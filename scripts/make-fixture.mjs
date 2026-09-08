@@ -1,22 +1,22 @@
 // Generates a throwaway Journaley project to develop and test against.
 //
-//   node scripts/make-fixture.mjs <folder> [entryCount]
+//   node scripts/make-fixture.mjs [folder] [entryCount]
 //
 // Entries are spread over a realistic-looking span with gaps and the odd
 // double day, and each gets a generated image so the timeline has something to
 // show. Used both for everyday poking and for the 1500-entry scale check.
+//
+// Defaults into the OS temp folder. Fixtures are disposable noise and do not
+// belong next to real projects, so opting into a location is deliberate.
 
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-const OUT = process.argv[2];
+const OUT = process.argv[2] ?? join(tmpdir(), "journaley-fixture");
 const COUNT = Number(process.argv[3] ?? 24);
-if (!OUT) {
-  console.error("usage: node scripts/make-fixture.mjs <folder> [entryCount]");
-  process.exit(1);
-}
 
 // --- a tiny PNG encoder, so the fixture needs no image dependencies --------
 

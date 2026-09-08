@@ -43,9 +43,9 @@ Video export needs ffmpeg: drop an `ffmpeg.exe` into `src-tauri/binaries/` to bu
 ## Development
 
 ```
-cargo test -j 1                              # in src-tauri/
+cargo test -j 1                 # in src-tauri/
 npx tsc --noEmit
-node scripts/make-fixture.mjs <folder> 24    # a project to poke at
+node scripts/make-fixture.mjs   # a throwaway project, in the temp folder
 ```
 
 Always single-job: parallel builds exhaust the Windows page file. See [CLAUDE.md](CLAUDE.md) for the invariants worth knowing before changing anything.
