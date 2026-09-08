@@ -38,6 +38,11 @@ pub fn run() {
             commands::journal_today,
             commands::startup_project,
             commands::default_projects_dir,
+            commands::ffmpeg_status,
+            commands::export_begin,
+            commands::export_push_frame,
+            commands::export_finish,
+            commands::export_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Journaley");

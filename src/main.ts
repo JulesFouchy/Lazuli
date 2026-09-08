@@ -27,6 +27,7 @@ import {
   refreshEntryEditor,
   type EditorContext,
 } from "./entry-editor";
+import { openExportDialog } from "./export-dialog";
 import { addDroppedPaths } from "./image-picker";
 import { isModalOpen } from "./modal";
 import { renderTimeline } from "./timeline";
@@ -226,6 +227,11 @@ function timelineSection(project: Project): HTMLElement {
         class: "button button--primary",
         text: "New entry",
         onclick: () => void addEntry(),
+      }),
+      el("button", {
+        class: "button",
+        text: "Export video…",
+        onclick: () => openExportDialog(project),
       }),
       el("span", { class: "timeline__spacer" }),
       el("button", {

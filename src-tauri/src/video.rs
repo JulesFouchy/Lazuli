@@ -181,8 +181,24 @@ impl Encode {
         self.stdin.take();
         let _ = self.child.kill();
         let _ = self.child.wait();
-        // A truncated mp4 that looks like a finished export is worse than none.
-        let _ = std::fs::remove_file(&self.output);
+
+        // A truncated mp4 that looks like a finished export is worse than no
+        // file at all, so this is worth retrying: on Windows the output handle
+        // can briefly outlive the terminated process, and the first delete
+        // then fails with "in use by another process".
+        for attempt in 0..20 {
+            if !self.output.exists() {
+                return;
+            }
+            if std::fs::remove_file(&self.output).is_ok() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+        }
+        eprintln!(
+            "journaley: could not remove the cancelled export at {}",
+            self.output.display()
+        );
     }
 
     /// Whatever ffmpeg complained about, formatted for appending to an error.
@@ -213,9 +229,160 @@ mod tests {
             seconds_per_frame: 0.0,
             ..Default::default()
         };
-        let err = Encode::start(Path::new("ffmpeg"), &options)
-            .expect_err("a zero hold should be rejected");
+        // `expect_err` would need `Encode: Debug`, which would mean deriving
+        // it on a struct holding a live child process.
+        let Err(err) = Encode::start(Path::new("ffmpeg"), &options) else {
+            panic!("a zero-length frame hold should be rejected");
+        };
         assert!(err.to_string().contains("positive"));
+    }
+
+    /// A minimal valid PNG of a solid colour, so the pipe can be tested
+    /// without pulling in an image crate.
+    fn solid_png(width: u32, height: u32, shade: u8) -> Vec<u8> {
+        use std::io::Write as _;
+
+        fn crc32(bytes: &[u8]) -> u32 {
+            let mut crc = !0u32;
+            for byte in bytes {
+                crc ^= *byte as u32;
+                for _ in 0..8 {
+                    crc = (crc >> 1) ^ (0xEDB8_8320 & (!(crc & 1)).wrapping_add(1));
+                }
+            }
+            !crc
+        }
+
+        fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            let mut body = kind.to_vec();
+            body.extend_from_slice(data);
+            out.extend_from_slice(&body);
+            out.extend_from_slice(&crc32(&body).to_be_bytes());
+            out
+        }
+
+        // Uncompressed deflate blocks: no compressor needed.
+        fn store(raw: &[u8]) -> Vec<u8> {
+            let mut out = vec![0x78, 0x01];
+            for (index, block) in raw.chunks(65_535).enumerate() {
+                let last = (index + 1) * 65_535 >= raw.len();
+                out.push(if last { 1 } else { 0 });
+                out.extend_from_slice(&(block.len() as u16).to_le_bytes());
+                out.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
+                out.extend_from_slice(block);
+            }
+            let (mut a, mut b) = (1u32, 0u32);
+            for byte in raw {
+                a = (a + *byte as u32) % 65521;
+                b = (b + a) % 65521;
+            }
+            let _ = out.write_all(&((b << 16) | a).to_be_bytes());
+            out
+        }
+
+        let mut raw = Vec::new();
+        for _ in 0..height {
+            raw.push(0); // filter: none
+            for _ in 0..width {
+                raw.extend_from_slice(&[shade, shade / 2, 255 - shade]);
+            }
+        }
+
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&width.to_be_bytes());
+        ihdr.extend_from_slice(&height.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend(chunk(b"IHDR", &ihdr));
+        png.extend(chunk(b"IDAT", &store(&raw)));
+        png.extend(chunk(b"IEND", &[]));
+        png
+    }
+
+    /// The real thing: spawn ffmpeg, stream frames through stdin, get a file.
+    ///
+    /// Skipped when the machine has no ffmpeg, since that is an environment
+    /// gap rather than a code failure.
+    #[test]
+    fn frames_piped_to_ffmpeg_produce_a_playable_file() {
+        let Some((ffmpeg, _)) = find_ffmpeg(None) else {
+            eprintln!("skipping: no ffmpeg on PATH");
+            return;
+        };
+
+        let output = std::env::temp_dir()
+            .join(format!("journaley-export-{}.mp4", uuid::Uuid::new_v4()));
+        let options = ExportOptions {
+            output: output.clone(),
+            seconds_per_frame: 0.5,
+            width: 320,
+            height: 240,
+            fps: 24,
+        };
+
+        let mut encode = Encode::start(&ffmpeg, &options).expect("ffmpeg should start");
+        for frame in 0..6u8 {
+            encode
+                .push_frame(&solid_png(320, 240, frame * 40))
+                .expect("ffmpeg should accept the frame");
+        }
+        assert_eq!(encode.frames_written, 6);
+
+        let written = encode.finish().expect("ffmpeg should finish cleanly");
+        let size = std::fs::metadata(&written)
+            .expect("the output file should exist")
+            .len();
+        assert!(size > 0, "the exported file should not be empty");
+        let _ = std::fs::remove_file(&written);
+    }
+
+    #[test]
+    fn an_export_with_no_frames_is_an_error_not_an_empty_file() {
+        let Some((ffmpeg, _)) = find_ffmpeg(None) else {
+            eprintln!("skipping: no ffmpeg on PATH");
+            return;
+        };
+        let output = std::env::temp_dir()
+            .join(format!("journaley-empty-{}.mp4", uuid::Uuid::new_v4()));
+        let encode = Encode::start(
+            &ffmpeg,
+            &ExportOptions {
+                output: output.clone(),
+                ..Default::default()
+            },
+        )
+        .expect("ffmpeg should start");
+        // ffmpeg itself fails on an empty stream; either way this must not
+        // hand back a path to a file that does not play.
+        assert!(encode.finish().is_err());
+        let _ = std::fs::remove_file(&output);
+    }
+
+    #[test]
+    fn cancelling_removes_the_half_written_file() {
+        let Some((ffmpeg, _)) = find_ffmpeg(None) else {
+            eprintln!("skipping: no ffmpeg on PATH");
+            return;
+        };
+        let output = std::env::temp_dir()
+            .join(format!("journaley-cancel-{}.mp4", uuid::Uuid::new_v4()));
+        let mut encode = Encode::start(
+            &ffmpeg,
+            &ExportOptions {
+                output: output.clone(),
+                width: 320,
+                height: 240,
+                ..Default::default()
+            },
+        )
+        .expect("ffmpeg should start");
+        encode.push_frame(&solid_png(320, 240, 90)).expect("frame accepted");
+        encode.cancel();
+        // A truncated mp4 left behind would look like a finished export.
+        assert!(!output.exists(), "cancel should leave no file behind");
     }
 
     #[test]
