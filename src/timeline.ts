@@ -21,6 +21,12 @@ export interface TimelineHandlers {
   openEntry: (entry: Entry) => void;
 }
 
+// TODO(deferred): virtualise this list. Every entry becomes a DOM card, and at
+// a couple of thousand entries scrolling will suffer. The fix is windowing:
+// render only what is near the viewport. Left undone on purpose -- it
+// complicates the gap connectors, which are positional, and scroll anchoring,
+// and plain DOM may well hold up for far longer than expected. Do it when
+// scrolling actually feels bad, not before.
 export function renderTimeline(
   project: Project,
   handlers: TimelineHandlers,
@@ -105,6 +111,14 @@ function entryCard(
           alt: entry.text || "Entry illustration",
           // Thousands of full-resolution photos would otherwise all decode at
           // once; the browser skips the offscreen ones.
+          //
+          // TODO(deferred): generate thumbnails. Lazy loading avoids decoding
+          // what is offscreen, but scrolling a long project still decodes a
+          // full-size photo per card. Cache downscaled copies in a
+          // .journaley-cache/ folder inside the project -- gitignored, safe to
+          // delete, and consistent with everything being files on disk. This
+          // is the likeliest thing to hurt first at scale, and it is purely
+          // additive, so it can wait until it does.
           loading: "lazy",
           decoding: "async",
         })
