@@ -5,6 +5,10 @@ Local-first project journal: a project is a folder on disk, each entry is a date
 ## Rules
 
 - **`wip.md` is the owner's idea dump and todo list. Read it for context, never edit it.**
+- **Deferred ideas go in a `TODO(deferred):` comment at the spot in the code they concern**, saying what the fix is and why it is not being done yet. `rg "TODO\(deferred\)"` is the backlog. An idea with no code to attach to goes to the owner to put in `wip.md`, not into a file here.
+- When editing files with a script, write bytes or pass `newline=""` / `encoding="utf-8"`. Python's text mode silently turns every `
+` into `
+` on Windows, which rewrites the whole file and buries a one-line change in a full-file diff. `.gitattributes` normalises the repo to LF.
 - Never run build or test tools in parallel. `cargo test -j 1`, `cargo build -j 1`, `npm run` scripts one at a time. Parallel jobs exhaust the Windows page file and corrupt crate metadata.
 
 ## Architecture

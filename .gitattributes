@@ -1,0 +1,11 @@
+# Normalise line endings so a Windows editor cannot turn a one-line change into
+# a whole-file diff.
+* text=auto eol=lf
+
+# wip.md belongs to the repo owner and is never rewritten, not even for line
+# endings.
+wip.md -text
+
+*.woff2 binary
+*.png binary
+*.ico binary
