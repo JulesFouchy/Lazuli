@@ -5,10 +5,9 @@ Local-first project journal: a project is a folder on disk, each entry is a date
 ## Rules
 
 - **`wip.md` is the owner's idea dump and todo list. Read it for context, never edit it.**
+- **Never hard-wrap markdown.** One line per paragraph and per bullet; editors soft-wrap. A hard-wrapped paragraph turns a three-word edit into a reflowed block in the diff.
 - **Deferred ideas go in [`ideas/`](ideas/), one markdown file each** — never as a TODO comment. Before changing a file, `rg "<that file>" ideas/` says what is already planned for it; see [ideas/README.md](ideas/README.md) for the shape. Delete the file when the idea ships or is dropped.
-- When editing files with a script, write bytes or pass `newline=""` / `encoding="utf-8"`. Python's text mode silently turns every `
-` into `
-` on Windows, which rewrites the whole file and buries a one-line change in a full-file diff. `.gitattributes` normalises the repo to LF.
+- When editing files with a script, write bytes rather than text. Python's text mode rewrites every newline in CRLF form on Windows, which converts the whole file and buries a one-line change in a full-file diff. `.gitattributes` pins the repo to LF.
 - Never run build or test tools in parallel. `cargo test -j 1`, `cargo build -j 1`, `npm run` scripts one at a time. Parallel jobs exhaust the Windows page file and corrupt crate metadata.
 
 ## Architecture
