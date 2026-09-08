@@ -11,8 +11,11 @@ use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeDelta};
 
 /// Hour at which a new journal day begins, in local time.
 ///
-/// TODO: promote to a global user setting once user settings exist. It is
-/// deliberately not per-project and never stored on disk.
+/// Deliberately global rather than per-project: it describes when the user
+/// sleeps, not anything about a project, so it must never end up in
+/// `journaley.yaml` — the same entry would otherwise land on different days in
+/// different projects. [`journal_date_at`] takes the hour as a parameter so
+/// making this configurable stays a change at one call site.
 pub const DAY_START_HOUR: u32 = 5;
 
 /// The journal day a timestamp belongs to.

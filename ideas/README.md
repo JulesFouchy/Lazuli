@@ -3,7 +3,14 @@
 Things decided on, but deliberately not built yet. One file per idea.
 
 The directory listing is the index — there is no summary file to fall out of
-date. Name a file after its idea, in kebab-case.
+date.
+
+**Name a file after whatever will make someone open it**, in kebab-case, which
+is not always the idea itself. A note saying "this constant should become a
+setting one day" belongs in `user-settings.md`, not
+`day-start-hour-should-be-configurable.md`: the day it matters is the day
+someone builds settings, and that is the name they will be looking for. Several
+small deferrals often collapse into one such file.
 
 Each file opens with frontmatter:
 
