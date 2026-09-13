@@ -6,6 +6,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dates;
@@ -424,7 +425,7 @@ pub fn trash_image(
             }
         }
 
-        trash::delete(&path).with_context(|| format!("moving {} to the Recycle Bin", path.display()))?;
+        trash_with_retry(&path)?;
         push_undo(open, record);
         Ok(())
     })?;
@@ -439,8 +440,7 @@ pub fn trash_entry(app: AppHandle, state: State<AppState>, id: String) -> CmdRes
         if !dir.is_dir() {
             bail!("no entry {id} in this project");
         }
-        trash::delete(&dir)
-            .with_context(|| format!("moving {} to the Recycle Bin", dir.display()))?;
+        trash_with_retry(&dir)?;
         push_undo(
             open,
             Trashed {
@@ -510,6 +510,35 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
             more: !open.undo.is_empty(),
         }))
     })?)
+}
+
+/// How many times a Recycle Bin move is tried before giving up, and the step
+/// between tries. The delay grows with each attempt, so the worst case is under
+/// two seconds.
+const TRASH_ATTEMPTS: u32 = 6;
+const TRASH_RETRY_STEP: Duration = Duration::from_millis(120);
+
+/// Move a path to the Recycle Bin, retrying briefly while something holds it.
+///
+/// The shell will not move a folder that anything still has an open handle on,
+/// and reports that as "some operations were aborted" rather than as a lock.
+/// Our own watcher is one such holder: dropping it tells its thread to close
+/// the directory handle, which has not happened by the time the next line runs.
+/// Editors and search indexers watching the same folder do the same from
+/// outside, and nothing here can make them let go. Retrying for under a second
+/// turns both into a pause nobody sees.
+fn trash_with_retry(path: &Path) -> Result<()> {
+    for attempt in 1..=TRASH_ATTEMPTS {
+        match trash::delete(path) {
+            Ok(()) => return Ok(()),
+            Err(err) if attempt == TRASH_ATTEMPTS => {
+                return Err(anyhow!(err))
+                    .with_context(|| format!("moving {} to the Recycle Bin", path.display()));
+            }
+            Err(_) => std::thread::sleep(TRASH_RETRY_STEP * attempt),
+        }
+    }
+    unreachable!("the loop returns on the last attempt")
 }
 
 /// Pull one item back out of the Recycle Bin, returning the name it landed
@@ -758,8 +787,7 @@ pub fn trash_project(
         }
     }
 
-    trash::delete(&path)
-        .with_context(|| format!("moving {} to the Recycle Bin", path.display()))?;
+    trash_with_retry(&path)?;
     Ok(forget_recent(app, path))
 }
 

@@ -5,7 +5,8 @@ import { el } from "./ui";
 let current: { overlay: HTMLElement; onClose?: () => void } | null = null;
 
 export interface ModalOptions {
-  title: string;
+  /** Plain text, or a node when the title is itself a control. */
+  title: string | HTMLElement;
   body: HTMLElement;
   foot?: HTMLElement;
   onClose?: () => void;
@@ -49,7 +50,9 @@ export function openModal(options: ModalOptions): void {
       el(
         "header",
         { class: "modal__head" },
-        el("h2", { class: "modal__title", text: options.title }),
+        typeof options.title === "string"
+          ? el("h2", { class: "modal__title", text: options.title })
+          : options.title,
         el("span", { class: "card__grow" }),
         el("button", {
           class: "button button--ghost",
@@ -79,9 +82,11 @@ export function closeModal(options: { replacing?: boolean } = {}): void {
 export const isModalOpen = () => current !== null;
 
 /** Retitle the open modal, e.g. when the date it is showing changes. */
-export function setModalTitle(title: string): void {
+export function setModalTitle(title: string | HTMLElement): void {
   const heading = current?.overlay.querySelector(".modal__title");
-  if (heading) heading.textContent = title;
+  if (!heading) return;
+  if (typeof title === "string") heading.textContent = title;
+  else heading.replaceWith(title);
 }
 
 /** Swap the open modal's contents without the dismiss-and-reopen flicker. */

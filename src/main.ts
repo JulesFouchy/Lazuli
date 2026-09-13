@@ -28,7 +28,7 @@ import {
 import { formatRealWorld, onDateFormatChange } from "./dates";
 import {
   announceDeletion,
-  confirmDeleteEntry,
+  deleteEntry,
   openCoverPicker,
   openEntryEditor,
   refreshCoverPicker,
@@ -38,6 +38,7 @@ import {
 import { openExportDialog } from "./export-dialog";
 import { addDroppedPaths } from "./image-picker";
 import { closeModal, isModalOpen, onModalDismissed } from "./modal";
+import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { renderTimeline } from "./timeline";
 import { clear, el, isEditing, toast, toastError } from "./ui";
@@ -104,7 +105,11 @@ function launchView(): HTMLElement {
       );
       return;
     }
-    list.append(...recents.map(recentRow));
+    list.append(
+      ...recents
+        .filter((recent) => !isDeleting(projectKey(recent.path)))
+        .map(recentRow),
+    );
   });
 
   return view;
@@ -284,7 +289,7 @@ function timelineSection(project: Project): HTMLElement {
       {
         openEntry: (entry: Entry) => openHere({ kind: "entry", id: entry.id }),
         deleteEntry: (entry: Entry) =>
-          confirmDeleteEntry(entry.id, editorContext),
+          deleteEntry(entry.id, editorContext),
       },
       state.newestFirst,
     ),
@@ -358,21 +363,19 @@ function offerUndo(message: string, undo: () => void): void {
   });
 }
 
-/** Move a project folder to the Recycle Bin, list entry and all. */
+/**
+ * Move a project folder to the Recycle Bin, list entry and all.
+ *
+ * Nothing is asked first: Undo is the answer to a mis-click, and it is a better
+ * one than a dialog in front of every delete. The row goes immediately and
+ * comes back if the shell refuses the folder.
+ */
 async function deleteProject(recent: RecentProject): Promise<void> {
-  // The one action here that discards a folder of work rather than a row in a
-  // list, so it asks first. Forget does not.
-  if (
-    !window.confirm(
-      `Move ${recent.name} to the Recycle Bin? The whole project folder goes, ` +
-        `and Undo brings it back.`,
-    )
-  ) {
-    return;
-  }
+  const key = projectKey(recent.path);
+  markDeleting(key);
+  render();
   try {
     const index = await trashProject(recent.path);
-    render();
     offerUndo(`Deleted ${recent.name}`, () => {
       void restoreProject(recent.path, index ?? 0)
         .then(render)
@@ -380,14 +383,19 @@ async function deleteProject(recent: RecentProject): Promise<void> {
     });
   } catch (err) {
     toastError(`Could not delete ${recent.name}`, err);
+  } finally {
+    unmarkDeleting(key);
+    render();
   }
 }
 
 /** Drop a project from the list, leaving the folder where it is. */
 async function forgetProject(recent: RecentProject): Promise<void> {
+  const key = projectKey(recent.path);
+  markDeleting(key);
+  render();
   try {
     const index = await forgetRecent(recent.path);
-    render();
     offerUndo(`Forgot ${recent.name}`, () => {
       void restoreRecent(recent.path, index ?? 0)
         .then(render)
@@ -395,6 +403,9 @@ async function forgetProject(recent: RecentProject): Promise<void> {
     });
   } catch (err) {
     toastError(`Could not forget ${recent.name}`, err);
+  } finally {
+    unmarkDeleting(key);
+    render();
   }
 }
 
@@ -643,8 +654,13 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "Escape" && !isModalOpen()) {
-    (document.activeElement as HTMLElement | null)?.blur();
+  // Escape peels off one layer at a time: the menu, then the dialog, then
+  // whatever has the cursor.
+  if (event.key === "Escape") {
+    event.preventDefault();
+    if (isContextMenuOpen()) closeContextMenu();
+    else if (isModalOpen()) closeModal();
+    else (document.activeElement as HTMLElement | null)?.blur();
   }
 });
 

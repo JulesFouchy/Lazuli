@@ -8,9 +8,11 @@
 
 import type { Entry, Project } from "./api";
 import { setCover, trashEntry, updateEntry } from "./api";
-import { formatDate } from "./dates";
+import { onDateFormatChange } from "./dates";
 import { renderImagePicker } from "./image-picker";
 import { closeModal, openModal, replaceModalBody, setModalTitle } from "./modal";
+import { entryKey, markDeleting, unmarkDeleting } from "./pending";
+import { dateToggle } from "./timeline";
 import { el, toast, toastError } from "./ui";
 
 /** How long to wait after the last keystroke before writing to disk. */
@@ -30,9 +32,19 @@ interface OpenEditor {
   pickerHost: HTMLElement;
   /** What the picker was last drawn from, so it is rebuilt only when it changed. */
   pickerSignature: string;
+  /** Write the note now rather than when the debounce next fires. */
+  flushNote: () => void;
 }
 
 let editor: OpenEditor | null = null;
+
+/** Drops the open editor's subscription to the global date-format toggle. */
+let stopWatchingFormat: (() => void) | null = null;
+
+/** The editor's title: the entry's date, which flips format like any other. */
+function titleFor(entry: Entry): HTMLElement {
+  return dateToggle(entry, "modal__title date-toggle");
+}
 
 /** The image state the picker reflects, as a single comparable string. */
 function pickerSignature(entry: Entry): string {
@@ -53,16 +65,26 @@ export function openEntryEditor(id: string, context: EditorContext): void {
 
   const built = editorBody(entry, context);
   openModal({
-    title: formatDate(entry.journal_date, entry.day_number),
+    title: titleFor(entry),
     body: built.node,
     // No delete button: it lives on the card's right-click menu, where it is
     // out of reach of someone who only came here to write a sentence.
     onClose: () => {
+      // Escape, the backdrop and Back all land here. Whatever is still sitting
+      // in the debounce is written rather than lost.
+      editor?.flushNote();
       editor = null;
+      stopWatchingFormat?.();
+      stopWatchingFormat = null;
     },
   });
   // After `openModal`, which dismisses whatever was there and so clears this.
   editor = built.fields;
+  // Nothing rescans when the format flips, so the title has to follow it here.
+  stopWatchingFormat = onDateFormatChange(() => {
+    const current = context.entry(id);
+    if (current) setModalTitle(titleFor(current));
+  });
   // Straight into the note: writing it is the reason the editor is open.
   built.fields.textarea.focus();
 }
@@ -86,7 +108,7 @@ export function refreshEntryEditor(id: string, context: EditorContext): void {
     return;
   }
 
-  setModalTitle(formatDate(entry.journal_date, entry.day_number));
+  setModalTitle(titleFor(entry));
   if (document.activeElement !== editor.dateInput) {
     editor.dateInput.value = entry.journal_date;
   }
@@ -112,7 +134,7 @@ function editorBody(
   const id = entry.id;
 
   const dateInput = el("input", {
-    class: "input",
+    class: "input input--date",
     type: "date",
     // An entry has a day and no time: this is the whole of its date.
     value: entry.journal_date,
@@ -135,11 +157,16 @@ function editorBody(
   let timer: number | undefined;
   const saveNote = async () => {
     window.clearTimeout(timer);
+    timer = undefined;
     try {
       await updateEntry(id, { text: textarea.value });
     } catch (err) {
       toastError("Could not save the note", err);
     }
+  };
+  /** Write now if a save is still waiting on the debounce, otherwise do nothing. */
+  const flushNote = () => {
+    if (timer !== undefined) void saveNote();
   };
   textarea.addEventListener("input", () => {
     window.clearTimeout(timer);
@@ -174,6 +201,7 @@ function editorBody(
       imagesLabel,
       pickerHost,
       pickerSignature: pickerSignature(entry),
+      flushNote,
     },
   };
 }
@@ -198,33 +226,30 @@ function imagePicker(entry: Entry, context: EditorContext): HTMLElement {
 }
 
 /**
- * Ask, then move an entry and its images to the Recycle Bin.
+ * Move an entry and its images to the Recycle Bin.
  *
- * Shared by the editor's own button and the timeline's right-click menu, so
- * deleting an entry asks the same question and leaves the same undo either way.
+ * Nothing is asked first: the toast offers Undo, and Ctrl+Z reaches the same
+ * place, which is a better answer than a dialog in the way of every delete.
+ * The card goes at once and comes back if the delete fails.
  */
-export function confirmDeleteEntry(id: string, context: EditorContext): void {
+export function deleteEntry(id: string, context: EditorContext): void {
   const entry = context.entry(id);
   if (!entry) return;
 
-  const count = entry.images.length;
-  const what =
-    count === 0
-      ? "this entry"
-      : `this entry and its ${count} image${count === 1 ? "" : "s"}`;
-
-  // The only action that discards more than is visible on screen, so this one
-  // asks first. Image deletes do not.
-  if (!window.confirm(`Move ${what} to the Recycle Bin?`)) return;
+  const key = entryKey(id);
+  markDeleting(key);
+  closeModal();
+  context.refresh();
 
   void (async () => {
     try {
       await trashEntry(id);
       context.noteDeletion(`the entry from ${entry.journal_date}`);
-      closeModal();
-      context.refresh();
     } catch (err) {
       toastError("Could not delete the entry", err);
+    } finally {
+      unmarkDeleting(key);
+      context.refresh();
     }
   })();
 }

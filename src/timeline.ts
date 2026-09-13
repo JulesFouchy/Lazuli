@@ -10,6 +10,7 @@ import {
   toggleDateFormat,
 } from "./dates";
 import { openContextMenu } from "./context-menu";
+import { entryKey, isDeleting } from "./pending";
 import { el } from "./ui";
 
 /** Pixels of dashed rule per elapsed day, and the ceiling on that. */
@@ -29,7 +30,13 @@ export function renderTimeline(
 ): HTMLElement {
   const container = el("div", { class: "timeline__list" });
 
-  if (project.entries.length === 0) {
+  // Entries being deleted are already gone as far as the page is concerned, so
+  // the gaps either side of them close up rather than straddling a hole.
+  const entries = project.entries.filter(
+    (entry) => !isDeleting(entryKey(entry.id)),
+  );
+
+  if (entries.length === 0) {
     container.append(
       el("p", {
         class: "empty",
@@ -41,7 +48,7 @@ export function renderTimeline(
 
   // Always reason about gaps oldest-first, then flip for display, so the
   // arithmetic does not have to care which way the page runs.
-  const ordered = [...project.entries];
+  const ordered = entries;
   const pieces: HTMLElement[] = [];
 
   ordered.forEach((entry, index) => {
@@ -130,10 +137,13 @@ function entryCard(
 /**
  * The date label. Clicking it flips every date on the page, so the click must
  * not also open the entry.
+ *
+ * Exported because the entry editor puts the same control in its title bar: a
+ * date that switches format everywhere else should not be inert there.
  */
-function dateToggle(entry: Entry): HTMLElement {
-  const button = el("button", {
-    class: "date-toggle",
+export function dateToggle(entry: Entry, className = "date-toggle"): HTMLElement {
+  return el("button", {
+    class: className,
     title: `${formatDateAlternate(entry.journal_date, entry.day_number)} — click to switch every date`,
     text: formatDate(entry.journal_date, entry.day_number),
     onclick: (event: Event) => {
@@ -141,5 +151,4 @@ function dateToggle(entry: Entry): HTMLElement {
       toggleDateFormat();
     },
   });
-  return button;
 }

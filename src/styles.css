@@ -171,6 +171,16 @@ textarea {
   border-color: var(--accent-dim);
 }
 
+/* Only as wide as a date needs.
+   The native calendar is anchored to the input's left edge, not to the cursor,
+   so a full-width field puts it most of a dialog away from the icon you just
+   clicked. Shrinking the field is what closes that distance. */
+.input--date {
+  align-self: flex-start;
+  width: auto;
+  min-width: 0;
+}
+
 /* --- launch screen ------------------------------------------------------- */
 
 .launch {
@@ -569,6 +579,14 @@ textarea {
 
 .modal__title {
   margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* The entry editor's title is the date toggle. It keeps the title's size and
+   weight and takes the toggle's colour and hover, so it reads as the heading
+   it is while still looking like something you can press. */
+.modal__title.date-toggle {
   font-size: 16px;
   font-weight: 600;
 }

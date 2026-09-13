@@ -36,15 +36,19 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
     spellcheck: "false",
   }) as HTMLInputElement;
 
-  // Read-only rather than disabled: the path stays selectable and copyable,
-  // but it is only ever set by the folder picker, which knows it exists.
+  // Typed as well as browsed: pasting a path is often quicker than walking a
+  // folder tree, and a path that does not exist yet is fine — the folder is
+  // created either way, and the line underneath says where it will land.
   const locationInput = el("input", {
     class: "input card__grow",
     type: "text",
-    readonly: "true",
+    spellcheck: "false",
   }) as HTMLInputElement;
 
-  const dateInput = el("input", { class: "input", type: "date" }) as HTMLInputElement;
+  const dateInput = el("input", {
+    class: "input input--date",
+    type: "date",
+  }) as HTMLInputElement;
 
   const destination = el("p", { class: "hint" });
   const createButton = el("button", {
@@ -90,9 +94,12 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
   };
 
   nameInput.addEventListener("input", refreshDestination);
-  nameInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !createButton.disabled) create();
-  });
+  locationInput.addEventListener("input", refreshDestination);
+  for (const field of [nameInput, locationInput]) {
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !createButton.disabled) create();
+    });
+  }
 
   const browse = async () => {
     const chosen = await openDialog({
@@ -195,7 +202,7 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
  */
 export function openStartDateEditor(project: Project): void {
   const dateInput = el("input", {
-    class: "input",
+    class: "input input--date",
     type: "date",
     value: project.meta.start_date,
   }) as HTMLInputElement;

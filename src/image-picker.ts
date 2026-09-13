@@ -6,6 +6,7 @@
 
 import { assetUrl, importImageBytes, importImages, trashImage } from "./api";
 import { openContextMenu } from "./context-menu";
+import { imageKey, isDeleting, markDeleting, unmarkDeleting } from "./pending";
 import { el, toast, toastError } from "./ui";
 
 export interface PickerOptions {
@@ -25,14 +26,18 @@ export interface PickerOptions {
 export function renderImagePicker(options: PickerOptions): HTMLElement {
   const grid = el("div", { class: "thumbs" });
 
-  for (const filename of options.filenames) {
+  // A thumbnail whose delete is still running is already gone from the page.
+  const filenames = options.filenames.filter(
+    (filename) => !isDeleting(imageKey(options.directory, filename)),
+  );
+  for (const filename of filenames) {
     grid.append(thumbnail(filename, options));
   }
 
   const zone = el(
     "div",
     { class: "dropzone" },
-    options.filenames.length > 0
+    filenames.length > 0
       ? grid
       : el("p", { class: "hint", text: "No images yet." }),
     el("p", {
@@ -81,12 +86,18 @@ async function deleteImage(
   filename: string,
   options: PickerOptions,
 ): Promise<void> {
+  // Gone from the grid at once; back again if the Recycle Bin refuses it.
+  const key = imageKey(options.directory, filename);
+  markDeleting(key);
+  options.onChanged();
   try {
     await trashImage(options.entryId, filename);
     options.onDeleted(filename);
-    options.onChanged();
   } catch (err) {
     toastError(`Could not delete ${filename}`, err);
+  } finally {
+    unmarkDeleting(key);
+    options.onChanged();
   }
 }
 
