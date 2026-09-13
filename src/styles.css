@@ -31,6 +31,8 @@
 }
 
 :root {
+  /* Also the window's `backgroundColor` in `src-tauri/tauri.conf.json`, so the
+     window is this colour before the page has painted. Change both together. */
   --bg: #131316;
   --bg-raised: #1b1b20;
   --bg-sunken: #0e0e11;
@@ -722,6 +724,38 @@ textarea {
 
 .toast__action:hover {
   text-decoration: underline;
+}
+
+/* --- busy spinner --------------------------------------------------------- */
+
+/* Bottom right, clear of the toasts in the bottom centre. Fades in after a
+   delay, so a short wait never flashes a spinner and only one long enough to
+   be felt shows it. Opening an 81-entry project takes 130–300 ms in a debug
+   build and should stay spinner-free; a 2000-entry one takes 2 s. */
+.busy {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+  opacity: 0;
+  transition: opacity 120ms 400ms;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.busy--on {
+  opacity: 1;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 @keyframes toast-in {

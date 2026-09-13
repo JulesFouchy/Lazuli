@@ -14,9 +14,28 @@ pub mod watch;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Startup timing, printed in debug builds only. The gap from process start
+    // to "started" is WebView2 coming up; "started" to "finished" is the page
+    // and its module graph being served (by Vite, in a dev session). The page
+    // itself logs its first render, so the whole black-window interval can be
+    // split into who was waiting on what.
+    let launched = std::time::Instant::now();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .on_page_load(move |_webview, payload| {
+            if cfg!(debug_assertions) {
+                let what = match payload.event() {
+                    tauri::webview::PageLoadEvent::Started => "started",
+                    tauri::webview::PageLoadEvent::Finished => "finished",
+                };
+                eprintln!(
+                    "journaley: page load {what} at {} ms",
+                    launched.elapsed().as_millis()
+                );
+            }
+        })
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::open_project,

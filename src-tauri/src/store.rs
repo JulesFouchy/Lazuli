@@ -7,7 +7,7 @@
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, FixedOffset, NaiveDate};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -61,7 +61,7 @@ impl ProjectStore {
         let cover_images = list_images(&self.root.join(COVER_DIR))?;
 
         let mut entries = Vec::new();
-        let mut seen = Vec::new();
+        let mut seen = HashSet::new();
         for entry_dir in list_entry_dirs(&self.root)? {
             let id = entry_dir
                 .file_name()
@@ -79,7 +79,7 @@ impl ProjectStore {
                     continue;
                 }
             };
-            seen.push(entry_file);
+            seen.insert(entry_file);
 
             // `created` is paired with the entry only for the sort below; it is
             // dropped before the project leaves this function, because an entry

@@ -20,6 +20,7 @@ import {
   trashProject,
   undoDelete,
 } from "./api";
+import { whileBusy } from "./busy";
 import {
   closeContextMenu,
   isContextMenuOpen,
@@ -65,6 +66,23 @@ const state: AppState = {
 /** The recents list as last read, so redrawing the launch screen is instant. */
 let knownRecents: RecentProject[] | null = null;
 
+/** How many reads have been asked for, so a stale answer can be spotted. */
+let recentsAsked = 0;
+
+/**
+ * Read the recents list into the cache. The newest read asked for wins.
+ *
+ * Several of these are in flight at once — a paint, a delete finishing, an undo
+ * finishing — and they do not come back in the order they were asked for. An
+ * older answer landing last puts a row back in the cache that the newer one
+ * knows is gone, and the next paint shows it.
+ */
+async function readRecents(): Promise<void> {
+  const asked = ++recentsAsked;
+  const recents = await whileBusy(recentProjects());
+  if (asked === recentsAsked) knownRecents = recents;
+}
+
 // --- rendering -----------------------------------------------------------
 
 function render(): void {
@@ -102,18 +120,13 @@ function launchView(): HTMLElement {
   view.append(list);
 
   const paint = (recents: RecentProject[]) => {
-    // A project put back by an undo stops needing special treatment as soon as
-    // the list it belongs to has it again.
-    for (const path of [...reappearing.keys()]) {
-      if (recents.some((recent) => recent.path === path)) {
-        reappearing.delete(path);
-      }
-    }
-
     const rows = recents.filter(
       (recent) => !isDeleting(projectKey(recent.path)),
     );
     for (const { at, recent } of reappearing.values()) {
+      // The list it is waiting for can arrive before the undo that asked for
+      // it has finished, and one row is wanted, not two.
+      if (rows.some((row) => row.path === recent.path)) continue;
       rows.splice(Math.min(at, rows.length), 0, recent);
     }
     list.className = rows.length === 0 ? "empty" : "recent";
@@ -129,11 +142,8 @@ function launchView(): HTMLElement {
   // including the one that hides a project being deleted — showed an empty
   // list for a frame first.
   if (knownRecents) paint(knownRecents);
-  void recentProjects()
-    .then((recents) => {
-      knownRecents = recents;
-      paint(recents);
-    })
+  void readRecents()
+    .then(() => paint(knownRecents ?? []))
     // Without this a failure leaves the screen looking like a first run. It
     // happens: the window can be up and asking before the backend is ready.
     .catch((err) => toastError("Could not read the recent projects", err));
@@ -179,6 +189,7 @@ function recentRow(recent: RecentProject): HTMLElement {
           class: "recent__image",
           src: assetUrl(recent.path, "cover", recent.cover),
           alt: "",
+          decoding: "async",
         })
       : null,
     el("div", { class: "recent__scrim" }),
@@ -234,6 +245,7 @@ function banner(project: Project): HTMLElement {
           class: "banner__image",
           src: assetUrl(project.root, "cover", cover),
           alt: `${project.meta.name} cover`,
+          decoding: "async",
         })
       : null,
     el("div", { class: "banner__scrim" }),
@@ -324,9 +336,27 @@ const editorContext: EditorContext = {
   entry: (id) => state.project?.entries.find((e) => e.id === id) ?? null,
   refresh: () => render(),
   noteDeletion: (what, deleted) => {
-    announceDeletion(what, deleted, () => void runUndo());
+    const offer: UndoOffer = { dismiss: () => {} };
+    offer.dismiss = announceDeletion(what, deleted, () => void runUndo(), () => {
+      const at = liveOffers.indexOf(offer);
+      if (at >= 0) liveOffers.splice(at, 1);
+    });
+    liveOffers.push(offer);
   },
 };
+
+interface UndoOffer {
+  dismiss: () => void;
+}
+
+/**
+ * Deletion toasts still on screen, oldest first.
+ *
+ * The Rust undo stack pops the last thing trashed, which is the one the newest
+ * of these describes, so taking that one down on Ctrl+Z keeps the two in step:
+ * every toast left is still offering exactly the undo it names.
+ */
+const liveOffers: UndoOffer[] = [];
 
 // --- actions ---------------------------------------------------------------
 
@@ -343,14 +373,27 @@ function newProject(): void {
   openHere({ kind: "new-project" });
 }
 
-/** Open a project folder, reporting whether it worked. */
+/** How many opens have been asked for, so a stale answer can be spotted. */
+let opensAsked = 0;
+
+/**
+ * Open a project folder, reporting whether it worked.
+ *
+ * Opens run off the main thread in Rust and so are no longer serialised: two
+ * quick clicks are two opens in flight, and they need not come back in order.
+ * Only the newest one asked for gets to become the project on screen — it is
+ * also the one Rust ends up holding open, so the two stay in step.
+ */
 async function loadProject(path: string): Promise<boolean> {
+  const asked = ++opensAsked;
   try {
-    state.project = await openProject(path);
+    const project = await whileBusy(openProject(path));
+    if (asked !== opensAsked) return false;
+    state.project = project;
     render();
     return true;
   } catch (err) {
-    toastError("Could not open that folder", err);
+    if (asked === opensAsked) toastError("Could not open that folder", err);
     return false;
   }
 }
@@ -369,8 +412,7 @@ function openRecent(path: string): Promise<void> {
 let launchUndo: (() => void) | null = null;
 
 function offerUndo(message: string, undo: () => void): void {
-  launchUndo = undo;
-  toast(message, {
+  const dismiss = toast(message, {
     action: {
       label: "Undo",
       run: () => {
@@ -379,6 +421,13 @@ function offerUndo(message: string, undo: () => void): void {
       },
     },
   });
+  // Ctrl+Z does the same thing the button does, so it takes the offer down
+  // with it: a toast still offering an undo that has already happened would
+  // undo whatever came before it instead.
+  launchUndo = () => {
+    dismiss();
+    undo();
+  };
 }
 
 /**
@@ -405,9 +454,17 @@ function undoRemoval(
   void removal
     .then((index) => (index === null ? null : restore(index)))
     .catch((err) => toastError("Could not undo", err))
-    // The row stays on screen throughout: `paint` drops it from `reappearing`
-    // only once a fresh list actually contains it again.
-    .finally(render);
+    // The row stays on screen throughout: it is held here until a list read
+    // asked for *after* the restore finished has replaced the cache, so the
+    // paint that stops holding it already has the row of its own. A restore
+    // that failed drops it too — the toast has said so, and a row for a
+    // project that is not there is worse than no row.
+    .then(readRecents)
+    .catch(() => {})
+    .finally(() => {
+      reappearing.delete(recent.path);
+      render();
+    });
 }
 
 /**
@@ -440,10 +497,7 @@ function deleteProject(recent: RecentProject): void {
       restoreProject(recent.path, index),
     ),
   );
-  void deleted.then(() => {
-    unmarkDeleting(key);
-    render();
-  });
+  void deleted.then(() => stopHiding(key));
 }
 
 /** Drop a project from the list, leaving the folder where it is. */
@@ -468,10 +522,28 @@ function forgetProject(recent: RecentProject): void {
       restoreRecent(recent.path, index),
     ),
   );
-  void forgotten.then(() => {
-    unmarkDeleting(key);
-    render();
-  });
+  void forgotten.then(() => stopHiding(key));
+}
+
+/**
+ * Stop hiding a row, once the list itself agrees about it.
+ *
+ * Dropping the key the moment the call returns is one paint too early:
+ * `launchView` draws `knownRecents` before the fresh list has arrived, so a row
+ * that is gone from the backend but still in that cache flashes back for the
+ * length of one round trip. Reading the list first means the paint that follows
+ * has nothing to flash. A row whose delete failed is still in the list and
+ * comes back the same way.
+ */
+function stopHiding(key: string): void {
+  // Not worth a toast: the paint below asks for the list again anyway, and the
+  // only cost of a failure here is the flicker this avoids.
+  void readRecents()
+    .catch(() => {})
+    .finally(() => {
+      unmarkDeleting(key);
+      render();
+    });
 }
 
 function projectCreated(project: Project): void {
@@ -673,6 +745,8 @@ async function runUndo(): Promise<void> {
       toast("Nothing to undo.");
       return;
     }
+    // The offer this just took up goes, so it cannot be taken twice.
+    liveOffers.pop()?.dismiss();
     toast(outcome.message);
   } catch (err) {
     toastError("Could not undo", err);
@@ -751,6 +825,20 @@ window.addEventListener("keydown", (event) => {
 onDateFormatChange(render);
 
 render();
+
+// The other half of the startup timing that `lib.rs` prints to stderr: how long
+// the page's own HTML took to arrive, and when the first render happened, both
+// counted from the moment the webview began navigating.
+if (import.meta.env.DEV) {
+  const [navigation] = performance.getEntriesByType("navigation");
+  const responseStart =
+    navigation instanceof PerformanceNavigationTiming
+      ? Math.round(navigation.responseStart)
+      : "?";
+  console.info(
+    `journaley: html arrived at ${responseStart} ms, first render at ${Math.round(performance.now())} ms`,
+  );
+}
 
 // `journaley <folder>` opens straight into that project.
 void startupProject().then((path) => {

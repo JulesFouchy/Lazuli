@@ -77,8 +77,9 @@ impl OpenProject {
 }
 
 /// Close whatever project is open, if any, waiting for its watcher to stop.
-fn close_open(state: &State<AppState>) {
-    let closing = state
+fn close_open(app: &AppHandle) {
+    let closing = app
+        .state::<AppState>()
         .open
         .lock()
         .expect("project lock was poisoned")
@@ -92,6 +93,11 @@ fn close_open(state: &State<AppState>) {
 #[derive(Default)]
 pub struct AppState {
     open: Mutex<Option<OpenProject>>,
+    /// Held for the whole of an open, so opens finish in the order they were
+    /// asked for. They run off the main thread and would otherwise overlap:
+    /// two quick clicks are two opens in flight, and the frontend keeps the
+    /// one it asked for last, so that must also be the one left open here.
+    opening: Mutex<()>,
     /// The export in flight, if any. Frames are pushed into it one at a time.
     export: Mutex<Option<Encode>>,
 }
@@ -102,9 +108,12 @@ const MAX_UNDO: usize = 50;
 
 // --- opening and closing -------------------------------------------------
 
+// Opening reads every entry in the folder, so it runs off the main thread: see
+// [`off_thread`]. Blocking the main thread here froze the launch screen for the
+// length of the scan, and queued every other command behind it.
 #[tauri::command]
-pub fn open_project(app: AppHandle, state: State<AppState>, path: PathBuf) -> CmdResult<Project> {
-    Ok(open_at(&app, &state, path)?)
+pub async fn open_project(app: AppHandle, path: PathBuf) -> CmdResult<Project> {
+    Ok(off_thread(move || open_at(&app, path)).await?)
 }
 
 /// Where a project called `name` would go inside `parent`, and what stands in
@@ -134,20 +143,25 @@ pub fn new_project_target(parent: PathBuf, name: String) -> NewProjectTarget {
 /// The folder name is derived here rather than taken from the frontend, so it
 /// is the same string [`new_project_target`] previewed.
 #[tauri::command]
-pub fn create_project(
+pub async fn create_project(
     app: AppHandle,
-    state: State<AppState>,
     parent: PathBuf,
     name: String,
     start_date: NaiveDate,
 ) -> CmdResult<Project> {
     let path = parent.join(folder_name_for(&name));
-    store::create_project(&path, &name, start_date)?;
-    remember_projects_dir(&app, &path);
-    Ok(open_at(&app, &state, path)?)
+    Ok(off_thread(move || {
+        store::create_project(&path, &name, start_date)?;
+        remember_projects_dir(&app, &path);
+        open_at(&app, path)
+    })
+    .await?)
 }
 
-fn open_at(app: &AppHandle, state: &State<AppState>, path: PathBuf) -> Result<Project> {
+fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
+    let state = app.state::<AppState>();
+    let _one_at_a_time = state.opening.lock().expect("opening lock was poisoned");
+
     if !store::is_project(&path) {
         bail!(
             "{} is not a Journaley project (no {} inside)",
@@ -168,20 +182,36 @@ fn open_at(app: &AppHandle, state: &State<AppState>, path: PathBuf) -> Result<Pr
     let watcher = watch::watch_project(app.clone(), &path)?;
 
     remember_recent(app, &path);
-    // The project being replaced gets the same orderly shutdown as a close.
-    close_open(state);
-    *state.open.lock().expect("project lock was poisoned") = Some(OpenProject {
-        store,
-        snapshot: snapshot.clone(),
-        watcher: Some(watcher),
-        undo: Vec::new(),
-    });
+    // Swapped in one step, so there is never a moment with no project open
+    // that another thread could see. The project being replaced then gets the
+    // same orderly shutdown as a close — outside the lock, because `close`
+    // waits for a watcher thread that may itself be waiting for the lock.
+    let replaced = state
+        .open
+        .lock()
+        .expect("project lock was poisoned")
+        .replace(OpenProject {
+            store,
+            snapshot: snapshot.clone(),
+            watcher: Some(watcher),
+            undo: Vec::new(),
+        });
+    if let Some(open) = replaced {
+        open.close();
+    }
     Ok(snapshot)
 }
 
+// Async for the same reason as [`open_project`]: closing waits for the watcher
+// thread to stop.
 #[tauri::command]
-pub fn close_project(state: State<AppState>) {
-    close_open(&state);
+pub async fn close_project(app: AppHandle) -> CmdResult<()> {
+    off_thread(move || {
+        close_open(&app);
+        Ok(())
+    })
+    .await?;
+    Ok(())
 }
 
 /// Re-read the project and tell the frontend only if something actually
@@ -558,17 +588,17 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
 const TRASH_RETRY_WINDOW: Duration = Duration::from_secs(2);
 const TRASH_RETRY_STEP: Duration = Duration::from_millis(150);
 
-/// Run a blocking filesystem call away from the main thread.
+/// Run blocking filesystem work away from the main thread.
 ///
 /// A `#[tauri::command] fn` runs on the main thread, where a Recycle Bin move
-/// taking a second or two blocks every other command behind it -- including the
-/// `recent_projects` call that redraws the launch screen, which is why deleting
-/// one project used to empty the whole list until it finished.
+/// taking a second or two, or a scan of a large project, blocks every other
+/// command behind it and freezes the page meanwhile. Deleting one project used
+/// to empty the whole launch list until the move finished, because the
+/// `recent_projects` call that redraws it was stuck in that queue.
 async fn off_thread<T: Send + 'static>(
-    path: PathBuf,
-    work: impl FnOnce(&Path) -> Result<T> + Send + 'static,
+    work: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
-    tauri::async_runtime::spawn_blocking(move || work(&path))
+    tauri::async_runtime::spawn_blocking(work)
         .await
         .context("a filesystem task did not finish")?
 }
@@ -760,9 +790,16 @@ pub fn journal_today() -> NaiveDate {
 ///
 /// The one piece of state that is not in a project folder, because it is about
 /// the app rather than any one project.
+///
+/// Off the main thread like every other read of the disk: this is what draws
+/// the launch screen, and it should never sit behind anything.
 #[tauri::command]
-pub fn recent_projects(app: AppHandle) -> Vec<RecentProject> {
-    read_recent(&app)
+pub async fn recent_projects(app: AppHandle) -> CmdResult<Vec<RecentProject>> {
+    Ok(off_thread(move || Ok(read_recent_projects(&app))).await?)
+}
+
+fn read_recent_projects(app: &AppHandle) -> Vec<RecentProject> {
+    read_recent(app)
         .into_iter()
         .filter(|path| store::is_project(path))
         .map(|path| {
@@ -847,10 +884,11 @@ pub async fn trash_project(
         .as_ref()
         .is_some_and(|open| open.store.root() == path)
     {
-        close_open(&state);
+        close_open(&app);
     }
 
-    off_thread(path.clone(), trash_with_retry).await?;
+    let trashing = path.clone();
+    off_thread(move || trash_with_retry(&trashing)).await?;
     Ok(forget_recent(app, path))
 }
 
@@ -861,7 +899,8 @@ pub async fn restore_project(
     path: PathBuf,
     index: usize,
 ) -> CmdResult<PathBuf> {
-    let restored_as = off_thread(path.clone(), |path| restore(path)).await?;
+    let restoring = path.clone();
+    let restored_as = off_thread(move || restore(&restoring)).await?;
     // The old name may have been taken in the meantime, in which case the
     // folder comes back under a different one and the list must follow it.
     let actual = path.with_file_name(restored_as);

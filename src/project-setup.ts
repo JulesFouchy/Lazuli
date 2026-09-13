@@ -13,6 +13,7 @@ import {
   newProjectTarget,
   setStartDate,
 } from "./api";
+import { whileBusy } from "./busy";
 import { daysBetween, formatRealWorld } from "./dates";
 import { openModal } from "./modal";
 import { el, toastError } from "./ui";
@@ -122,7 +123,9 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
         // The caller closes this dialog, as part of recording the move to the
         // new project; closing it here would record an extra step back to the
         // launch screen on the way.
-        onCreated(await createProject(parent, name, dateInput.value));
+        onCreated(
+          await whileBusy(createProject(parent, name, dateInput.value)),
+        );
       } catch (err) {
         toastError("Could not create the project", err);
         createButton.disabled = false;

@@ -9,16 +9,17 @@ Every entry becomes a DOM card. At a couple of thousand entries — a realistic 
 
 ## Why not yet
 
-Two things make it more than a mechanical change:
+One thing makes it more than a mechanical change:
 
-- **Gap connectors are positional.** The dashed rule between two entries has a height derived from the days between them, so a windowing implementation cannot treat rows as uniform, and it has to keep the connectors consistent with whichever cards are currently mounted.
 - **Scroll anchoring.** Mounting and unmounting cards while the user scrolls will make the viewport jump unless offsets are maintained deliberately.
+
+Every gap connector has the same fixed height, so rows are uniform apart from the cards' own image heights, and the connectors need no special handling.
 
 And plain DOM may well hold up for far longer than expected. Measure before paying that cost.
 
 ## How
 
-Render only what is near the viewport, with a spacer above and below sized to the rows that are not mounted. Simplest workable version: measure a card once, assume a uniform height per card plus the gap height, which is now the same for every gap, and correct as real heights become known.
+Render only what is near the viewport, with a spacer above and below sized to the rows that are not mounted. Simplest workable version: measure a card once, assume a uniform height per card plus the gap height, and correct as real heights become known. Needs the cards keyed by entry id, which [incremental-timeline-render.md](incremental-timeline-render.md) also wants.
 
 ## When
 
