@@ -21,6 +21,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_project,
             commands::create_project,
+            commands::new_project_target,
             commands::close_project,
             commands::peek_project,
             commands::recent_projects,

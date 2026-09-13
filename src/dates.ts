@@ -66,12 +66,6 @@ export function formatDateAlternate(
     : formatRealWorld(journalDate);
 }
 
-/** `14:32` — the wall-clock time an entry was written, in its own timezone. */
-export function formatWallClock(created: string): string {
-  const match = created.match(/T(\d{2}):(\d{2})/);
-  return match ? `${match[1]}:${match[2]}` : "";
-}
-
 /** Whole days between two `YYYY-MM-DD` journal dates. */
 export function daysBetween(from: string, to: string): number {
   const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
@@ -86,25 +80,3 @@ export function formatGap(days: number): string {
   return `${(days / 365.25).toFixed(1)} years`;
 }
 
-/**
- * An RFC 3339 string with the machine's current offset, from the values of a
- * `<input type="date">` and `<input type="time">`.
- *
- * Built by hand rather than via `Date.toISOString()`, which would convert to
- * UTC and throw away the offset the whole app depends on.
- */
-export function toRfc3339(date: string, time: string): string {
-  const minutes = -new Date(`${date}T${time}`).getTimezoneOffset();
-  const sign = minutes < 0 ? "-" : "+";
-  const abs = Math.abs(minutes);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date}T${time}:00${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
-}
-
-/** The `YYYY-MM-DD` and `HH:MM` an RFC 3339 string was written at, locally. */
-export function splitRfc3339(created: string): { date: string; time: string } {
-  return {
-    date: created.slice(0, 10),
-    time: created.slice(11, 16),
-  };
-}

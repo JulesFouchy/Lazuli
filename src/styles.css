@@ -109,6 +109,16 @@ textarea {
   border-color: var(--line-strong);
 }
 
+/* Dimmed rather than hidden: a greyed-out button says the action exists and
+   something is missing, where a vanished one says nothing at all. */
+.button:disabled,
+.button:disabled:hover {
+  opacity: 0.45;
+  cursor: default;
+  background: var(--bg-raised);
+  border-color: var(--line);
+}
+
 .button--primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -204,42 +214,84 @@ textarea {
 }
 
 .recent__row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 84px;
   padding: 12px 14px;
   text-align: left;
-  width: 100%;
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
-  transition: background 120ms;
+  background: var(--bg-sunken);
 }
 
 .recent__row:last-child {
   border-bottom: none;
 }
 
-.recent__row:hover {
-  background: var(--bg-raised);
+/* The cover is the row's background, so it sits behind everything and is
+   cropped to the strip rather than letterboxed into it. */
+.recent__image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.9);
+  transition: transform 200ms;
+}
+
+.recent__row:hover .recent__image {
+  transform: scale(1.03);
+}
+
+/* Covers are photographs, so the name needs its own ground to stay readable
+   over whatever the picture happens to be. */
+.recent__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(12, 12, 14, 0.94) 0%,
+    rgba(12, 12, 14, 0.82) 55%,
+    rgba(12, 12, 14, 0.58) 100%
+  );
+}
+
+.recent__row:hover .recent__scrim {
+  background: linear-gradient(
+    90deg,
+    rgba(12, 12, 14, 0.86) 0%,
+    rgba(12, 12, 14, 0.66) 55%,
+    rgba(12, 12, 14, 0.34) 100%
+  );
+}
+
+.recent__label {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: 100%;
+  min-width: 0;
 }
 
 .recent__name {
   font-weight: 550;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
 }
 
 .recent__path {
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--text-faint);
+  color: var(--text-dim);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   direction: rtl;
   text-align: left;
-}
-
-.recent__grow {
-  flex: 1;
-  min-width: 0;
 }
 
 .empty {
@@ -311,6 +363,22 @@ textarea {
   font-family: var(--mono);
   font-size: 12px;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+}
+
+/* Underlined on hover only: the start date reads as part of the sentence until
+   you go looking for something to click. */
+.banner__start {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.banner__start:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 .banner__actions {
@@ -396,12 +464,6 @@ textarea {
 
 .date-toggle:hover {
   background: rgba(240, 168, 74, 0.12);
-}
-
-.card__time {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text-faint);
 }
 
 .card__grow {
@@ -518,6 +580,14 @@ textarea {
   gap: 18px;
 }
 
+/* A dialog that builds its own stack of fields, rather than one block of
+   content. Repeats the body's spacing so the two nest without a seam. */
+.modal__body-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
 .modal__foot {
   display: flex;
   gap: 10px;
@@ -572,19 +642,6 @@ textarea {
   border-color: var(--accent);
 }
 
-.thumb__badge {
-  position: absolute;
-  left: 4px;
-  bottom: 4px;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: var(--accent);
-  color: #17130c;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
 .thumb__delete {
   position: absolute;
   top: 4px;
@@ -615,6 +672,43 @@ textarea {
   font-size: 12px;
   color: var(--text-faint);
   margin: 0;
+}
+
+/* A hint that says why something cannot be done, not merely what it will do. */
+.hint--problem {
+  color: var(--danger);
+}
+
+/* --- right-click menu ---------------------------------------------------- */
+
+.menu {
+  position: fixed;
+  /* Above the modal overlay and the toasts: it is the thing just summoned. */
+  z-index: 70;
+  min-width: 160px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.menu__item {
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.menu__item:hover {
+  background: var(--bg-sunken);
+}
+
+.menu__item--danger:hover {
+  color: var(--danger);
 }
 
 /* --- toasts -------------------------------------------------------------- */

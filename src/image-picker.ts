@@ -60,7 +60,8 @@ function thumbnail(filename: string, options: PickerOptions): HTMLElement {
       loading: "lazy",
       decoding: "async",
     }),
-    isChosen && el("span", { class: "thumb__badge", text: "CHOSEN" }),
+    // No badge: the accent outline already says which one is chosen, and a
+    // label over the corner of a small square hides part of the picture.
     el("span", {
       class: "thumb__delete",
       role: "button",

@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "Journaley",
+        "maximized": true,
         "width": 1100,
         "height": 820,
         "minWidth": 640,

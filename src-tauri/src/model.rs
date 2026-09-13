@@ -22,8 +22,20 @@ pub struct ProjectMeta {
 /// The frontmatter block of an `entries/<uuid>/entry.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntryFrontmatter {
-    /// RFC 3339 with the offset always present. The offset is load-bearing:
-    /// see [`crate::dates`].
+    /// The journal day this entry is about. The only date the entry has, and
+    /// the only one the user edits.
+    ///
+    /// Optional purely for the entries written before this field existed, whose
+    /// day was read off `created` by the 5am rule; [`Self::journal_date`] keeps
+    /// meaning the same for both. It is written out from then on.
+    #[serde(default)]
+    pub date: Option<NaiveDate>,
+    /// When the entry was made. RFC 3339 with the offset always present: see
+    /// [`crate::dates`].
+    ///
+    /// Not a time the entry claims to be *about* — it orders entries that share
+    /// a day, and dates the ones written before `date` existed. Never edited,
+    /// and deliberately never sent to the frontend.
     pub created: DateTime<FixedOffset>,
     /// Filename within the entry folder, or `None` for an entry with no chosen
     /// illustration.
@@ -31,15 +43,26 @@ pub struct EntryFrontmatter {
     pub image: Option<String>,
 }
 
+impl EntryFrontmatter {
+    /// The journal day the entry belongs to.
+    ///
+    /// An entry written before `date` existed has its day derived the way it
+    /// always was, so an old file keeps the day it has always shown.
+    pub fn journal_date(&self) -> NaiveDate {
+        self.date.unwrap_or_else(|| dates::journal_date(self.created))
+    }
+}
+
 /// One entry, as the frontend sees it.
 ///
-/// `journal_date` and `day_number` are derived here rather than in the UI so
-/// there is exactly one implementation of the 5am rule that matters.
+/// `day_number` is derived here rather than in the UI so there is exactly one
+/// place that counts days. `created` is deliberately absent: an entry has a
+/// day and no time, and a field the UI could read is a field the UI will
+/// eventually print.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Entry {
     /// The entry folder's name: a UUID, stable across date edits.
     pub id: String,
-    pub created: DateTime<FixedOffset>,
     pub text: String,
     /// The chosen image, if the file named in frontmatter still exists.
     pub image: Option<String>,
@@ -69,7 +92,7 @@ impl Project {
         text: String,
         images: Vec<String>,
     ) -> Entry {
-        let journal_date = dates::journal_date(frontmatter.created);
+        let journal_date = frontmatter.journal_date();
         // A frontmatter `image` naming a file that has since been deleted from
         // Explorer degrades to "no chosen image" rather than a broken card.
         let image = frontmatter
@@ -77,7 +100,6 @@ impl Project {
             .filter(|name| images.iter().any(|candidate| candidate == name));
         Entry {
             id,
-            created: frontmatter.created,
             text,
             image,
             images,
@@ -112,6 +134,7 @@ mod tests {
 
     fn frontmatter(image: Option<&str>) -> EntryFrontmatter {
         EntryFrontmatter {
+            date: NaiveDate::from_ymd_opt(2026, 6, 10),
             created: DateTime::parse_from_rfc3339("2026-06-10T09:00:00+02:00")
                 .expect("valid test timestamp"),
             image: image.map(str::to_owned),
@@ -157,6 +180,38 @@ mod tests {
         assert_eq!(entry.image, None);
         // The surviving candidate is not silently promoted.
         assert_eq!(entry.images, vec!["b.jpg".to_string()]);
+    }
+
+    #[test]
+    fn an_explicit_date_is_taken_as_written() {
+        // 01:00 with no `date` would file under the 9th under the 5am rule; an
+        // entry that says which day it is about is believed instead.
+        let frontmatter = EntryFrontmatter {
+            date: NaiveDate::from_ymd_opt(2026, 6, 10),
+            created: DateTime::parse_from_rfc3339("2026-06-10T01:00:00+02:00")
+                .expect("valid test timestamp"),
+            image: None,
+        };
+        assert_eq!(
+            frontmatter.journal_date(),
+            NaiveDate::from_ymd_opt(2026, 6, 10).expect("valid test date")
+        );
+    }
+
+    #[test]
+    fn an_entry_written_before_date_existed_keeps_the_day_it_always_had() {
+        // The whole point of the fallback: files on disk must not shift a day
+        // when the app that reads them is upgraded.
+        let frontmatter = EntryFrontmatter {
+            date: None,
+            created: DateTime::parse_from_rfc3339("2026-06-10T01:00:00+02:00")
+                .expect("valid test timestamp"),
+            image: None,
+        };
+        assert_eq!(
+            frontmatter.journal_date(),
+            NaiveDate::from_ymd_opt(2026, 6, 9).expect("valid test date")
+        );
     }
 
     #[test]

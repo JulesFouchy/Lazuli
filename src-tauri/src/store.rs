@@ -81,13 +81,14 @@ impl ProjectStore {
             };
             seen.push(entry_file);
 
+            // `created` is paired with the entry only for the sort below; it is
+            // dropped before the project leaves this function, because an entry
+            // has a day and no time as far as the rest of the app is concerned.
+            let created = frontmatter.created;
             let images = list_images(&entry_dir)?;
-            entries.push(Project::make_entry(
-                meta.start_date,
-                id,
-                frontmatter,
-                text,
-                images,
+            entries.push((
+                created,
+                Project::make_entry(meta.start_date, id, frontmatter, text, images),
             ));
         }
 
@@ -95,14 +96,15 @@ impl ProjectStore {
         // of adding and deleting entries does not grow the map without bound.
         self.cache.retain(|path, _| seen.contains(path));
 
-        // Sort by journal day first so entries group coherently even if an
-        // offset change makes instants and local wall-clock times disagree.
-        entries.sort_by(|a, b| {
+        // Day first, then the order the entries were written in, so two entries
+        // on the same day read in the order they happened.
+        entries.sort_by(|(a_created, a), (b_created, b)| {
             a.journal_date
                 .cmp(&b.journal_date)
-                .then_with(|| a.created.cmp(&b.created))
+                .then_with(|| a_created.cmp(b_created))
                 .then_with(|| a.id.cmp(&b.id))
         });
+        let entries = entries.into_iter().map(|(_, entry)| entry).collect();
 
         Ok(Project {
             root: self.root.clone(),
@@ -159,13 +161,42 @@ pub fn write_meta(root: &Path, meta: &ProjectMeta) -> Result<()> {
     fs::write(&path, yaml).with_context(|| format!("writing {}", path.display()))
 }
 
-/// Create a new, empty project folder.
+/// Why `root` cannot become a new project, phrased for the user, or `None`
+/// when it can.
 ///
-/// Refuses to touch a folder that already holds a project rather than
-/// overwriting its metadata.
-pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<ProjectMeta> {
+/// A path that does not exist yet is the normal case — creating the folder is
+/// part of making the project. An existing empty folder is fine too. Anything
+/// else is refused rather than written into: a project folder is never created
+/// on top of files that were already there.
+///
+/// Separate from [`create_project`] so the new-project dialog can say what is
+/// wrong while the name is still being typed, instead of after the click.
+pub fn new_project_problem(root: &Path) -> Option<String> {
     if is_project(root) {
-        bail!("{} already contains a project", root.display());
+        return Some(format!("{} is already a project.", root.display()));
+    }
+    if !root.exists() {
+        return None;
+    }
+    if !root.is_dir() {
+        return Some(format!("{} is a file, not a folder.", root.display()));
+    }
+    match fs::read_dir(root) {
+        Ok(mut listing) => listing
+            .next()
+            .is_some()
+            .then(|| format!("{} already exists and is not empty.", root.display())),
+        Err(err) => Some(format!("{} cannot be read: {err}", root.display())),
+    }
+}
+
+/// Create a new, empty project folder, making the folder itself if needed.
+///
+/// Refuses any folder [`new_project_problem`] objects to, rather than writing
+/// into something that was already there.
+pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<ProjectMeta> {
+    if let Some(problem) = new_project_problem(root) {
+        bail!("{problem}");
     }
     fs::create_dir_all(root.join(ENTRIES_DIR))
         .with_context(|| format!("creating {}", root.join(ENTRIES_DIR).display()))?;
@@ -182,13 +213,21 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
 }
 
 /// Create an entry folder with an empty `entry.md`, returning its id.
-pub fn create_entry(root: &Path, created: DateTime<FixedOffset>) -> Result<String> {
+///
+/// `date` is the day the entry is about; `created` is the moment it was made,
+/// which is only ever used to order entries that share a day.
+pub fn create_entry(
+    root: &Path,
+    date: NaiveDate,
+    created: DateTime<FixedOffset>,
+) -> Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
     let dir = root.join(ENTRIES_DIR).join(&id);
     fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     write_entry_file(
         &dir,
         &EntryFrontmatter {
+            date: Some(date),
             created,
             image: None,
         },
@@ -280,14 +319,16 @@ fn list_entry_dirs(root: &Path) -> Result<Vec<PathBuf>> {
 pub fn update_entry(
     root: &Path,
     id: &str,
-    created: Option<DateTime<FixedOffset>>,
+    date: Option<NaiveDate>,
     text: Option<&str>,
     image: Option<Option<&str>>,
 ) -> Result<()> {
     let dir = entry_dir(root, id);
     let (mut frontmatter, mut body) = read_entry_file(&dir.join(ENTRY_FILE))?;
-    if let Some(created) = created {
-        frontmatter.created = created;
+    // `created` is never touched: it says when the entry was made, which moving
+    // the entry to another day does not change.
+    if let Some(date) = date {
+        frontmatter.date = Some(date);
     }
     if let Some(text) = text {
         body = text.to_owned();
@@ -375,7 +416,8 @@ mod tests {
         create_project(&dir.0, "Woodworking bench", date(2026, 6, 1))
             .expect("should create a project");
 
-        let id = create_entry(&dir.0, ts("2026-07-09T21:00:00+02:00")).expect("should add entry");
+        let id = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T21:00:00+02:00"))
+            .expect("should add entry");
         update_entry(
             &dir.0,
             &id,
@@ -407,28 +449,85 @@ mod tests {
     }
 
     #[test]
-    fn entries_sort_by_journal_day_then_time() {
+    fn a_project_folder_that_does_not_exist_yet_is_created() {
+        let dir = TempDir::new("fresh");
+        let root = dir.0.join("Woodworking bench");
+        assert_eq!(new_project_problem(&root), None);
+        create_project(&root, "Woodworking bench", date(2026, 6, 1))
+            .expect("the folder should be created along with the project");
+        assert!(root.join(META_FILE).is_file());
+    }
+
+    #[test]
+    fn a_folder_with_someone_elses_files_in_it_is_refused() {
+        let dir = TempDir::new("occupied");
+        fs::write(dir.0.join("holiday.jpg"), b"x").expect("should write a test file");
+        assert!(new_project_problem(&dir.0).is_some());
+        assert!(create_project(&dir.0, "P", date(2026, 6, 1)).is_err());
+        // The file that was there is still there, untouched.
+        assert!(dir.0.join("holiday.jpg").is_file());
+    }
+
+    #[test]
+    fn entries_sort_by_day_then_by_when_they_were_written() {
         let dir = TempDir::new("sort");
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
 
-        // Written out of order, and the 01:00 one belongs to the 9th.
-        create_entry(&dir.0, ts("2026-07-10T09:00:00+02:00")).expect("should add");
-        create_entry(&dir.0, ts("2026-07-10T01:00:00+02:00")).expect("should add");
-        create_entry(&dir.0, ts("2026-07-09T14:00:00+02:00")).expect("should add");
+        // Added out of order, with two entries sharing Day 39.
+        let later = create_entry(&dir.0, date(2026, 7, 10), ts("2026-07-10T09:00:00+02:00"))
+            .expect("should add");
+        let second = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T22:00:00+02:00"))
+            .expect("should add");
+        let first = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T14:00:00+02:00"))
+            .expect("should add");
 
         let project = read_project(&dir.0).expect("should read");
         let days: Vec<i64> = project.entries.iter().map(|e| e.day_number).collect();
         assert_eq!(days, vec![39, 39, 40]);
-        // Within Day 39, the afternoon entry precedes the small-hours one.
-        assert_eq!(project.entries[0].created, ts("2026-07-09T14:00:00+02:00"));
-        assert_eq!(project.entries[1].created, ts("2026-07-10T01:00:00+02:00"));
+        // Within Day 39, the one written first comes first.
+        let ids: Vec<&str> = project.entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, vec![first, second, later]);
+    }
+
+    #[test]
+    fn an_entry_is_filed_under_its_date_not_the_hour_it_was_written() {
+        let dir = TempDir::new("late-night");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        // Written at 01:00 but marked as the 10th: the file says which day it
+        // is about, and nothing re-derives it from the clock.
+        create_entry(&dir.0, date(2026, 7, 10), ts("2026-07-10T01:00:00+02:00"))
+            .expect("should add");
+
+        let project = read_project(&dir.0).expect("should read");
+        assert_eq!(project.entries[0].journal_date, date(2026, 7, 10));
+    }
+
+    #[test]
+    fn an_entry_file_without_a_date_field_still_reads() {
+        let dir = TempDir::new("legacy");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+
+        // Exactly what the app wrote before entries carried their own date.
+        let entry = dir.0.join(ENTRIES_DIR).join("legacy-id");
+        fs::create_dir_all(&entry).expect("should create");
+        fs::write(
+            entry.join(ENTRY_FILE),
+            "---\ncreated: 2026-07-10T01:00:00+02:00\nimage: null\n---\n\nStill up.\n",
+        )
+        .expect("should write");
+
+        let project = read_project(&dir.0).expect("should read");
+        // The 5am rule applied to `created`, as it always did for this file.
+        assert_eq!(project.entries[0].journal_date, date(2026, 7, 9));
+        assert_eq!(project.entries[0].text, "Still up.");
     }
 
     #[test]
     fn a_malformed_entry_is_skipped_not_fatal() {
         let dir = TempDir::new("malformed");
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
-        let good = create_entry(&dir.0, ts("2026-06-02T10:00:00+02:00")).expect("should add");
+        let good = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"))
+            .expect("should add");
 
         let broken = dir.0.join(ENTRIES_DIR).join("not-a-uuid");
         fs::create_dir_all(&broken).expect("should create");
@@ -443,7 +542,8 @@ mod tests {
     fn the_cache_serves_unchanged_files_and_notices_edits() {
         let dir = TempDir::new("cache");
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
-        let id = create_entry(&dir.0, ts("2026-06-02T10:00:00+02:00")).expect("should add");
+        let id = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"))
+            .expect("should add");
 
         let mut store = ProjectStore::new(&dir.0);
         let first = store.scan().expect("first scan");

@@ -23,9 +23,9 @@ Nothing is thrown away on your behalf: every image you tried for an entry stays 
 
 ## The 5am rule
 
-A journal day runs from **05:00 to 04:59 the next morning**. An entry written on July 11 at 01:00 belongs to July 10 — you were still up working on the 10th. Sleep, wake, write again, and that one is July 11.
+A journal day runs from **05:00 to 04:59 the next morning**. Add an entry on July 11 at 01:00 and it is dated July 10 — you were still up working on the 10th. Sleep, wake, add another, and that one is July 11.
 
-This applies everywhere, not just to the label: gap lengths, which entries stack together, what date a new entry defaults to, and the project's own start date.
+The rule decides what a new entry is dated, and what the project's own start date is. After that the date is the entry's own: it sits in `entry.md` as a plain day, and you can change it to any other day. An entry has no time — `created:` records when you wrote it, only so that two entries on the same day keep the order you wrote them in.
 
 Clicking any date flips every date on the page between `Sep 15, 2026` and `Day 39`.
 

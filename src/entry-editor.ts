@@ -1,18 +1,43 @@
 // The entry editor and the cover picker.
 //
-// There is no save button: edits are written straight to `entry.md`. The
-// watcher sees those writes, rescans, finds nothing new, and stays quiet, so
-// the field being typed into is never redrawn underneath the cursor.
+// There is no save button: edits are written straight to `entry.md`. Every such
+// write comes back as a rescan a moment later, so the editor is refreshed in
+// place rather than rebuilt — see `refreshEntryEditor`. Rebuilding it would
+// replace the textarea under the cursor, which is exactly what the user is
+// using at the time.
 
 import type { Entry, Project } from "./api";
 import { setCover, trashEntry, updateEntry } from "./api";
-import { formatDate, splitRfc3339, toRfc3339 } from "./dates";
+import { formatDate } from "./dates";
 import { renderImagePicker } from "./image-picker";
-import { closeModal, openModal, replaceModalBody } from "./modal";
+import { closeModal, openModal, replaceModalBody, setModalTitle } from "./modal";
 import { el, toast, toastError } from "./ui";
 
 /** How long to wait after the last keystroke before writing to disk. */
 const SAVE_DEBOUNCE_MS = 400;
+
+/**
+ * The fields of the editor currently on screen.
+ *
+ * Held so a rescan can update them individually, leaving whichever one has the
+ * cursor alone.
+ */
+interface OpenEditor {
+  id: string;
+  dateInput: HTMLInputElement;
+  textarea: HTMLTextAreaElement;
+  imagesLabel: HTMLElement;
+  pickerHost: HTMLElement;
+  /** What the picker was last drawn from, so it is rebuilt only when it changed. */
+  pickerSignature: string;
+}
+
+let editor: OpenEditor | null = null;
+
+/** The image state the picker reflects, as a single comparable string. */
+function pickerSignature(entry: Entry): string {
+  return `${entry.image ?? ""}::${entry.images.join("|")}`;
+}
 
 export interface EditorContext {
   project: () => Project;
@@ -26,9 +51,10 @@ export function openEntryEditor(id: string, context: EditorContext): void {
   const entry = context.entry(id);
   if (!entry) return;
 
+  const built = editorBody(entry, context);
   openModal({
     title: formatDate(entry.journal_date, entry.day_number),
-    body: editorBody(id, context),
+    body: built.node,
     foot: el(
       "div",
       { class: "modal__foot" },
@@ -39,44 +65,71 @@ export function openEntryEditor(id: string, context: EditorContext): void {
         onclick: () => confirmDeleteEntry(id, context),
       }),
     ),
+    onClose: () => {
+      editor = null;
+    },
   });
+  // After `openModal`, which dismisses whatever was there and so clears this.
+  editor = built.fields;
 }
 
-/** Redraw the editor in place, e.g. after an image is added or removed. */
+/**
+ * Bring the open editor up to date after a rescan.
+ *
+ * Updates each field rather than replacing the body, and skips whichever field
+ * has the cursor: every keystroke in the note is saved, and every save comes
+ * back through here, so rebuilding would take the focus away mid-sentence.
+ */
 export function refreshEntryEditor(id: string, context: EditorContext): void {
-  if (context.entry(id)) replaceModalBody(editorBody(id, context));
+  // Not the editor on screen — or none is. Reopening one the user has closed
+  // would be worse than doing nothing.
+  if (!editor || editor.id !== id) return;
+
+  const entry = context.entry(id);
+  if (!entry) {
+    replaceModalBody(el("p", { class: "empty", text: "This entry is gone." }));
+    editor = null;
+    return;
+  }
+
+  setModalTitle(formatDate(entry.journal_date, entry.day_number));
+  if (document.activeElement !== editor.dateInput) {
+    editor.dateInput.value = entry.journal_date;
+  }
+  if (
+    document.activeElement !== editor.textarea &&
+    editor.textarea.value !== entry.text
+  ) {
+    editor.textarea.value = entry.text;
+  }
+
+  const signature = pickerSignature(entry);
+  if (signature !== editor.pickerSignature) {
+    editor.pickerSignature = signature;
+    editor.imagesLabel.textContent = `Images (${entry.images.length})`;
+    editor.pickerHost.replaceChildren(imagePicker(entry, context));
+  }
 }
 
-function editorBody(id: string, context: EditorContext): HTMLElement {
-  const project = context.project();
-  const entry = context.entry(id);
-  if (!entry) return el("p", { class: "empty", text: "This entry is gone." });
-
-  const { date, time } = splitRfc3339(entry.created);
+function editorBody(
+  entry: Entry,
+  context: EditorContext,
+): { node: HTMLElement; fields: OpenEditor } {
+  const id = entry.id;
 
   const dateInput = el("input", {
     class: "input",
     type: "date",
-    value: date,
-  }) as HTMLInputElement;
-  const timeInput = el("input", {
-    class: "input",
-    type: "time",
-    value: time,
+    // An entry has a day and no time: this is the whole of its date.
+    value: entry.journal_date,
   }) as HTMLInputElement;
 
-  const saveWhen = async () => {
-    if (!dateInput.value || !timeInput.value) return;
-    try {
-      await updateEntry(id, {
-        created: toRfc3339(dateInput.value, timeInput.value),
-      });
-    } catch (err) {
-      toastError("Could not change the date", err);
-    }
-  };
-  dateInput.addEventListener("change", saveWhen);
-  timeInput.addEventListener("change", saveWhen);
+  dateInput.addEventListener("change", () => {
+    if (!dateInput.value) return;
+    void updateEntry(id, { date: dateInput.value }).catch((err) =>
+      toastError("Could not change the date", err),
+    );
+  });
 
   const textarea = el("textarea", {
     class: "input",
@@ -97,14 +150,39 @@ function editorBody(id: string, context: EditorContext): HTMLElement {
     }, SAVE_DEBOUNCE_MS);
   });
 
-  const picker = renderImagePicker({
-    directory: `${project.root}/entries/${id}`,
+  const imagesLabel = el("label", { text: `Images (${entry.images.length})` });
+  const pickerHost = el("div", {}, imagePicker(entry, context));
+
+  return {
+    node: el(
+      "div",
+      { class: "modal__body-inner" },
+      // Note and images first; the date is already right nearly every time, so
+      // it sits at the bottom out of the way rather than in the first field.
+      el("div", { class: "field" }, el("label", { text: "Note" }), textarea),
+      el("div", { class: "field" }, imagesLabel, pickerHost),
+      el("div", { class: "field" }, el("label", { text: "Date" }), dateInput),
+    ),
+    fields: {
+      id,
+      dateInput,
+      textarea,
+      imagesLabel,
+      pickerHost,
+      pickerSignature: pickerSignature(entry),
+    },
+  };
+}
+
+function imagePicker(entry: Entry, context: EditorContext): HTMLElement {
+  return renderImagePicker({
+    directory: `${context.project().root}/entries/${entry.id}`,
     filenames: entry.images,
     chosen: entry.image,
-    entryId: id,
+    entryId: entry.id,
     onChoose: async (filename) => {
       try {
-        await updateEntry(id, { image: filename });
+        await updateEntry(entry.id, { image: filename });
         context.refresh();
       } catch (err) {
         toastError("Could not choose that image", err);
@@ -113,54 +191,15 @@ function editorBody(id: string, context: EditorContext): HTMLElement {
     onChanged: () => context.refresh(),
     onDeleted: (filename) => context.noteDeletion(filename),
   });
-
-  return el(
-    "div",
-    { class: "modal__body-inner" },
-    el(
-      "div",
-      { class: "row" },
-      el(
-        "div",
-        { class: "field" },
-        el("label", { text: "Date" }),
-        dateInput,
-      ),
-      el(
-        "div",
-        { class: "field" },
-        el("label", { text: "Time" }),
-        timeInput,
-      ),
-      el(
-        "div",
-        { class: "field card__grow" },
-        el("label", { text: "Journal day" }),
-        el("div", {
-          class: "input",
-          // The wall-clock time and the journal day are both shown, so an
-          // entry written at 01:00 filing under the previous day is visible
-          // rather than mysterious.
-          text: `Day ${entry.day_number} · ${entry.journal_date}`,
-        }),
-      ),
-    ),
-    el(
-      "div",
-      { class: "field" },
-      el("label", { text: "Note" }),
-      textarea,
-    ),
-    el(
-      "div",
-      { class: "field" },
-      el("label", { text: `Images (${entry.images.length})` }),
-      picker,
-    ),
-  );
 }
 
-function confirmDeleteEntry(id: string, context: EditorContext): void {
+/**
+ * Ask, then move an entry and its images to the Recycle Bin.
+ *
+ * Shared by the editor's own button and the timeline's right-click menu, so
+ * deleting an entry asks the same question and leaves the same undo either way.
+ */
+export function confirmDeleteEntry(id: string, context: EditorContext): void {
   const entry = context.entry(id);
   if (!entry) return;
 

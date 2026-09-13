@@ -1,7 +1,7 @@
 //! The Tauri command surface, and the state behind it.
 
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::{DateTime, FixedOffset, Local, NaiveDate};
+use chrono::{Local, NaiveDate};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dates;
 use crate::model::{is_image, Project, ProjectMeta};
-use crate::paths::unique_path;
+use crate::paths::{folder_name_for, unique_path};
 use crate::store::{self, ProjectStore};
 use crate::video::{self, Encode, ExportOptions};
 use crate::watch::{self, ProjectWatcher};
@@ -71,14 +71,42 @@ pub fn open_project(app: AppHandle, state: State<AppState>, path: PathBuf) -> Cm
     Ok(open_at(&app, &state, path)?)
 }
 
+/// Where a project called `name` would go inside `parent`, and what stands in
+/// the way if anything does.
+///
+/// The dialog calls this on every keystroke so the destination path is visible
+/// as it is typed, and "that folder is taken" arrives before the click rather
+/// than after it.
+#[derive(Debug, Serialize)]
+pub struct NewProjectTarget {
+    pub path: PathBuf,
+    /// A sentence to show under the field, or `None` when the path is usable.
+    pub problem: Option<String>,
+}
+
+#[tauri::command]
+pub fn new_project_target(parent: PathBuf, name: String) -> NewProjectTarget {
+    let path = parent.join(folder_name_for(&name));
+    NewProjectTarget {
+        problem: store::new_project_problem(&path),
+        path,
+    }
+}
+
+/// Create a project in a *new* folder inside `parent`, named after the project.
+///
+/// The folder name is derived here rather than taken from the frontend, so it
+/// is the same string [`new_project_target`] previewed.
 #[tauri::command]
 pub fn create_project(
     app: AppHandle,
     state: State<AppState>,
-    path: PathBuf,
+    parent: PathBuf,
     name: String,
+    start_date: NaiveDate,
 ) -> CmdResult<Project> {
-    store::create_project(&path, &name, dates::today())?;
+    let path = parent.join(folder_name_for(&name));
+    store::create_project(&path, &name, start_date)?;
     remember_projects_dir(&app, &path);
     Ok(open_at(&app, &state, path)?)
 }
@@ -207,15 +235,19 @@ pub fn set_cover(
 
 // --- entries -------------------------------------------------------------
 
+/// Add an entry for `date`, defaulting to the journal day in progress.
+///
+/// The 5am rule lives in that default: opening the app at 02:00 offers
+/// yesterday, which is nearly always the day the work belongs to.
 #[tauri::command]
 pub fn create_entry(
     app: AppHandle,
     state: State<AppState>,
-    created: Option<DateTime<FixedOffset>>,
+    date: Option<NaiveDate>,
 ) -> CmdResult<String> {
-    let created = created.unwrap_or_else(|| Local::now().fixed_offset());
+    let date = date.unwrap_or_else(dates::today);
     Ok(with_project(&app, &state, |open| {
-        store::create_entry(&root_of(open), created)
+        store::create_entry(&root_of(open), date, Local::now().fixed_offset())
     })?)
 }
 
@@ -224,7 +256,7 @@ pub fn update_entry(
     app: AppHandle,
     state: State<AppState>,
     id: String,
-    created: Option<DateTime<FixedOffset>>,
+    date: Option<NaiveDate>,
     text: Option<String>,
     // `Some(None)` clears the chosen image; `None` leaves it alone. Serde maps
     // an absent field to the outer `None` and an explicit `null` to the inner.
@@ -234,7 +266,7 @@ pub fn update_entry(
         store::update_entry(
             &root_of(open),
             &id,
-            created,
+            date,
             text.as_deref(),
             image.as_ref().map(|inner| inner.as_deref()),
         )
@@ -274,8 +306,29 @@ pub fn import_images(
             })?;
             named.push(file_name_of(&destination));
         }
+        if let Some(last) = named.last() {
+            choose_image(open, entry_id.as_deref(), last)?;
+        }
         Ok(named)
     })?)
+}
+
+/// Make a newly added image the chosen one.
+///
+/// Adding an image is how you say which picture the day gets, so the new one
+/// wins rather than joining the pile unseen. Nothing is lost: the previous
+/// choice is still in the folder, one click away in the picker. On a batch the
+/// last file added wins, being the most recent thing the user did.
+fn choose_image(open: &OpenProject, entry_id: Option<&str>, filename: &str) -> Result<()> {
+    let root = root_of(open);
+    match entry_id {
+        Some(id) => store::update_entry(&root, id, None, None, Some(Some(filename))),
+        None => {
+            let mut meta = store::read_meta(&root)?;
+            meta.cover = Some(filename.to_owned());
+            store::write_meta(&root, &meta)
+        }
+    }
 }
 
 /// Save pasted image bytes into an entry folder or `cover/`.
@@ -297,7 +350,9 @@ pub fn import_image_bytes(
         let destination = unique_path(&target, &filename);
         fs::write(&destination, &bytes)
             .with_context(|| format!("writing {}", destination.display()))?;
-        Ok(file_name_of(&destination))
+        let saved = file_name_of(&destination);
+        choose_image(open, entry_id.as_deref(), &saved)?;
+        Ok(saved)
     })?)
 }
 
@@ -618,11 +673,24 @@ pub fn recent_projects(app: AppHandle) -> Vec<RecentProject> {
     read_recent(&app)
         .into_iter()
         .filter(|path| store::is_project(path))
-        .map(|path| RecentProject {
-            name: store::read_meta(&path)
-                .map(|meta| meta.name)
-                .unwrap_or_else(|_| file_name_of(&path)),
-            path,
+        .map(|path| {
+            let meta = store::read_meta(&path).ok();
+            // The launch screen shows each project behind its own cover, so the
+            // webview has to be allowed to load that one folder. Not recursive,
+            // and not the whole project: nothing else is shown until it opens.
+            if meta.as_ref().is_some_and(|meta| meta.cover.is_some()) {
+                let _ = app
+                    .asset_protocol_scope()
+                    .allow_directory(path.join(store::COVER_DIR), false);
+            }
+            RecentProject {
+                name: meta
+                    .as_ref()
+                    .map(|meta| meta.name.clone())
+                    .unwrap_or_else(|| file_name_of(&path)),
+                cover: meta.and_then(|meta| meta.cover),
+                path,
+            }
         })
         .collect()
 }
@@ -631,6 +699,8 @@ pub fn recent_projects(app: AppHandle) -> Vec<RecentProject> {
 pub struct RecentProject {
     pub name: String,
     pub path: PathBuf,
+    /// Filename within the project's `cover/`, when one is chosen.
+    pub cover: Option<String>,
 }
 
 #[tauri::command]

@@ -17,14 +17,17 @@ export interface ProjectMeta {
 export interface Entry {
   /** The entry folder's name. Stable across date edits. */
   id: string;
-  /** RFC 3339 with an offset. */
-  created: string;
   text: string;
   /** The chosen image, or null when none is set or the file has gone. */
   image: string | null;
   /** Every image in the entry folder, sorted. */
   images: string[];
-  /** `YYYY-MM-DD`, already shifted by the 5am rule. */
+  /**
+   * `YYYY-MM-DD`: the day the entry is about, and the only date it has.
+   *
+   * An entry records no time. Rust keeps a `created` stamp in the file to order
+   * entries that share a day, and deliberately does not send it here.
+   */
   journal_date: string;
   day_number: number;
 }
@@ -40,6 +43,8 @@ export interface Project {
 export interface RecentProject {
   name: string;
   path: string;
+  /** Filename within the project's `cover/`, when one is chosen. */
+  cover: string | null;
 }
 
 export interface UndoOutcome {
@@ -50,8 +55,23 @@ export interface UndoOutcome {
 export const openProject = (path: string) =>
   invoke<Project>("open_project", { path });
 
-export const createProject = (path: string, name: string) =>
-  invoke<Project>("create_project", { path, name });
+export interface NewProjectTarget {
+  /** The folder that would be created: `parent` plus a name derived from the project's. */
+  path: string;
+  /** Why that folder cannot be used, or null when it can. */
+  problem: string | null;
+}
+
+/** Preview the folder a new project would land in, without creating anything. */
+export const newProjectTarget = (parent: string, name: string) =>
+  invoke<NewProjectTarget>("new_project_target", { parent, name });
+
+/** Create a project in a new folder inside `parent`. `startDate` is `YYYY-MM-DD`. */
+export const createProject = (
+  parent: string,
+  name: string,
+  startDate: string,
+) => invoke<Project>("create_project", { parent, name, startDate });
 
 export const closeProject = () => invoke<void>("close_project");
 
@@ -70,8 +90,9 @@ export const setStartDate = (startDate: string) =>
 export const setCover = (filename: string | null) =>
   invoke<void>("set_cover", { filename });
 
-export const createEntry = (created?: string) =>
-  invoke<string>("create_entry", { created: created ?? null });
+/** Add an entry. `date` is `YYYY-MM-DD`, defaulting to the journal day in progress. */
+export const createEntry = (date?: string) =>
+  invoke<string>("create_entry", { date: date ?? null });
 
 /**
  * Patch an entry. Omitted fields are left alone; passing `image: null` clears
@@ -79,11 +100,11 @@ export const createEntry = (created?: string) =>
  */
 export const updateEntry = (
   id: string,
-  patch: { created?: string; text?: string; image?: string | null },
+  patch: { date?: string; text?: string; image?: string | null },
 ) =>
   invoke<void>("update_entry", {
     id,
-    created: patch.created ?? null,
+    date: patch.date ?? null,
     text: patch.text ?? null,
     // The Rust side takes `Option<Option<String>>`: absent means "no change",
     // present-but-null means "clear". `undefined` serialises to absent.

@@ -7,9 +7,9 @@ import {
   formatDate,
   formatDateAlternate,
   formatGap,
-  formatWallClock,
   toggleDateFormat,
 } from "./dates";
+import { openContextMenu } from "./context-menu";
 import { el } from "./ui";
 
 /** Pixels of dashed rule per elapsed day, and the ceiling on that. */
@@ -19,6 +19,7 @@ const GAP_MAX = 200;
 
 export interface TimelineHandlers {
   openEntry: (entry: Entry) => void;
+  deleteEntry: (entry: Entry) => void;
 }
 
 export function renderTimeline(
@@ -85,12 +86,19 @@ function entryCard(
     {
       class: "card",
       onclick: () => handlers.openEntry(entry),
+      oncontextmenu: (event: Event) =>
+        openContextMenu(event as MouseEvent, [
+          {
+            label: "Delete entry",
+            danger: true,
+            run: () => handlers.deleteEntry(entry),
+          },
+        ]),
     },
     el(
       "header",
       { class: "card__head" },
       dateToggle(entry),
-      el("span", { class: "card__time", text: formatWallClock(entry.created) }),
       el("span", { class: "card__grow" }),
       extras > 0 &&
         el("span", {

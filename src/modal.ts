@@ -11,8 +11,20 @@ export interface ModalOptions {
   onClose?: () => void;
 }
 
+/**
+ * Notified when the modal layer becomes empty.
+ *
+ * Distinct from a modal's own `onClose`: one modal replacing another is not a
+ * dismissal, and the app's history must not record it as a move.
+ */
+let onDismissed: (() => void) | null = null;
+
+export function onModalDismissed(listener: () => void): void {
+  onDismissed = listener;
+}
+
 export function openModal(options: ModalOptions): void {
-  closeModal();
+  closeModal({ replacing: true });
 
   const overlay = el(
     "div",
@@ -46,16 +58,23 @@ export function openModal(options: ModalOptions): void {
   current = { overlay, onClose: options.onClose };
 }
 
-export function closeModal(): void {
+export function closeModal(options: { replacing?: boolean } = {}): void {
   if (!current) return;
   const { overlay, onClose } = current;
   // Clear first: `onClose` may itself want to open another modal.
   current = null;
   overlay.remove();
   onClose?.();
+  if (!options.replacing) onDismissed?.();
 }
 
 export const isModalOpen = () => current !== null;
+
+/** Retitle the open modal, e.g. when the date it is showing changes. */
+export function setModalTitle(title: string): void {
+  const heading = current?.overlay.querySelector(".modal__title");
+  if (heading) heading.textContent = title;
+}
 
 /** Swap the open modal's contents without the dismiss-and-reopen flicker. */
 export function replaceModalBody(body: HTMLElement): void {

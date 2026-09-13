@@ -39,6 +39,67 @@ pub fn unique_path(dir: &Path, filename: &str) -> PathBuf {
     dir.join(format!("{stem} ({}){extension}", uuid::Uuid::new_v4()))
 }
 
+/// Characters Windows refuses in a filename. Kept as an explicit list rather
+/// than a platform `cfg`: a project folder made on Windows should still be
+/// openable when the folder is synced to a Mac, and vice versa.
+const ILLEGAL_CHARS: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+
+/// Device names Windows still reserves, with or without an extension.
+const RESERVED_STEMS: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Cap on a derived folder name, so a pasted paragraph does not produce a path
+/// long enough to break the tools the user opens the folder with.
+const MAX_FOLDER_NAME: usize = 120;
+
+/// Used when a name sanitises away to nothing, e.g. `???`.
+const FALLBACK_FOLDER_NAME: &str = "Project";
+
+/// The folder name a project called `name` gets.
+///
+/// The project's real name lives in `journaley.yaml` and can be anything; this
+/// is only the folder it sits in, so it trades exactness for being a name the
+/// user can type in a terminal. Illegal characters become spaces rather than
+/// being dropped, so `Kitchen/Bathroom` reads as two words instead of one.
+pub fn folder_name_for(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|character| {
+            if ILLEGAL_CHARS.contains(&character) || character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+
+    let mut folder: String = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Truncate on a character boundary, then re-trim: cutting mid-word can
+    // leave a trailing space, which Windows would silently drop anyway.
+    if folder.chars().count() > MAX_FOLDER_NAME {
+        folder = folder.chars().take(MAX_FOLDER_NAME).collect();
+    }
+    // Windows stores neither a trailing dot nor a trailing space.
+    let folder = folder.trim_end_matches(['.', ' ']).to_owned();
+
+    if folder.is_empty() {
+        return FALLBACK_FOLDER_NAME.to_owned();
+    }
+
+    // `CON` and `CON.txt` are both the console device; a trailing underscore is
+    // the least surprising way out.
+    let stem = folder.split('.').next().unwrap_or(&folder);
+    if RESERVED_STEMS
+        .iter()
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+    {
+        return format!("{folder}_");
+    }
+    folder
+}
+
 /// Split a filename into its stem and its extension *including* the dot.
 ///
 /// Hand-rolled rather than using `Path::extension` so that dotfiles and
@@ -116,5 +177,48 @@ mod tests {
     fn a_leading_dot_is_part_of_the_name() {
         // Otherwise `.gitignore` would collide as ` (2).gitignore`.
         assert_eq!(split_extension(".gitignore"), (".gitignore", ""));
+    }
+
+    #[test]
+    fn an_ordinary_name_is_used_as_the_folder_name() {
+        assert_eq!(folder_name_for("Woodworking bench"), "Woodworking bench");
+    }
+
+    #[test]
+    fn illegal_characters_become_spaces_rather_than_vanishing() {
+        assert_eq!(folder_name_for("Kitchen/Bathroom"), "Kitchen Bathroom");
+        assert_eq!(folder_name_for("Trip: Iceland"), "Trip Iceland");
+    }
+
+    #[test]
+    fn surrounding_and_repeated_whitespace_is_collapsed() {
+        assert_eq!(folder_name_for("  a   b  "), "a b");
+    }
+
+    #[test]
+    fn trailing_dots_and_spaces_are_dropped() {
+        // Windows would drop them itself, leaving the app looking for a folder
+        // under a name that is not the one on disk.
+        assert_eq!(folder_name_for("Version 2..."), "Version 2");
+    }
+
+    #[test]
+    fn a_name_that_sanitises_to_nothing_falls_back() {
+        assert_eq!(folder_name_for("???"), FALLBACK_FOLDER_NAME);
+        assert_eq!(folder_name_for(""), FALLBACK_FOLDER_NAME);
+    }
+
+    #[test]
+    fn reserved_device_names_are_escaped() {
+        assert_eq!(folder_name_for("con"), "con_");
+        assert_eq!(folder_name_for("LPT1.old"), "LPT1.old_");
+        // Only the exact device names; `console` is a perfectly good folder.
+        assert_eq!(folder_name_for("console"), "console");
+    }
+
+    #[test]
+    fn a_very_long_name_is_truncated_without_splitting_a_character() {
+        let folder = folder_name_for(&"é".repeat(500));
+        assert_eq!(folder.chars().count(), MAX_FOLDER_NAME);
     }
 }
