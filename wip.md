@@ -12,6 +12,6 @@ So I can see all the things I did in one place, when I was more on a given proje
 
 ## Triage
 
-need a way to see images bigger, probably edit becomes a pencil button in top right, and clicking the image actually opens it in fullscreen (full image, original aspect ratio, and text line at the bottom, and we can go left/right to see previous/next entry, using back arrow keys and small arrow buttons on screen)
+need a way to see images bigger, probably edit becomes a pencil button in top right (and ctrl+click on card), and clicking the card actually opens it in fullscreen (full image, original aspect ratio, and text line at the bottom, and we can go left/right to see previous/next entry, using back arrow keys and small arrow buttons on screen)
 
 we should see the current date at the top
