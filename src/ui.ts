@@ -45,18 +45,22 @@ export interface ToastOptions {
   error?: boolean;
   /** Milliseconds on screen. */
   duration?: number;
+  /** Called when it leaves the screen, however it came to go. */
+  onGone?: () => void;
 }
 
 /**
- * Show a transient message.
+ * Show a transient message, returning the way to take it back down.
  *
  * Deletes are not confirmed with a dialog, so this is where the undo lives: the
  * toast has to stay long enough to be a real safety net, and stays clickable
- * for cases where Ctrl+Z would be swallowed by a focused text field.
+ * for cases where Ctrl+Z would be swallowed by a focused text field. An offer
+ * taken up elsewhere — Ctrl+Z rather than the button — dismisses it, so what is
+ * on screen is only ever what can still be done.
  */
-export function toast(message: string, options: ToastOptions = {}): void {
+export function toast(message: string, options: ToastOptions = {}): () => void {
   const host = document.getElementById("toasts");
-  if (!host) return;
+  if (!host) return () => {};
 
   const node = el(
     "div",
@@ -68,16 +72,29 @@ export function toast(message: string, options: ToastOptions = {}): void {
         text: options.action.label,
         onclick: () => {
           options.action?.run();
-          node.remove();
+          dismiss();
         },
       }),
   );
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let gone = false;
+  const dismiss = () => {
+    if (gone) return;
+    gone = true;
+    clearTimeout(timer);
+    node.remove();
+    options.onGone?.();
+  };
+
   host.append(node);
-  const timer = setTimeout(() => node.remove(), options.duration ?? TOAST_MS);
+  timer = setTimeout(dismiss, options.duration ?? TOAST_MS);
   // Keep it up while the pointer is on it, so a slow reader can still undo.
   node.addEventListener("mouseenter", () => clearTimeout(timer));
-  node.addEventListener("mouseleave", () => setTimeout(() => node.remove(), 1200));
+  node.addEventListener("mouseleave", () => {
+    timer = setTimeout(dismiss, 1200);
+  });
+  return dismiss;
 }
 
 /** Report a failed command without swallowing the cause. */

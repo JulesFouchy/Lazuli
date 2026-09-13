@@ -282,8 +282,9 @@ export function announceDeletion(
   what: string,
   deleted: Promise<boolean>,
   undo: () => void,
-): void {
-  toast(`Deleted ${what}`, {
+  onGone?: () => void,
+): () => void {
+  return toast(`Deleted ${what}`, {
     action: {
       label: "Undo",
       // The toast goes up before the Recycle Bin has been asked, so the undo
@@ -291,5 +292,6 @@ export function announceDeletion(
       // fail, which would otherwise pop whatever was underneath it.
       run: () => void deleted.then((ok) => ok && undo()),
     },
+    onGone,
   });
 }
