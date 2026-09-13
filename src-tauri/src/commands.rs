@@ -59,10 +59,11 @@ impl OpenProject {
     ///
     /// `Debouncer`'s own `Drop` raises a stop flag and returns without joining
     /// the thread, so letting the value fall out of scope leaves the folder's
-    /// directory handle open for as long as that thread takes to notice — long
-    /// enough that the folder then cannot be moved to the Recycle Bin at all.
-    /// `stop` joins, which is the difference between a project that can be
-    /// deleted after being opened and one that cannot.
+    /// directory handle open for as long as that thread takes to notice. That
+    /// handle is opened with delete sharing and does not stop the folder being
+    /// moved (measured: a project renames fine while it is being watched), but
+    /// a rescan racing a delete is still a rescan of a folder that is going
+    /// away, so the close waits for the thread rather than hoping.
     fn close(mut self) {
         let root = self.store.root().to_path_buf();
         if let Some(mut watcher) = self.watcher.take() {
@@ -578,12 +579,12 @@ async fn off_thread<T: Send + 'static>(
 /// that as "some operations were aborted" rather than as a lock, so the message
 /// says nothing useful on its own.
 ///
-/// Our own watcher is the usual holder. Dropping it asks its thread to close
-/// the directory handle, and that thread takes its time: the close has not
-/// happened when the next line runs, nor a second later. Editors and search
-/// indexers watching the same folder hold it the same way from outside, and
-/// nothing here can make them let go — hence a window rather than a fixed
-/// number of tries, and a message that says what to do when it runs out.
+/// Our own watcher is not the holder: its handle is opened with delete sharing
+/// and a watched project moves fine. The holders are outside the app — editors,
+/// search indexers, file watchers in other tools (the Vite dev server was one,
+/// until `vite.config.ts` told it to ignore `projects/`) — and nothing here can
+/// make them let go. Some release within a moment, hence a window rather than
+/// a fixed number of tries; the rest get a message that says what to do.
 fn trash_with_retry(path: &Path) -> Result<()> {
     let deadline = Instant::now() + TRASH_RETRY_WINDOW;
     loop {
@@ -837,9 +838,8 @@ pub async fn trash_project(
         return Err(anyhow!("{} is not a Journaley project", path.display()).into());
     }
 
-    // Windows will not move a folder anything holds a handle on, and the
-    // watcher holds one until it has been stopped and joined. This is required,
-    // not tidiness.
+    // Closing first so no rescan runs against a folder that is on its way to
+    // the Recycle Bin. The watcher's own handle does not block the move.
     if state
         .open
         .lock()
