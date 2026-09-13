@@ -8,11 +8,9 @@
 
 import type { Entry, Project } from "./api";
 import { setCover, trashEntry, updateEntry } from "./api";
-import { onDateFormatChange } from "./dates";
 import { renderImagePicker } from "./image-picker";
-import { closeModal, openModal, replaceModalBody, setModalTitle } from "./modal";
+import { closeModal, openModal, replaceModalBody } from "./modal";
 import { entryKey, markDeleting, unmarkDeleting } from "./pending";
-import { dateToggle } from "./timeline";
 import { el, toast, toastError } from "./ui";
 
 /** How long to wait after the last keystroke before writing to disk. */
@@ -38,14 +36,6 @@ interface OpenEditor {
 
 let editor: OpenEditor | null = null;
 
-/** Drops the open editor's subscription to the global date-format toggle. */
-let stopWatchingFormat: (() => void) | null = null;
-
-/** The editor's title: the entry's date, which flips format like any other. */
-function titleFor(entry: Entry): HTMLElement {
-  return dateToggle(entry, "modal__title date-toggle");
-}
-
 /** The image state the picker reflects, as a single comparable string. */
 function pickerSignature(entry: Entry): string {
   return `${entry.image ?? ""}::${entry.images.join("|")}`;
@@ -56,7 +46,13 @@ export interface EditorContext {
   /** Re-read the entry from the latest project state, or null if it is gone. */
   entry: (id: string) => Entry | null;
   refresh: () => void;
-  noteDeletion: (what: string) => void;
+  /**
+   * Offer an undo for something just deleted.
+   *
+   * `deleted` resolves to whether the delete actually happened: the toast goes
+   * up before the Recycle Bin has been asked.
+   */
+  noteDeletion: (what: string, deleted: Promise<boolean>) => void;
 }
 
 export function openEntryEditor(id: string, context: EditorContext): void {
@@ -65,26 +61,20 @@ export function openEntryEditor(id: string, context: EditorContext): void {
 
   const built = editorBody(entry, context);
   openModal({
-    title: titleFor(entry),
+    // No header: the date was in it and in the field at the bottom, and the
+    // field is the one that can be edited. Escape, Back and the backdrop
+    // close it, and delete is on the card's own right-click menu.
+    title: null,
     body: built.node,
-    // No delete button: it lives on the card's right-click menu, where it is
-    // out of reach of someone who only came here to write a sentence.
     onClose: () => {
       // Escape, the backdrop and Back all land here. Whatever is still sitting
       // in the debounce is written rather than lost.
       editor?.flushNote();
       editor = null;
-      stopWatchingFormat?.();
-      stopWatchingFormat = null;
     },
   });
   // After `openModal`, which dismisses whatever was there and so clears this.
   editor = built.fields;
-  // Nothing rescans when the format flips, so the title has to follow it here.
-  stopWatchingFormat = onDateFormatChange(() => {
-    const current = context.entry(id);
-    if (current) setModalTitle(titleFor(current));
-  });
   // Straight into the note: writing it is the reason the editor is open.
   built.fields.textarea.focus();
 }
@@ -108,7 +98,6 @@ export function refreshEntryEditor(id: string, context: EditorContext): void {
     return;
   }
 
-  setModalTitle(titleFor(entry));
   if (document.activeElement !== editor.dateInput) {
     editor.dateInput.value = entry.journal_date;
   }
@@ -221,7 +210,7 @@ function imagePicker(entry: Entry, context: EditorContext): HTMLElement {
       }
     },
     onChanged: () => context.refresh(),
-    onDeleted: (filename) => context.noteDeletion(filename),
+    onDeleted: (filename, deleted) => context.noteDeletion(filename, deleted),
   });
 }
 
@@ -241,17 +230,19 @@ export function deleteEntry(id: string, context: EditorContext): void {
   closeModal();
   context.refresh();
 
-  void (async () => {
-    try {
-      await trashEntry(id);
-      context.noteDeletion(`the entry from ${entry.journal_date}`);
-    } catch (err) {
+  const deleted = trashEntry(id).then(
+    () => true,
+    (err) => {
       toastError("Could not delete the entry", err);
-    } finally {
-      unmarkDeleting(key);
-      context.refresh();
-    }
-  })();
+      return false;
+    },
+  );
+  // Offered at once, like the card disappearing at once.
+  context.noteDeletion(`the entry from ${entry.journal_date}`, deleted);
+  void deleted.then(() => {
+    unmarkDeleting(key);
+    context.refresh();
+  });
 }
 
 export function openCoverPicker(context: EditorContext): void {
@@ -281,12 +272,24 @@ function coverBody(context: EditorContext): HTMLElement {
         }
       },
       onChanged: () => context.refresh(),
-      onDeleted: (filename) => context.noteDeletion(filename),
+      onDeleted: (filename, deleted) => context.noteDeletion(filename, deleted),
     }),
   );
 }
 
 /** Shared by both pickers: report what a delete did and how to take it back. */
-export function announceDeletion(what: string, undo: () => void): void {
-  toast(`Deleted ${what}`, { action: { label: "Undo", run: undo } });
+export function announceDeletion(
+  what: string,
+  deleted: Promise<boolean>,
+  undo: () => void,
+): void {
+  toast(`Deleted ${what}`, {
+    action: {
+      label: "Undo",
+      // The toast goes up before the Recycle Bin has been asked, so the undo
+      // waits for the answer -- and does nothing if the delete turned out to
+      // fail, which would otherwise pop whatever was underneath it.
+      run: () => void deleted.then((ok) => ok && undo()),
+    },
+  });
 }

@@ -5,8 +5,12 @@ import { el } from "./ui";
 let current: { overlay: HTMLElement; onClose?: () => void } | null = null;
 
 export interface ModalOptions {
-  /** Plain text, or a node when the title is itself a control. */
-  title: string | HTMLElement;
+  /**
+   * Plain text, a node when the title is itself a control, or null for a
+   * dialog with no header at all -- one whose contents say what it is, and
+   * which Escape, Back and the backdrop are enough to close.
+   */
+  title: string | HTMLElement | null;
   body: HTMLElement;
   foot?: HTMLElement;
   onClose?: () => void;
@@ -47,19 +51,21 @@ export function openModal(options: ModalOptions): void {
     el(
       "div",
       { class: "modal", role: "dialog", "aria-modal": "true" },
-      el(
-        "header",
-        { class: "modal__head" },
-        typeof options.title === "string"
-          ? el("h2", { class: "modal__title", text: options.title })
-          : options.title,
-        el("span", { class: "card__grow" }),
-        el("button", {
-          class: "button button--ghost",
-          text: "Close",
-          onclick: () => closeModal(),
-        }),
-      ),
+      options.title === null
+        ? null
+        : el(
+            "header",
+            { class: "modal__head" },
+            typeof options.title === "string"
+              ? el("h2", { class: "modal__title", text: options.title })
+              : options.title,
+            el("span", { class: "card__grow" }),
+            el("button", {
+              class: "button button--ghost",
+              text: "Close",
+              onclick: () => closeModal(),
+            }),
+          ),
       el("div", { class: "modal__body" }, options.body),
       options.foot ?? null,
     ),
@@ -80,14 +86,6 @@ export function closeModal(options: { replacing?: boolean } = {}): void {
 }
 
 export const isModalOpen = () => current !== null;
-
-/** Retitle the open modal, e.g. when the date it is showing changes. */
-export function setModalTitle(title: string | HTMLElement): void {
-  const heading = current?.overlay.querySelector(".modal__title");
-  if (!heading) return;
-  if (typeof title === "string") heading.textContent = title;
-  else heading.replaceWith(title);
-}
 
 /** Swap the open modal's contents without the dismiss-and-reopen flicker. */
 export function replaceModalBody(body: HTMLElement): void {

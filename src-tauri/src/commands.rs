@@ -518,6 +518,21 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
 const TRASH_ATTEMPTS: u32 = 6;
 const TRASH_RETRY_STEP: Duration = Duration::from_millis(120);
 
+/// Run a blocking filesystem call away from the main thread.
+///
+/// A `#[tauri::command] fn` runs on the main thread, where a Recycle Bin move
+/// taking a second or two blocks every other command behind it -- including the
+/// `recent_projects` call that redraws the launch screen, which is why deleting
+/// one project used to empty the whole list until it finished.
+async fn off_thread<T: Send + 'static>(
+    path: PathBuf,
+    work: impl FnOnce(&Path) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    tauri::async_runtime::spawn_blocking(move || work(&path))
+        .await
+        .context("a filesystem task did not finish")?
+}
+
 /// Move a path to the Recycle Bin, retrying briefly while something holds it.
 ///
 /// The shell will not move a folder that anything still has an open handle on,
@@ -766,9 +781,9 @@ pub fn restore_recent(app: AppHandle, path: PathBuf, index: usize) {
 /// Returns its place in the recents list, so the undo can put both the folder
 /// and the list entry back.
 #[tauri::command]
-pub fn trash_project(
+pub async fn trash_project(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     path: PathBuf,
 ) -> CmdResult<Option<usize>> {
     if !store::is_project(&path) {
@@ -787,14 +802,18 @@ pub fn trash_project(
         }
     }
 
-    trash_with_retry(&path)?;
+    off_thread(path.clone(), trash_with_retry).await?;
     Ok(forget_recent(app, path))
 }
 
 /// Take a deleted project back out of the Recycle Bin and back into recents.
 #[tauri::command]
-pub fn restore_project(app: AppHandle, path: PathBuf, index: usize) -> CmdResult<PathBuf> {
-    let restored_as = restore(&path)?;
+pub async fn restore_project(
+    app: AppHandle,
+    path: PathBuf,
+    index: usize,
+) -> CmdResult<PathBuf> {
+    let restored_as = off_thread(path.clone(), |path| restore(path)).await?;
     // The old name may have been taken in the meantime, in which case the
     // folder comes back under a different one and the list must follow it.
     let actual = path.with_file_name(restored_as);

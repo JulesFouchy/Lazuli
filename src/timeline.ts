@@ -137,13 +137,10 @@ function entryCard(
 /**
  * The date label. Clicking it flips every date on the page, so the click must
  * not also open the entry.
- *
- * Exported because the entry editor puts the same control in its title bar: a
- * date that switches format everywhere else should not be inert there.
  */
-export function dateToggle(entry: Entry, className = "date-toggle"): HTMLElement {
+function dateToggle(entry: Entry): HTMLElement {
   return el("button", {
-    class: className,
+    class: "date-toggle",
     title: `${formatDateAlternate(entry.journal_date, entry.day_number)} — click to switch every date`,
     text: formatDate(entry.journal_date, entry.day_number),
     onclick: (event: Event) => {

@@ -62,6 +62,9 @@ const state: AppState = {
   newestFirst: localStorage.getItem("journaley.newestFirst") !== "false",
 };
 
+/** The recents list as last read, so redrawing the launch screen is instant. */
+let knownRecents: RecentProject[] | null = null;
+
 // --- rendering -----------------------------------------------------------
 
 function render(): void {
@@ -98,18 +101,26 @@ function launchView(): HTMLElement {
   const list = el("div", { class: "recent" });
   view.append(list);
 
-  void recentProjects().then((recents) => {
-    if (recents.length === 0) {
-      list.replaceWith(
-        el("p", { class: "empty", text: "Nothing opened yet." }),
-      );
-      return;
-    }
-    list.append(
-      ...recents
-        .filter((recent) => !isDeleting(projectKey(recent.path)))
-        .map(recentRow),
+  const paint = (recents: RecentProject[]) => {
+    const rows = recents.filter(
+      (recent) => !isDeleting(projectKey(recent.path)),
     );
+    list.className = rows.length === 0 ? "empty" : "recent";
+    list.replaceChildren(
+      ...(rows.length === 0
+        ? [el("p", { text: "Nothing opened yet." })]
+        : rows.map(recentRow)),
+    );
+  };
+
+  // Painted from the last list before the fresh one is asked for. Reading the
+  // recents is a round trip, and without this every redraw of this screen —
+  // including the one that hides a project being deleted — showed an empty
+  // list for a frame first.
+  if (knownRecents) paint(knownRecents);
+  void recentProjects().then((recents) => {
+    knownRecents = recents;
+    paint(recents);
   });
 
   return view;
@@ -132,11 +143,15 @@ function recentRow(recent: RecentProject): HTMLElement {
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
           {
+            label: "Reveal in Explorer",
+            run: () => void revealItemInDir(recent.path),
+          },
+          {
             label: "Delete",
             danger: true,
-            run: () => void deleteProject(recent),
+            run: () => deleteProject(recent),
           },
-          { label: "Forget", run: () => void forgetProject(recent) },
+          { label: "Forget", run: () => forgetProject(recent) },
         ]),
     },
     recent.cover
@@ -203,26 +218,9 @@ function banner(project: Project): HTMLElement {
       : null,
     el("div", { class: "banner__scrim" }),
     el("div", { class: "banner__hint", text: "Click to change the cover" }),
-    el(
-      "div",
-      { class: "banner__actions" },
-      el("button", {
-        class: "button",
-        text: "Reveal in Explorer",
-        onclick: (event: Event) => {
-          event.stopPropagation();
-          void revealItemInDir(project.root);
-        },
-      }),
-      el("button", {
-        class: "button",
-        text: "Close",
-        onclick: (event: Event) => {
-          event.stopPropagation();
-          void goTo({ project: null, modal: null });
-        },
-      }),
-    ),
+    // No buttons over the cover: Escape and the mouse's Back button leave the
+    // project, and Reveal in Explorer is on the project's own right-click menu
+    // on the launch screen.
     el(
       "div",
       { class: "banner__bar" },
@@ -305,8 +303,8 @@ const editorContext: EditorContext = {
   },
   entry: (id) => state.project?.entries.find((e) => e.id === id) ?? null,
   refresh: () => render(),
-  noteDeletion: (what) => {
-    announceDeletion(what, () => void runUndo());
+  noteDeletion: (what, deleted) => {
+    announceDeletion(what, deleted, () => void runUndo());
   },
 };
 
@@ -370,51 +368,69 @@ function offerUndo(message: string, undo: () => void): void {
  * one than a dialog in front of every delete. The row goes immediately and
  * comes back if the shell refuses the folder.
  */
-async function deleteProject(recent: RecentProject): Promise<void> {
+function deleteProject(recent: RecentProject): void {
   const key = projectKey(recent.path);
   markDeleting(key);
   render();
-  try {
-    const index = await trashProject(recent.path);
-    offerUndo(`Deleted ${recent.name}`, () => {
-      void restoreProject(recent.path, index ?? 0)
+
+  // Started, not awaited: the toast and the empty row both want to be there
+  // before the Recycle Bin has finished thinking about it.
+  const deleted = trashProject(recent.path).then(
+    (index) => index ?? 0,
+    (err) => {
+      toastError(`Could not delete ${recent.name}`, err);
+      return null;
+    },
+  );
+  offerUndo(`Deleted ${recent.name}`, () => {
+    void deleted.then((index) => {
+      if (index === null) return;
+      void restoreProject(recent.path, index)
         .then(render)
         .catch((err) => toastError("Could not undo", err));
     });
-  } catch (err) {
-    toastError(`Could not delete ${recent.name}`, err);
-  } finally {
+  });
+  void deleted.then(() => {
     unmarkDeleting(key);
     render();
-  }
+  });
 }
 
 /** Drop a project from the list, leaving the folder where it is. */
-async function forgetProject(recent: RecentProject): Promise<void> {
+function forgetProject(recent: RecentProject): void {
   const key = projectKey(recent.path);
   markDeleting(key);
   render();
-  try {
-    const index = await forgetRecent(recent.path);
-    offerUndo(`Forgot ${recent.name}`, () => {
-      void restoreRecent(recent.path, index ?? 0)
+
+  const forgotten = forgetRecent(recent.path).then(
+    (index) => index ?? 0,
+    (err) => {
+      toastError(`Could not forget ${recent.name}`, err);
+      return null;
+    },
+  );
+  offerUndo(`Forgot ${recent.name}`, () => {
+    void forgotten.then((index) => {
+      if (index === null) return;
+      void restoreRecent(recent.path, index)
         .then(render)
         .catch((err) => toastError("Could not undo", err));
     });
-  } catch (err) {
-    toastError(`Could not forget ${recent.name}`, err);
-  } finally {
+  });
+  void forgotten.then(() => {
     unmarkDeleting(key);
     render();
-  }
+  });
 }
 
 function projectCreated(project: Project): void {
   // Already open in Rust, so this records the move and closes the dialog
-  // rather than opening the folder a second time.
+  // rather than opening the folder a second time. It replaces the dialog's own
+  // place instead of following it, so Back goes to the launch screen rather
+  // than back into a form whose project already exists.
   state.project = project;
   render();
-  void goTo({ project: project.root, modal: null });
+  void replaceHere({ project: project.root, modal: null });
 }
 
 // --- back and forward ------------------------------------------------------
@@ -469,6 +485,19 @@ async function goTo(place: Place): Promise<void> {
   history.length = cursor + 1;
   history.push(place);
   cursor = history.length - 1;
+  await apply(place);
+}
+
+/**
+ * Go somewhere instead of where we are, rather than after it.
+ *
+ * For a place the one we are on was only ever a step towards: the new-project
+ * dialog is replaced by the project it made, so Back from that project reaches
+ * the launch screen rather than reopening the form that has already been used.
+ */
+async function replaceHere(place: Place): Promise<void> {
+  history[cursor] = place;
+  history.length = cursor + 1;
   await apply(place);
 }
 
@@ -660,7 +689,10 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (isContextMenuOpen()) closeContextMenu();
     else if (isModalOpen()) closeModal();
-    else (document.activeElement as HTMLElement | null)?.blur();
+    // A field that owns its keystrokes is a layer too: Escape gets out of the
+    // project name before it gets out of the project.
+    else if (isEditing()) (document.activeElement as HTMLElement | null)?.blur();
+    else if (state.project) void goTo({ project: null, modal: null });
   }
 });
 

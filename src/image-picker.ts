@@ -19,8 +19,8 @@ export interface PickerOptions {
   onChoose: (filename: string | null) => void;
   /** Called after any change that needs the surrounding view redrawn. */
   onChanged: () => void;
-  /** Offered when the last delete can still be undone. */
-  onDeleted: (filename: string) => void;
+  /** Offered as soon as a delete starts; the promise says whether it stuck. */
+  onDeleted: (filename: string, deleted: Promise<boolean>) => void;
 }
 
 export function renderImagePicker(options: PickerOptions): HTMLElement {
@@ -90,15 +90,19 @@ async function deleteImage(
   const key = imageKey(options.directory, filename);
   markDeleting(key);
   options.onChanged();
-  try {
-    await trashImage(options.entryId, filename);
-    options.onDeleted(filename);
-  } catch (err) {
-    toastError(`Could not delete ${filename}`, err);
-  } finally {
-    unmarkDeleting(key);
-    options.onChanged();
-  }
+
+  const deleted = trashImage(options.entryId, filename).then(
+    () => true,
+    (err) => {
+      toastError(`Could not delete ${filename}`, err);
+      return false;
+    },
+  );
+  // Offered at once, like the thumbnail disappearing at once.
+  options.onDeleted(filename, deleted);
+  await deleted;
+  unmarkDeleting(key);
+  options.onChanged();
 }
 
 /** Accept files dropped onto the zone, and images pasted while it is open. */

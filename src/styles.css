@@ -391,21 +391,6 @@ textarea {
   text-decoration: underline;
 }
 
-.banner__actions {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  gap: 8px;
-  opacity: 0;
-  transition: opacity 140ms;
-}
-
-.banner:hover .banner__actions,
-.banner__actions:focus-within {
-  opacity: 1;
-}
-
 .banner__hint {
   position: absolute;
   top: 16px;
@@ -579,14 +564,6 @@ textarea {
 
 .modal__title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-/* The entry editor's title is the date toggle. It keeps the title's size and
-   weight and takes the toggle's colour and hover, so it reads as the heading
-   it is while still looking like something you can press. */
-.modal__title.date-toggle {
   font-size: 16px;
   font-weight: 600;
 }
