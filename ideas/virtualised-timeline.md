@@ -18,7 +18,7 @@ And plain DOM may well hold up for far longer than expected. Measure before payi
 
 ## How
 
-Render only what is near the viewport, with a spacer above and below sized to the rows that are not mounted. Simplest workable version: measure a card once, assume a uniform height per card plus the known gap heights, and correct as real heights become known.
+Render only what is near the viewport, with a spacer above and below sized to the rows that are not mounted. Simplest workable version: measure a card once, assume a uniform height per card plus the gap height, which is now the same for every gap, and correct as real heights become known.
 
 ## When
 

@@ -6,7 +6,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dates;
@@ -49,9 +49,43 @@ struct OpenProject {
     store: ProjectStore,
     /// What the frontend was last told. The diff baseline.
     snapshot: Project,
-    /// Held so the watcher stays alive; dropped when the project closes.
-    _watcher: ProjectWatcher,
+    /// Held so the watcher stays alive. Taken and stopped by [`Self::close`].
+    watcher: Option<ProjectWatcher>,
     undo: Vec<Trashed>,
+}
+
+impl OpenProject {
+    /// Stop watching, and wait until the watcher has actually stopped.
+    ///
+    /// `Debouncer`'s own `Drop` raises a stop flag and returns without joining
+    /// the thread, so letting the value fall out of scope leaves the folder's
+    /// directory handle open for as long as that thread takes to notice — long
+    /// enough that the folder then cannot be moved to the Recycle Bin at all.
+    /// `stop` joins, which is the difference between a project that can be
+    /// deleted after being opened and one that cannot.
+    fn close(mut self) {
+        let root = self.store.root().to_path_buf();
+        if let Some(mut watcher) = self.watcher.take() {
+            // Unwatch first: stopping the debouncer ends its own thread, but the
+            // directory handle belongs to the watcher underneath it and is only
+            // closed by asking for the path to be dropped.
+            let _ = watcher.unwatch(&root);
+            watcher.stop();
+        }
+    }
+}
+
+/// Close whatever project is open, if any, waiting for its watcher to stop.
+fn close_open(state: &State<AppState>) {
+    let closing = state
+        .open
+        .lock()
+        .expect("project lock was poisoned")
+        .take();
+    // Outside the lock: `stop` blocks, and a rescan may be waiting on it.
+    if let Some(open) = closing {
+        open.close();
+    }
 }
 
 #[derive(Default)]
@@ -133,10 +167,12 @@ fn open_at(app: &AppHandle, state: &State<AppState>, path: PathBuf) -> Result<Pr
     let watcher = watch::watch_project(app.clone(), &path)?;
 
     remember_recent(app, &path);
+    // The project being replaced gets the same orderly shutdown as a close.
+    close_open(state);
     *state.open.lock().expect("project lock was poisoned") = Some(OpenProject {
         store,
         snapshot: snapshot.clone(),
-        _watcher: watcher,
+        watcher: Some(watcher),
         undo: Vec::new(),
     });
     Ok(snapshot)
@@ -144,7 +180,7 @@ fn open_at(app: &AppHandle, state: &State<AppState>, path: PathBuf) -> Result<Pr
 
 #[tauri::command]
 pub fn close_project(state: State<AppState>) {
-    *state.open.lock().expect("project lock was poisoned") = None;
+    close_open(&state);
 }
 
 /// Re-read the project and tell the frontend only if something actually
@@ -512,11 +548,14 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
     })?)
 }
 
-/// How many times a Recycle Bin move is tried before giving up, and the step
-/// between tries. The delay grows with each attempt, so the worst case is under
-/// two seconds.
-const TRASH_ATTEMPTS: u32 = 6;
-const TRASH_RETRY_STEP: Duration = Duration::from_millis(120);
+/// How long a Recycle Bin move keeps retrying, and the gap between tries.
+///
+/// Long enough to ride out something letting go of the folder, short enough
+/// that a folder held for good reports it promptly: the row is already gone
+/// from the screen and comes back when this gives up, so a long window would
+/// mean a long silence before the row reappeared.
+const TRASH_RETRY_WINDOW: Duration = Duration::from_secs(2);
+const TRASH_RETRY_STEP: Duration = Duration::from_millis(150);
 
 /// Run a blocking filesystem call away from the main thread.
 ///
@@ -533,27 +572,35 @@ async fn off_thread<T: Send + 'static>(
         .context("a filesystem task did not finish")?
 }
 
-/// Move a path to the Recycle Bin, retrying briefly while something holds it.
+/// Move a path to the Recycle Bin, retrying while something still holds it.
 ///
-/// The shell will not move a folder that anything still has an open handle on,
-/// and reports that as "some operations were aborted" rather than as a lock.
-/// Our own watcher is one such holder: dropping it tells its thread to close
-/// the directory handle, which has not happened by the time the next line runs.
-/// Editors and search indexers watching the same folder do the same from
-/// outside, and nothing here can make them let go. Retrying for under a second
-/// turns both into a pause nobody sees.
+/// The shell will not move a folder anything has an open handle on, and reports
+/// that as "some operations were aborted" rather than as a lock, so the message
+/// says nothing useful on its own.
+///
+/// Our own watcher is the usual holder. Dropping it asks its thread to close
+/// the directory handle, and that thread takes its time: the close has not
+/// happened when the next line runs, nor a second later. Editors and search
+/// indexers watching the same folder hold it the same way from outside, and
+/// nothing here can make them let go — hence a window rather than a fixed
+/// number of tries, and a message that says what to do when it runs out.
 fn trash_with_retry(path: &Path) -> Result<()> {
-    for attempt in 1..=TRASH_ATTEMPTS {
-        match trash::delete(path) {
-            Ok(()) => return Ok(()),
-            Err(err) if attempt == TRASH_ATTEMPTS => {
-                return Err(anyhow!(err))
-                    .with_context(|| format!("moving {} to the Recycle Bin", path.display()));
-            }
-            Err(_) => std::thread::sleep(TRASH_RETRY_STEP * attempt),
+    let deadline = Instant::now() + TRASH_RETRY_WINDOW;
+    loop {
+        let Err(err) = trash::delete(path) else {
+            return Ok(());
+        };
+        if Instant::now() >= deadline {
+            return Err(anyhow!(err)).with_context(|| {
+                format!(
+                    "{} is still open in another program, so it cannot be moved \
+                     to the Recycle Bin. Close anything using it and try again.",
+                    path.display()
+                )
+            });
         }
+        std::thread::sleep(TRASH_RETRY_STEP);
     }
-    unreachable!("the loop returns on the last attempt")
 }
 
 /// Pull one item back out of the Recycle Bin, returning the name it landed
@@ -790,16 +837,17 @@ pub async fn trash_project(
         return Err(anyhow!("{} is not a Journaley project", path.display()).into());
     }
 
-    // Closing the project releases its watcher. Windows will not move a folder
-    // that something still holds a handle on, so this is required, not tidiness.
+    // Windows will not move a folder anything holds a handle on, and the
+    // watcher holds one until it has been stopped and joined. This is required,
+    // not tidiness.
+    if state
+        .open
+        .lock()
+        .expect("project lock was poisoned")
+        .as_ref()
+        .is_some_and(|open| open.store.root() == path)
     {
-        let mut guard = state.open.lock().expect("project lock was poisoned");
-        if guard
-            .as_ref()
-            .is_some_and(|open| open.store.root() == path)
-        {
-            *guard = None;
-        }
+        close_open(&state);
     }
 
     off_thread(path.clone(), trash_with_retry).await?;

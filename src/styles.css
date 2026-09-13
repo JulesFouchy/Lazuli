@@ -516,15 +516,14 @@ textarea {
   font-family: var(--mono);
 }
 
+/* One height for every gap: the label says how long it was, so the rule does
+   not have to, and two connectors can be compared without measuring them. */
 .gap__rule {
   width: 0;
+  height: 34px;
   border-left: 2px dashed var(--line-strong);
 }
 
-.gap--tight {
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
 
 .stack {
   height: 10px;

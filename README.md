@@ -1,6 +1,6 @@
 # Journaley
 
-A local-first journal for a long project. One picture and one sentence for each day you worked on it, shown as a timeline where the gaps between entries are as visible as the entries themselves — and exportable as a one-second-per-entry summary video.
+A local-first journal for a long project. One picture and one sentence for each day you worked on it, shown as a timeline where the gaps between entries are named as plainly as the entries themselves — and exportable as a one-second-per-entry summary video.
 
 ## Local-first
 

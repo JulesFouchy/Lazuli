@@ -51,6 +51,9 @@ export function openModal(options: ModalOptions): void {
     el(
       "div",
       { class: "modal", role: "dialog", "aria-modal": "true" },
+      // A header is a title and nothing else. There is no Close button on any
+      // dialog: Escape, the mouse's Back button and a click on the backdrop
+      // all dismiss, and a button repeating that only took up the corner.
       options.title === null
         ? null
         : el(
@@ -59,12 +62,6 @@ export function openModal(options: ModalOptions): void {
             typeof options.title === "string"
               ? el("h2", { class: "modal__title", text: options.title })
               : options.title,
-            el("span", { class: "card__grow" }),
-            el("button", {
-              class: "button button--ghost",
-              text: "Close",
-              onclick: () => closeModal(),
-            }),
           ),
       el("div", { class: "modal__body" }, options.body),
       options.foot ?? null,

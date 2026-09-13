@@ -9,6 +9,10 @@
     "dialog:allow-save",
     "dialog:allow-confirm",
     "dialog:allow-message",
-    "opener:allow-reveal-item-in-dir"
+    {
+      "identifier": "opener:allow-open-path",
+      "comment": "Opening a project folder in Explorer. A project can live anywhere the user keeps one, so the scope cannot be narrower than the whole filesystem; the only paths passed are ones already in the recents list.",
+      "allow": [{ "path": "**" }]
+    }
   ]
 }

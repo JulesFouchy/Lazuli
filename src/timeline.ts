@@ -13,10 +13,6 @@ import { openContextMenu } from "./context-menu";
 import { entryKey, isDeleting } from "./pending";
 import { el } from "./ui";
 
-/** Pixels of dashed rule per elapsed day, and the ceiling on that. */
-const GAP_BASE = 22;
-const GAP_PER_DAY = 6;
-const GAP_MAX = 200;
 
 export interface TimelineHandlers {
   openEntry: (entry: Entry) => void;
@@ -69,15 +65,20 @@ function stackSpacer(): HTMLElement {
   return el("div", { class: "stack" });
 }
 
+/**
+ * The dashed run between two entries, always the same height and always
+ * labelled.
+ *
+ * The length used to grow with the gap, so a long pause took up a lot of the
+ * page. The label carries that now — and reads exactly the same for one day as
+ * for a hundred, which is what makes two connectors comparable at a glance.
+ */
 function gapConnector(days: number): HTMLElement {
-  const height = Math.min(GAP_BASE + GAP_PER_DAY * days, GAP_MAX);
   return el(
     "div",
-    { class: days === 1 ? "gap gap--tight" : "gap" },
-    el("div", { class: "gap__rule", style: `height: ${height}px` }),
-    // A single day between entries is the normal case and needs no label; the
-    // small dash speaks for itself.
-    days === 1 ? null : el("span", { text: formatGap(days) }),
+    { class: "gap" },
+    el("div", { class: "gap__rule" }),
+    el("span", { text: formatGap(days) }),
   );
 }
 

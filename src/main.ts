@@ -3,7 +3,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 import type { Entry, Project, RecentProject } from "./api";
 import {
@@ -102,9 +102,20 @@ function launchView(): HTMLElement {
   view.append(list);
 
   const paint = (recents: RecentProject[]) => {
+    // A project put back by an undo stops needing special treatment as soon as
+    // the list it belongs to has it again.
+    for (const path of [...reappearing.keys()]) {
+      if (recents.some((recent) => recent.path === path)) {
+        reappearing.delete(path);
+      }
+    }
+
     const rows = recents.filter(
       (recent) => !isDeleting(projectKey(recent.path)),
     );
+    for (const { at, recent } of reappearing.values()) {
+      rows.splice(Math.min(at, rows.length), 0, recent);
+    }
     list.className = rows.length === 0 ? "empty" : "recent";
     list.replaceChildren(
       ...(rows.length === 0
@@ -118,10 +129,14 @@ function launchView(): HTMLElement {
   // including the one that hides a project being deleted — showed an empty
   // list for a frame first.
   if (knownRecents) paint(knownRecents);
-  void recentProjects().then((recents) => {
-    knownRecents = recents;
-    paint(recents);
-  });
+  void recentProjects()
+    .then((recents) => {
+      knownRecents = recents;
+      paint(recents);
+    })
+    // Without this a failure leaves the screen looking like a first run. It
+    // happens: the window can be up and asking before the backend is ready.
+    .catch((err) => toastError("Could not read the recent projects", err));
 
   return view;
 }
@@ -143,8 +158,13 @@ function recentRow(recent: RecentProject): HTMLElement {
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
           {
-            label: "Reveal in Explorer",
-            run: () => void revealItemInDir(recent.path),
+            label: "Open in Explorer",
+            // The folder itself, not the folder selected in its parent: what
+            // you want from here is to be inside it.
+            run: () =>
+              void openPath(recent.path).catch((err) =>
+                toastError("Could not open that folder", err),
+              ),
           },
           {
             label: "Delete",
@@ -362,6 +382,35 @@ function offerUndo(message: string, undo: () => void): void {
 }
 
 /**
+ * Projects an undo has asked back, shown until the list itself has them again.
+ *
+ * The mirror of `pending.ts`: that one hides rows the backend still has, this
+ * one shows rows it does not have yet. Undo can be pressed before the delete it
+ * undoes has even reached the Recycle Bin, and the row should be back the
+ * moment it is pressed rather than after two round trips.
+ */
+const reappearing = new Map<string, { at: number; recent: RecentProject }>();
+
+/** Put a row back on screen at once, and do the real restore behind it. */
+function undoRemoval(
+  recent: RecentProject,
+  at: number,
+  key: string,
+  removal: Promise<number | null>,
+  restore: (index: number) => Promise<unknown>,
+): void {
+  reappearing.set(recent.path, { at, recent });
+  unmarkDeleting(key);
+  render();
+  void removal
+    .then((index) => (index === null ? null : restore(index)))
+    .catch((err) => toastError("Could not undo", err))
+    // The row stays on screen throughout: `paint` drops it from `reappearing`
+    // only once a fresh list actually contains it again.
+    .finally(render);
+}
+
+/**
  * Move a project folder to the Recycle Bin, list entry and all.
  *
  * Nothing is asked first: Undo is the answer to a mis-click, and it is a better
@@ -370,26 +419,27 @@ function offerUndo(message: string, undo: () => void): void {
  */
 function deleteProject(recent: RecentProject): void {
   const key = projectKey(recent.path);
+  const at = Math.max(
+    knownRecents?.findIndex((row) => row.path === recent.path) ?? 0,
+    0,
+  );
   markDeleting(key);
   render();
 
   // Started, not awaited: the toast and the empty row both want to be there
   // before the Recycle Bin has finished thinking about it.
   const deleted = trashProject(recent.path).then(
-    (index) => index ?? 0,
+    (index) => index ?? at,
     (err) => {
       toastError(`Could not delete ${recent.name}`, err);
       return null;
     },
   );
-  offerUndo(`Deleted ${recent.name}`, () => {
-    void deleted.then((index) => {
-      if (index === null) return;
-      void restoreProject(recent.path, index)
-        .then(render)
-        .catch((err) => toastError("Could not undo", err));
-    });
-  });
+  offerUndo(`Deleted ${recent.name}`, () =>
+    undoRemoval(recent, at, key, deleted, (index) =>
+      restoreProject(recent.path, index),
+    ),
+  );
   void deleted.then(() => {
     unmarkDeleting(key);
     render();
@@ -399,24 +449,25 @@ function deleteProject(recent: RecentProject): void {
 /** Drop a project from the list, leaving the folder where it is. */
 function forgetProject(recent: RecentProject): void {
   const key = projectKey(recent.path);
+  const at = Math.max(
+    knownRecents?.findIndex((row) => row.path === recent.path) ?? 0,
+    0,
+  );
   markDeleting(key);
   render();
 
   const forgotten = forgetRecent(recent.path).then(
-    (index) => index ?? 0,
+    (index) => index ?? at,
     (err) => {
       toastError(`Could not forget ${recent.name}`, err);
       return null;
     },
   );
-  offerUndo(`Forgot ${recent.name}`, () => {
-    void forgotten.then((index) => {
-      if (index === null) return;
-      void restoreRecent(recent.path, index)
-        .then(render)
-        .catch((err) => toastError("Could not undo", err));
-    });
-  });
+  offerUndo(`Forgot ${recent.name}`, () =>
+    undoRemoval(recent, at, key, forgotten, (index) =>
+      restoreRecent(recent.path, index),
+    ),
+  );
   void forgotten.then(() => {
     unmarkDeleting(key);
     render();
