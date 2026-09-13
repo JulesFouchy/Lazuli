@@ -33,3 +33,5 @@ use Coollab to produce a small standalone app that exports the videos for journa
   - but for now we can just have a coollab project, and do the export entirely from coollab
 - the event graph needs to be able to export a video. 
 - how do we chain all images one after the other ? create a timelnie ? but the graph has to create it programmatically from the list of entries
+
+in entry card, the sentence should be above the image?
