@@ -78,8 +78,21 @@ export const closeProject = () => invoke<void>("close_project");
 export const recentProjects = () =>
   invoke<RecentProject[]>("recent_projects");
 
+/** Drop a project from the recents list, returning where in it the project was. */
 export const forgetRecent = (path: string) =>
-  invoke<void>("forget_recent", { path });
+  invoke<number | null>("forget_recent", { path });
+
+/** Put a forgotten project back at the position it held. */
+export const restoreRecent = (path: string, index: number) =>
+  invoke<void>("restore_recent", { path, index });
+
+/** Move a project folder to the Recycle Bin, returning its place in recents. */
+export const trashProject = (path: string) =>
+  invoke<number | null>("trash_project", { path });
+
+/** Take a deleted project back, returning the path it came back at. */
+export const restoreProject = (path: string, index: number) =>
+  invoke<string>("restore_project", { path, index });
 
 export const setProjectName = (name: string) =>
   invoke<void>("set_project_name", { name });

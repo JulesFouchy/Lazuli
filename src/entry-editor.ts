@@ -55,22 +55,16 @@ export function openEntryEditor(id: string, context: EditorContext): void {
   openModal({
     title: formatDate(entry.journal_date, entry.day_number),
     body: built.node,
-    foot: el(
-      "div",
-      { class: "modal__foot" },
-      el("span", { class: "card__grow" }),
-      el("button", {
-        class: "button button--danger",
-        text: "Delete entry",
-        onclick: () => confirmDeleteEntry(id, context),
-      }),
-    ),
+    // No delete button: it lives on the card's right-click menu, where it is
+    // out of reach of someone who only came here to write a sentence.
     onClose: () => {
       editor = null;
     },
   });
   // After `openModal`, which dismisses whatever was there and so clears this.
   editor = built.fields;
+  // Straight into the note: writing it is the reason the editor is open.
+  built.fields.textarea.focus();
 }
 
 /**
@@ -139,15 +133,25 @@ function editorBody(
   textarea.value = entry.text;
 
   let timer: number | undefined;
+  const saveNote = async () => {
+    window.clearTimeout(timer);
+    try {
+      await updateEntry(id, { text: textarea.value });
+    } catch (err) {
+      toastError("Could not save the note", err);
+    }
+  };
   textarea.addEventListener("input", () => {
     window.clearTimeout(timer);
-    timer = window.setTimeout(async () => {
-      try {
-        await updateEntry(id, { text: textarea.value });
-      } catch (err) {
-        toastError("Could not save the note", err);
-      }
-    }, SAVE_DEBOUNCE_MS);
+    timer = window.setTimeout(() => void saveNote(), SAVE_DEBOUNCE_MS);
+  });
+  textarea.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    // An entry is a sentence, so Enter means "done" and Shift+Enter is the
+    // escape hatch for the rare multi-line one. Write before closing: the
+    // debounce would otherwise still be holding the last few keystrokes.
+    event.preventDefault();
+    void saveNote().then(() => closeModal());
   });
 
   const imagesLabel = el("label", { text: `Images (${entry.images.length})` });

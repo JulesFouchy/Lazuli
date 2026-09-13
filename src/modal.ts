@@ -26,13 +26,21 @@ export function onModalDismissed(listener: () => void): void {
 export function openModal(options: ModalOptions): void {
   closeModal({ replacing: true });
 
+  // A click's target is the common ancestor of where it went down and where it
+  // came up, so dragging a text selection out of the dialog and releasing on
+  // the backdrop reports the backdrop. Requiring the press to have started
+  // there too is what tells a dismissal from a selection that overshot.
+  let pressedBackdrop = false;
+
   const overlay = el(
     "div",
     {
       class: "overlay",
+      onpointerdown: (event: Event) => {
+        pressedBackdrop = event.target === overlay;
+      },
       onclick: (event: Event) => {
-        // Only a click on the backdrop itself dismisses.
-        if (event.target === overlay) closeModal();
+        if (event.target === overlay && pressedBackdrop) closeModal();
       },
     },
     el(

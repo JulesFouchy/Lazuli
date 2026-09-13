@@ -30,7 +30,9 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
   const nameInput = el("input", {
     class: "input",
     type: "text",
-    placeholder: "Woodworking bench",
+    // A label, not an example: the example read as a suggestion of what kind
+    // of thing a project is supposed to be.
+    placeholder: "Project name",
     spellcheck: "false",
   }) as HTMLInputElement;
 

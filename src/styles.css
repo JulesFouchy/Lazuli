@@ -625,7 +625,10 @@ textarea {
   aspect-ratio: 1;
   border-radius: 8px;
   overflow: hidden;
-  border: 2px solid transparent;
+  /* On every thumb, transparent until chosen, so nothing shifts when the
+     choice moves. Three pixels because the outline is now the only thing
+     saying which one is chosen. */
+  border: 3px solid transparent;
   background: var(--bg-sunken);
   cursor: pointer;
   padding: 0;
@@ -640,32 +643,6 @@ textarea {
 
 .thumb--chosen {
   border-color: var(--accent);
-}
-
-.thumb__delete {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(10, 10, 12, 0.78);
-  color: var(--text);
-  display: grid;
-  place-items: center;
-  font-size: 13px;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 120ms, background 120ms;
-}
-
-.thumb:hover .thumb__delete,
-.thumb__delete:focus {
-  opacity: 1;
-}
-
-.thumb__delete:hover {
-  background: var(--danger);
 }
 
 .hint {

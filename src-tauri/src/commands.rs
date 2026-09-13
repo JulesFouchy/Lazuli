@@ -703,13 +703,75 @@ pub struct RecentProject {
     pub cover: Option<String>,
 }
 
+/// Drop a project from the recents list, returning where it was.
+///
+/// The index comes back so undoing puts it where it was rather than at the
+/// top: the list is ordered by when things were opened, and forgetting one by
+/// mistake should not reorder it.
 #[tauri::command]
-pub fn forget_recent(app: AppHandle, path: PathBuf) {
-    let remaining: Vec<PathBuf> = read_recent(&app)
-        .into_iter()
-        .filter(|candidate| candidate != &path)
-        .collect();
-    write_recent(&app, &remaining);
+pub fn forget_recent(app: AppHandle, path: PathBuf) -> Option<usize> {
+    let paths = read_recent(&app);
+    let was_at = paths.iter().position(|candidate| candidate == &path);
+    if was_at.is_some() {
+        let remaining: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|candidate| candidate != &path)
+            .collect();
+        write_recent(&app, &remaining);
+    }
+    was_at
+}
+
+/// Put a forgotten project back at the position it held.
+#[tauri::command]
+pub fn restore_recent(app: AppHandle, path: PathBuf, index: usize) {
+    let mut paths = read_recent(&app);
+    paths.retain(|candidate| candidate != &path);
+    paths.insert(index.min(paths.len()), path);
+    paths.truncate(MAX_RECENT);
+    write_recent(&app, &paths);
+}
+
+/// Move a whole project folder to the Recycle Bin.
+///
+/// Returns its place in the recents list, so the undo can put both the folder
+/// and the list entry back.
+#[tauri::command]
+pub fn trash_project(
+    app: AppHandle,
+    state: State<AppState>,
+    path: PathBuf,
+) -> CmdResult<Option<usize>> {
+    if !store::is_project(&path) {
+        return Err(anyhow!("{} is not a Journaley project", path.display()).into());
+    }
+
+    // Closing the project releases its watcher. Windows will not move a folder
+    // that something still holds a handle on, so this is required, not tidiness.
+    {
+        let mut guard = state.open.lock().expect("project lock was poisoned");
+        if guard
+            .as_ref()
+            .is_some_and(|open| open.store.root() == path)
+        {
+            *guard = None;
+        }
+    }
+
+    trash::delete(&path)
+        .with_context(|| format!("moving {} to the Recycle Bin", path.display()))?;
+    Ok(forget_recent(app, path))
+}
+
+/// Take a deleted project back out of the Recycle Bin and back into recents.
+#[tauri::command]
+pub fn restore_project(app: AppHandle, path: PathBuf, index: usize) -> CmdResult<PathBuf> {
+    let restored_as = restore(&path)?;
+    // The old name may have been taken in the meantime, in which case the
+    // folder comes back under a different one and the list must follow it.
+    let actual = path.with_file_name(restored_as);
+    restore_recent(app, actual.clone(), index);
+    Ok(actual)
 }
 
 const RECENT_FILE: &str = "recent.json";

@@ -13,8 +13,11 @@ import {
   forgetRecent,
   openProject,
   recentProjects,
+  restoreProject,
+  restoreRecent,
   setProjectName,
   startupProject,
+  trashProject,
   undoDelete,
 } from "./api";
 import {
@@ -110,10 +113,10 @@ function launchView(): HTMLElement {
 /**
  * One project on the launch screen, behind its own cover.
  *
- * The whole row is the button. Forget is on the right-click menu rather than
- * beside the name: it is rare, and a destructive control sitting permanently
- * next to the thing you actually came to click is a control you eventually hit
- * by accident.
+ * The whole row is the button. Delete and Forget are on the right-click menu
+ * rather than beside the name: both are rare, and a destructive control sitting
+ * permanently next to the thing you actually came to click is one you
+ * eventually hit by accident.
  */
 function recentRow(recent: RecentProject): HTMLElement {
   return el(
@@ -124,9 +127,11 @@ function recentRow(recent: RecentProject): HTMLElement {
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
           {
-            label: "Forget this project",
-            run: () => void forgetRecent(recent.path).then(render),
+            label: "Delete",
+            danger: true,
+            run: () => void deleteProject(recent),
           },
+          { label: "Forget", run: () => void forgetProject(recent) },
         ]),
     },
     recent.cover
@@ -331,6 +336,68 @@ function openRecent(path: string): Promise<void> {
   return goTo({ project: path, modal: null });
 }
 
+// --- deleting and forgetting a project -------------------------------------
+//
+// Both are undone from the toast rather than from the Rust undo stack, which
+// belongs to an open project and so is not reachable from the launch screen.
+// `launchUndo` is what makes Ctrl+Z work here too.
+
+/** The last thing done on the launch screen that can still be taken back. */
+let launchUndo: (() => void) | null = null;
+
+function offerUndo(message: string, undo: () => void): void {
+  launchUndo = undo;
+  toast(message, {
+    action: {
+      label: "Undo",
+      run: () => {
+        launchUndo = null;
+        undo();
+      },
+    },
+  });
+}
+
+/** Move a project folder to the Recycle Bin, list entry and all. */
+async function deleteProject(recent: RecentProject): Promise<void> {
+  // The one action here that discards a folder of work rather than a row in a
+  // list, so it asks first. Forget does not.
+  if (
+    !window.confirm(
+      `Move ${recent.name} to the Recycle Bin? The whole project folder goes, ` +
+        `and Undo brings it back.`,
+    )
+  ) {
+    return;
+  }
+  try {
+    const index = await trashProject(recent.path);
+    render();
+    offerUndo(`Deleted ${recent.name}`, () => {
+      void restoreProject(recent.path, index ?? 0)
+        .then(render)
+        .catch((err) => toastError("Could not undo", err));
+    });
+  } catch (err) {
+    toastError(`Could not delete ${recent.name}`, err);
+  }
+}
+
+/** Drop a project from the list, leaving the folder where it is. */
+async function forgetProject(recent: RecentProject): Promise<void> {
+  try {
+    const index = await forgetRecent(recent.path);
+    render();
+    offerUndo(`Forgot ${recent.name}`, () => {
+      void restoreRecent(recent.path, index ?? 0)
+        .then(render)
+        .catch((err) => toastError("Could not undo", err));
+    });
+  } catch (err) {
+    toastError(`Could not forget ${recent.name}`, err);
+  }
+}
+
 function projectCreated(project: Project): void {
   // Already open in Rust, so this records the move and closes the dialog
   // rather than opening the folder a second time.
@@ -499,6 +566,16 @@ async function addEntry(): Promise<void> {
 }
 
 async function runUndo(): Promise<void> {
+  // The Rust undo stack belongs to the open project, so on the launch screen
+  // the only thing to take back is a project delete or forget.
+  if (!state.project) {
+    const undo = launchUndo;
+    launchUndo = null;
+    if (undo) undo();
+    else toast("Nothing to undo.");
+    return;
+  }
+
   try {
     const outcome = await undoDelete();
     if (!outcome) {

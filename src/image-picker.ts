@@ -5,6 +5,7 @@
 // attempts that were kept. Nothing is removed except by an explicit delete.
 
 import { assetUrl, importImageBytes, importImages, trashImage } from "./api";
+import { openContextMenu } from "./context-menu";
 import { el, toast, toastError } from "./ui";
 
 export interface PickerOptions {
@@ -53,6 +54,17 @@ function thumbnail(filename: string, options: PickerOptions): HTMLElement {
       class: isChosen ? "thumb thumb--chosen" : "thumb",
       title: isChosen ? `${filename} (chosen)` : `${filename} — click to choose`,
       onclick: () => options.onChoose(isChosen ? null : filename),
+      // Delete is on the menu rather than on a cross in the corner: the cross
+      // sat on top of the picture it was about, a few pixels from the click
+      // that chooses it.
+      oncontextmenu: (event: Event) =>
+        openContextMenu(event as MouseEvent, [
+          {
+            label: "Delete image",
+            danger: true,
+            run: () => void deleteImage(filename, options),
+          },
+        ]),
     },
     el("img", {
       src: assetUrl(options.directory, filename),
@@ -62,24 +74,20 @@ function thumbnail(filename: string, options: PickerOptions): HTMLElement {
     }),
     // No badge: the accent outline already says which one is chosen, and a
     // label over the corner of a small square hides part of the picture.
-    el("span", {
-      class: "thumb__delete",
-      role: "button",
-      title: "Move to Recycle Bin",
-      text: "×",
-      onclick: async (event: Event) => {
-        // Otherwise the click would also select the image being deleted.
-        event.stopPropagation();
-        try {
-          await trashImage(options.entryId, filename);
-          options.onDeleted(filename);
-          options.onChanged();
-        } catch (err) {
-          toastError(`Could not delete ${filename}`, err);
-        }
-      },
-    }),
   );
+}
+
+async function deleteImage(
+  filename: string,
+  options: PickerOptions,
+): Promise<void> {
+  try {
+    await trashImage(options.entryId, filename);
+    options.onDeleted(filename);
+    options.onChanged();
+  } catch (err) {
+    toastError(`Could not delete ${filename}`, err);
+  }
 }
 
 /** Accept files dropped onto the zone, and images pasted while it is open. */
