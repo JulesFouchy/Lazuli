@@ -4,6 +4,34 @@ import { el } from "./ui";
 
 let current: { overlay: HTMLElement; onClose?: () => void } | null = null;
 
+/**
+ * Stop the page behind the dialog scrolling, and let it again afterwards.
+ *
+ * The backdrop covers the timeline but does not catch the wheel, so scrolling
+ * over a dialog used to move the page underneath it — and left you somewhere
+ * else entirely when the dialog closed. The dialog itself still scrolls: it is
+ * `max-height: 100%; overflow: auto`, so its own contents are unaffected.
+ *
+ * Removing the scrollbar takes its gutter with it and the page jumps sideways,
+ * so the same width goes back as padding while the lock is on.
+ */
+let unlockedOverflow: string | null = null;
+
+function lockPageScroll(): void {
+  if (unlockedOverflow !== null) return;
+  const gutter = window.innerWidth - document.documentElement.clientWidth;
+  unlockedOverflow = document.documentElement.style.overflow;
+  document.documentElement.style.overflow = "hidden";
+  if (gutter > 0) document.body.style.paddingRight = `${gutter}px`;
+}
+
+function unlockPageScroll(): void {
+  if (unlockedOverflow === null) return;
+  document.documentElement.style.overflow = unlockedOverflow;
+  document.body.style.paddingRight = "";
+  unlockedOverflow = null;
+}
+
 export interface ModalOptions {
   /**
    * Plain text, a node when the title is itself a control, or null for a
@@ -70,6 +98,7 @@ export function openModal(options: ModalOptions): void {
 
   document.body.append(overlay);
   current = { overlay, onClose: options.onClose };
+  lockPageScroll();
 }
 
 export function closeModal(options: { replacing?: boolean } = {}): void {
@@ -78,6 +107,9 @@ export function closeModal(options: { replacing?: boolean } = {}): void {
   // Clear first: `onClose` may itself want to open another modal.
   current = null;
   overlay.remove();
+  // One dialog replacing another keeps the lock: releasing it between the two
+  // would put the scrollbar back for a frame and shift the page sideways.
+  if (!options.replacing) unlockPageScroll();
   onClose?.();
   if (!options.replacing) onDismissed?.();
 }
