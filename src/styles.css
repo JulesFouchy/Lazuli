@@ -777,10 +777,12 @@ textarea {
 
 /* The other dialogs are panels laid over a page you can still read; this one
    is a picture, and the page behind it is competition. So its backdrop goes
-   near-black in both themes, and its margins are thinner. */
+   near-black in both themes. Its margin is the viewer's own (below), not the
+   overlay's: the overlay does not take part in dragging, and a magnified
+   picture has to be draggable from every pixel of the window. */
 .overlay:has(.modal--viewer) {
   background: rgba(0, 0, 0, 0.88);
-  padding: 24px;
+  padding: 0;
 }
 
 /* Not a panel over the page but the whole of it: the picture gets every pixel
@@ -809,6 +811,31 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* The margin the other dialogs get from the overlay, thinner, and inside the
+     viewer so that a drag can start there: a pointer pinned against the edge
+     of the screen is over this margin, and has to be able to take hold. */
+  padding: 24px;
+  /* A drag is a drag, never a selection. Left to the browser, a drag across
+     the middle of the picture selects the image, and the next press on a
+     selected image starts a native drag-and-drop of it, which cancels the
+     pointer on its first move: the picture was stuck until something cleared
+     the selection. The note's text is not selectable here either, which is the
+     price; it can be copied from the editor. */
+  user-select: none;
+}
+
+/* Magnified, the whole viewer is a handle on the picture: the drag that shows
+   its far side runs the pointer off the stage, into the margin or the caption,
+   and the hand that lets go there has to be able to take hold again where it
+   is. */
+.viewer--zoomed,
+.viewer--zoomed .viewer__stage {
+  cursor: grab;
+}
+
+.viewer--zoomed:active,
+.viewer--zoomed:active .viewer__stage {
+  cursor: grabbing;
 }
 
 /* The picture takes whatever is left once the caption has its line, and keeps
@@ -824,14 +851,6 @@ textarea {
   cursor: zoom-in;
 }
 
-.viewer__stage--zoomed {
-  cursor: grab;
-}
-
-.viewer__stage--zoomed:active {
-  cursor: grabbing;
-}
-
 /* Fills the stage rather than only shrinking to it: a small picture is exactly
    the one worth blowing up, and `contain` keeps its proportions either way.
    No ring here — `contain` letterboxes inside the element, so a ring would
@@ -842,7 +861,7 @@ textarea {
   height: 100%;
   object-fit: contain;
   /* The element covers its own letterbox bars, so it cannot be the thing that
-     decides what a click meant. Every pointer event goes to the stage, which
+     decides what a click meant. Every pointer event goes to the viewer, which
      works out from the picture's real rectangle whether the click was on it. */
   pointer-events: none;
 }

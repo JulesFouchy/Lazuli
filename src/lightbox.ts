@@ -40,6 +40,8 @@ export interface ViewerContext {
 interface OpenViewer {
   id: string;
   context: ViewerContext;
+  /** The whole of the dialog: stage, caption and the margin around both. */
+  body: HTMLElement;
   stage: HTMLElement;
   caption: HTMLElement;
   /** The picture, or null for an entry that has none. */
@@ -61,7 +63,7 @@ export function openLightbox(id: string, context: ViewerContext): void {
   const caption = el("div", { class: "viewer__caption" });
   const body = el("div", { class: "viewer" }, stage, caption);
 
-  bindPointer(stage);
+  bindPointer(body);
 
   openModal({
     // No header: the date is in the caption, under the picture it belongs to.
@@ -78,6 +80,7 @@ export function openLightbox(id: string, context: ViewerContext): void {
   viewer = {
     id,
     context,
+    body,
     stage,
     caption,
     image: null,
@@ -245,13 +248,13 @@ function clampPan(): void {
 function applyTransform(): void {
   if (!viewer) return;
   clampPan();
-  const { image, stage, zoomed, panX, panY } = viewer;
+  const { image, body, zoomed, panX, panY } = viewer;
   if (image) {
     image.style.transform = zoomed
       ? `translate(${panX}px, ${panY}px) scale(${ZOOM})`
       : "";
   }
-  stage.classList.toggle("viewer__stage--zoomed", zoomed);
+  body.classList.toggle("viewer--zoomed", zoomed);
 }
 
 /** Whether a point in the window is on the picture rather than beside it. */
@@ -275,41 +278,65 @@ function onPicture(clientX: number, clientY: number): boolean {
 }
 
 /**
- * Clicking and dragging on the stage.
+ * Clicking and dragging in the viewer.
  *
- * A click on the picture magnifies it around the point clicked, and a click on
- * the magnified picture puts it back. A click on the bare stage beside a
- * picture that does not fill it dismisses, which is what a click there would do
- * over any other dialog.
+ * A click on the picture magnifies it around the point clicked, and a click
+ * anywhere while it is magnified puts it back. A click beside a picture that
+ * does not fill the stage — on the bare stage or in the margin — dismisses,
+ * which is what a click there would do over any other dialog. The caption is
+ * exempt from all three: its date is a toggle with a click of its own, and a
+ * click on the note is a click on nothing.
  *
  * A drag moves the picture pixel for pixel with the pointer, so it stays under
- * the hand that is moving it.
+ * the hand that is moving it. It is bound to the whole viewer, margin and
+ * caption included, and not to the stage: at 2.5x the far side of the picture
+ * is further away than the edge of the screen, so the drag that reaches it
+ * runs the pointer into that edge with the picture still short of its corner,
+ * and the hand has to let go and take hold again where it is. Where it is, is
+ * wherever the screen's edge falls across the window — the margin or the
+ * caption as often as the stage — and a press there that did nothing was the
+ * picture being stuck in a corner. A drag that starts on the caption's date
+ * must not flip it on release, hence the swallowed click.
  *
- * The way a drag used to get stuck was a release the stage never saw: let go
- * outside the window and no `pointerup` arrives, so the drag stayed live and
- * the picture went on following a pointer with no button held. Hence the check
- * on `buttons` and the two backstops at the bottom of this file.
+ * Two other ways a drag has got stuck. A drag across the middle of the picture
+ * used to select the image, silently, and the browser answers a press on a
+ * selected image by dragging the image itself: `pointercancel` on the first
+ * move, and the picture stayed put until something cleared the selection —
+ * that one is the stylesheet's `user-select: none` and the `dragstart` handler.
+ * And a release the viewer never saw: let go outside the window and no
+ * `pointerup` arrives, so the drag stayed live and the picture went on
+ * following a pointer with no button held — hence the check on `buttons` and
+ * the two backstops at the bottom of this file.
  */
 let dragging = false;
 let lastX = 0;
 let lastY = 0;
 let travelled = 0;
+/** The press landed on the caption, whose date has a click of its own. */
+let pressedCaption = false;
+/** The press turned out to be a drag, so the click it ends with means nothing. */
+let swallowClick = false;
 
 function endDrag(): void {
   dragging = false;
 }
 
-function bindPointer(stage: HTMLElement): void {
-  stage.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+function bindPointer(body: HTMLElement): void {
+  // No pointer capture: it would retarget the click that follows a press from
+  // the caption's date to the viewer, and the toggle would never see it. The
+  // viewer fills the window, so there is nowhere inside it for a pointer to
+  // stray to; outside the window is the backstops' job.
+  body.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !viewer) return;
     dragging = true;
+    swallowClick = false;
     travelled = 0;
     lastX = event.clientX;
     lastY = event.clientY;
-    stage.setPointerCapture(event.pointerId);
+    pressedCaption = viewer.caption.contains(event.target as Node);
   });
 
-  stage.addEventListener("pointermove", (event) => {
+  body.addEventListener("pointermove", (event) => {
     if (!dragging || !viewer) return;
     if ((event.buttons & 1) === 0) {
       endDrag();
@@ -326,15 +353,13 @@ function bindPointer(stage: HTMLElement): void {
     applyTransform();
   });
 
-  stage.addEventListener("pointerup", (event) => {
+  body.addEventListener("pointerup", (event) => {
     if (!dragging || !viewer) return;
     const wasDrag = travelled > DRAG_SLOP;
     endDrag();
-    if (stage.hasPointerCapture(event.pointerId)) {
-      stage.releasePointerCapture(event.pointerId);
-    }
     // A drag that happened to end where it started is still a drag.
-    if (wasDrag) return;
+    swallowClick = wasDrag;
+    if (wasDrag || pressedCaption) return;
 
     if (viewer.zoomed) {
       viewer.zoomed = false;
@@ -348,10 +373,28 @@ function bindPointer(stage: HTMLElement): void {
     zoomAt(event.clientX, event.clientY);
   });
 
-  stage.addEventListener("pointercancel", endDrag);
+  // Before the click reaches whatever the drag ended on: the date toggle, if
+  // the drag started there and came back.
+  body.addEventListener(
+    "click",
+    (event) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.stopPropagation();
+    },
+    { capture: true },
+  );
+
+  body.addEventListener("pointercancel", endDrag);
+
+  // Nothing in the viewer is for dragging out of it. The stylesheet already
+  // keeps a drag from selecting anything, and a selection is what the browser
+  // would otherwise start dragging; this is the same intent at the point where
+  // it would take effect.
+  body.addEventListener("dragstart", (event) => event.preventDefault());
 }
 
-// The release that ends a drag may happen where the stage never sees it —
+// The release that ends a drag may happen where the viewer never sees it —
 // outside the window, or with the window losing focus underneath it.
 window.addEventListener("pointerup", endDrag);
 window.addEventListener("blur", endDrag);

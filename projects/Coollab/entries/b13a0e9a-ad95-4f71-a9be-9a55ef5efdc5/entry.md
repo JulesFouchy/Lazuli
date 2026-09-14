@@ -4,4 +4,4 @@ created: 2026-03-11T20:30:00+01:00
 image: null
 ---
 
-Visual non-regression tests are set up! And on the same day I started a VSCode extension for ISF files.
+Visual non-regression tests are set up!
