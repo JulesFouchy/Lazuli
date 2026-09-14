@@ -1,4 +1,14 @@
 ## Triage
+rename the project to Rupestre
+rename the project name + tagline from main screen
+Tagline: "tell your story/journey through pictures"? "Let pictures tell your journey"?
+for the app icon use C:\Users\fouch\Downloads\rupestre.png
+
+transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
+
+date format should be per-project
+
+when renaming a project it should also rename the folder
 
 alt + left/right arrow should work as forward/backward button
 
@@ -21,6 +31,8 @@ projects:
 
 For Coollab tell it to look through the git history to fill in the timeline (but what about images ? Maybe i just accept it starts from september, and i just fill in the first days of septembre manually, with end of intersnhsip, communale, my holliday break)
 Add soirée test communaele + screen of wip web ui + conf lgm, ui investigation + first and last day of all three interns + brussel lots of ideas for mapping, but also automation graph, control flow, spreadsheet data for entities simulation etc 
+
+And don't put all the code details for the past ones, i can't be bothered getting images for all of them. Just big milestones like UI prototype, ISF implementation, test framework, IrGraph/compiler, 3D renderer, text
 
 For Coollab images, never show code, always a render or the UI, because it's more visual, and eg we can see the ui evolving over time
 Maybe find some old images on discord ?
