@@ -919,6 +919,28 @@ struct Settings {
     /// Where the "new project" dialog opens. Updated whenever a project is
     /// created somewhere else, so the app follows wherever you keep them.
     projects_dir: Option<PathBuf>,
+    /// `system`, `light` or `dark`. The page keeps its own copy in
+    /// `localStorage`, because it needs the theme before the first paint and a
+    /// command is a round trip; this copy is the one Rust can read, and it
+    /// exists so the *window* — its frame and the colour behind the page — is
+    /// already right when it opens. See `theme.rs`.
+    theme: Option<String>,
+}
+
+/// The stored theme choice, for whoever is building the window.
+pub fn theme_preference(app: &AppHandle) -> Option<String> {
+    read_settings(app).theme
+}
+
+/// Remember the theme, so the next launch opens a window of the right colour.
+///
+/// Called by the page after it has already applied the theme to itself: nothing
+/// on screen is waiting for this.
+#[tauri::command]
+pub fn set_theme_preference(app: AppHandle, theme: String) {
+    let mut settings = read_settings(&app);
+    settings.theme = Some(theme);
+    write_settings(&app, &settings);
 }
 
 /// Where new projects go when nothing has said otherwise.
@@ -982,12 +1004,11 @@ fn remember_projects_dir(app: &AppHandle, root: &Path) {
     let Some(parent) = root.parent() else {
         return;
     };
-    write_settings(
-        app,
-        &Settings {
-            projects_dir: Some(parent.to_path_buf()),
-        },
-    );
+    // Read-modify-write rather than writing a fresh `Settings`: the file holds
+    // more than this field, and building one here would silently drop the rest.
+    let mut settings = read_settings(app);
+    settings.projects_dir = Some(parent.to_path_buf());
+    write_settings(app, &settings);
 }
 
 fn recent_path(app: &AppHandle) -> Option<PathBuf> {

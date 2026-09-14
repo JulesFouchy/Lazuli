@@ -15,8 +15,30 @@ import { el } from "./ui";
 
 
 export interface TimelineHandlers {
-  openEntry: (entry: Entry) => void;
+  /** A plain click: the picture, full size. */
+  viewEntry: (entry: Entry) => void;
+  /** The pencil, or Ctrl+click. */
+  editEntry: (entry: Entry) => void;
   deleteEntry: (entry: Entry) => void;
+}
+
+/**
+ * The entries the timeline draws, oldest first.
+ *
+ * Entries being deleted are already gone as far as the page is concerned, so
+ * the gaps either side of them close up rather than straddling a hole.
+ */
+export function visibleEntries(project: Project): Entry[] {
+  return project.entries.filter((entry) => !isDeleting(entryKey(entry.id)));
+}
+
+/** The same entries in the order they appear on the page. */
+export function displayedEntries(
+  project: Project,
+  newestFirst: boolean,
+): Entry[] {
+  const entries = visibleEntries(project);
+  return newestFirst ? [...entries].reverse() : entries;
 }
 
 export function renderTimeline(
@@ -26,11 +48,7 @@ export function renderTimeline(
 ): HTMLElement {
   const container = el("div", { class: "timeline__list" });
 
-  // Entries being deleted are already gone as far as the page is concerned, so
-  // the gaps either side of them close up rather than straddling a hole.
-  const entries = project.entries.filter(
-    (entry) => !isDeleting(entryKey(entry.id)),
-  );
+  const entries = visibleEntries(project);
 
   if (entries.length === 0) {
     container.append(
@@ -93,7 +111,14 @@ function entryCard(
     "article",
     {
       class: "card",
-      onclick: () => handlers.openEntry(entry),
+      // The card is the picture, so a click opens the picture. Editing is the
+      // rarer of the two and has the pencil; Ctrl+click is its shortcut, for
+      // the same reason a modifier opens a link in a new tab.
+      onclick: (event: Event) => {
+        const mouse = event as MouseEvent;
+        if (mouse.ctrlKey || mouse.metaKey) handlers.editEntry(entry);
+        else handlers.viewEntry(entry);
+      },
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
           {
@@ -113,22 +138,36 @@ function entryCard(
           class: "card__count",
           text: `${extras} other ${extras === 1 ? "attempt" : "attempts"}`,
         }),
+      el("button", {
+        class: "card__edit",
+        "aria-label": "Edit entry",
+        title: "Edit this entry — or Ctrl+click the card",
+        text: "✎",
+        onclick: (event: Event) => {
+          event.stopPropagation();
+          handlers.editEntry(entry);
+        },
+      }),
     ),
-    entry.image
-      ? el("img", {
-          class: "card__image",
-          src: assetUrl(project.root, "entries", entry.id, entry.image),
-          alt: entry.text || "Entry illustration",
-          // Thousands of full-resolution photos would otherwise all decode at
-          // once; the browser skips the offscreen ones.
-          loading: "lazy",
-          decoding: "async",
-        })
-      : el("div", { class: "card__placeholder", text: "No image chosen" }),
     el(
       "p",
       { class: entry.text ? "card__text" : "card__text card__text--empty" },
       entry.text || "No note yet",
+    ),
+    el(
+      "div",
+      { class: "card__figure" },
+      entry.image
+        ? el("img", {
+            class: "card__image",
+            src: assetUrl(project.root, "entries", entry.id, entry.image),
+            alt: entry.text || "Entry illustration",
+            // Thousands of full-resolution photos would otherwise all decode at
+            // once; the browser skips the offscreen ones.
+            loading: "lazy",
+            decoding: "async",
+          })
+        : el("div", { class: "card__placeholder", text: "No image chosen" }),
     ),
   );
 
@@ -139,7 +178,7 @@ function entryCard(
  * The date label. Clicking it flips every date on the page, so the click must
  * not also open the entry.
  */
-function dateToggle(entry: Entry): HTMLElement {
+export function dateToggle(entry: Entry): HTMLElement {
   return el("button", {
     class: "date-toggle",
     title: `${formatDateAlternate(entry.journal_date, entry.day_number)} — click to switch every date`,

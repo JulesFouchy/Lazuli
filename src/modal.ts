@@ -39,6 +39,8 @@ export interface ModalOptions {
    * which Escape, Back and the backdrop are enough to close.
    */
   title: string | HTMLElement | null;
+  /** Extra class on the dialog box, for one that is not a panel of fields. */
+  class?: string;
   body: HTMLElement;
   foot?: HTMLElement;
   onClose?: () => void;
@@ -78,7 +80,11 @@ export function openModal(options: ModalOptions): void {
     },
     el(
       "div",
-      { class: "modal", role: "dialog", "aria-modal": "true" },
+      {
+        class: options.class ? `modal ${options.class}` : "modal",
+        role: "dialog",
+        "aria-modal": "true",
+      },
       // A header is a title and nothing else. There is no Close button on any
       // dialog: Escape, the mouse's Back button and a click on the backdrop
       // all dismiss, and a button repeating that only took up the corner.

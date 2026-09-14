@@ -5,6 +5,10 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    {
+      "identifier": "core:window:allow-set-theme",
+      "comment": "The title bar is drawn by Windows, not by the page, so the only way it follows the app's own light/dark choice is to tell the window about it."
+    },
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-confirm",

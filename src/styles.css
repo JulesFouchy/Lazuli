@@ -1,4 +1,4 @@
-/* Journaley — a dark, quiet reading surface for a timeline of days. */
+/* Journaley — a quiet reading surface for a timeline of days, in two themes. */
 
 /* Bundled rather than relying on installed fonts: the video frames are drawn
    with these, and an export should look the same on any machine. */
@@ -30,28 +30,106 @@
   font-display: block;
 }
 
-:root {
-  /* Also the window's `backgroundColor` in `src-tauri/tauri.conf.json`, so the
-     window is this colour before the page has painted. Change both together. */
-  --bg: #131316;
-  --bg-raised: #1b1b20;
-  --bg-sunken: #0e0e11;
-  --line: #2a2a32;
-  --line-strong: #3a3a44;
-  --text: #e8e8ec;
-  --text-dim: #9a9aa6;
-  --text-faint: #6b6b78;
-  --accent: #f0a84a;
-  --accent-dim: #7a5628;
-  --danger: #e05a4e;
+/* --- tokens ---------------------------------------------------------------
+ *
+ * Every colour in this file comes from here. Two rules keep the themes honest:
+ *
+ * - Nothing below this block may name a literal colour. A hex further down is
+ *   a token that has not been written yet, and it will be wrong in one theme.
+ * - The `--accent-*` set is written onto the root element by `theme.ts`, not
+ *   declared here. The values here are the default accent's, so the page is
+ *   complete before any script has run.
+ */
 
+:root {
+  /* Shape and type: the same in both themes. */
+  --radius-sm: 8px;
   --radius: 10px;
   --radius-lg: 16px;
 
   --sans: "JournaleySans", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: "JournaleyMono", ui-monospace, Consolas, monospace;
 
+  /* Text laid over a photograph. A cover is any brightness, so this is white
+     in both themes, and the outline below is what makes it readable rather
+     than anything painted over the picture. */
+  --on-photo: #ffffff;
+  --on-photo-outline: rgba(0, 0, 0, 0.85);
+
+  /* The default accent, and the shades `theme.ts` derives from it. Kept in
+     step with `DEFAULT_ACCENT` in `theme.ts`. */
+  --accent: #f0a84a;
+  --accent-hover: #f4bb72;
+  --accent-soft: rgba(240, 168, 74, 0.16);
+  --accent-line: rgba(240, 168, 74, 0.55);
+  --on-accent: #14140f;
+  --accent-text: #f0a84a;
+}
+
+/* Dark, and the fallback when nothing has set a theme.
+   Both themes' `--bg` are repeated in `src-tauri/src/theme.rs`, which paints the
+   window with one of them before the page exists. Change them together, or the
+   window will be a different colour from the page it is about to show. */
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
+
+  --bg: #0d0d10;
+  --bg-raised: #191920;
+  --bg-raised-hover: #23232c;
+  --bg-sunken: #08080a;
+  --bg-inset: #131319;
+
+  --line: #30303b;
+  --line-strong: #4a4a58;
+
+  --text: #f5f5f8;
+  --text-dim: #b0b0be;
+  --text-faint: #83838f;
+
+  --danger: #ff6f61;
+  --danger-soft: rgba(255, 111, 97, 0.14);
+
+  /* The ring around a photograph. Its whole job is to stop a dark image
+     dissolving into a dark page, so it is light here and dark on the light
+     theme — the opposite of the surface it sits on either way. */
+  --image-ring: rgba(255, 255, 255, 0.3);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.6);
+
+  --overlay: rgba(4, 4, 6, 0.74);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Warm off-white rather than pure white: photographs sit better on it, and
+     it stops the cards from disappearing into the page. */
+  --bg: #f1f0ed;
+  --bg-raised: #ffffff;
+  --bg-raised-hover: #f6f5f2;
+  --bg-sunken: #e4e3de;
+  --bg-inset: #fbfaf8;
+
+  --line: #d2d0ca;
+  --line-strong: #a9a69e;
+
+  --text: #16161a;
+  --text-dim: #55555f;
+  --text-faint: #74747f;
+
+  --danger: #c33a2c;
+  --danger-soft: rgba(195, 58, 44, 0.1);
+
+  --image-ring: rgba(0, 0, 0, 0.18);
+
+  --shadow-1: 0 1px 2px rgba(30, 28, 24, 0.08);
+  --shadow-2: 0 6px 20px rgba(30, 28, 24, 0.12);
+  --shadow-3: 0 24px 64px rgba(30, 28, 24, 0.22);
+
+  --overlay: rgba(28, 26, 22, 0.42);
 }
 
 * {
@@ -73,6 +151,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 button {
   font: inherit;
   color: inherit;
@@ -85,6 +168,37 @@ input,
 textarea {
   font: inherit;
   color: inherit;
+}
+
+/* One focus ring for the whole app, on keyboard focus only. The controls all
+   have their own hover states, and a ring on every click drowns them. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/**
+ * Text sitting directly on a photograph.
+ *
+ * The alternative is a scrim — a dark gradient over the picture — which is a
+ * reliable way to make white text readable and a poor way to show a cover
+ * someone chose. This outlines the letters instead and leaves the photograph
+ * alone. `paint-order` is what makes it an outline rather than an erosion:
+ * without it the stroke is centred on the glyph edge and eats half the letter.
+ *
+ * Each of these sets its own `--photo-stroke`: a 30px title and a 12px mono
+ * label want very different weights, and one value for both is either
+ * invisible or a blob.
+ */
+.recent__row--cover .recent__name,
+.recent__row--cover .recent__path,
+.banner--cover .banner__name,
+.banner--cover .banner__meta,
+.banner--cover .banner__hint {
+  color: var(--on-photo);
+  -webkit-text-stroke: var(--photo-stroke, 1.5px) var(--on-photo-outline);
+  paint-order: stroke fill;
 }
 
 #app {
@@ -100,15 +214,20 @@ textarea {
   padding: 8px 14px;
   border-radius: var(--radius);
   background: var(--bg-raised);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   color: var(--text);
-  transition: background 120ms, border-color 120ms;
+  box-shadow: var(--shadow-1);
+  transition: background 120ms, border-color 120ms, box-shadow 120ms;
   white-space: nowrap;
 }
 
 .button:hover {
-  background: #232329;
-  border-color: var(--line-strong);
+  background: var(--bg-raised-hover);
+  border-color: var(--text-faint);
+}
+
+.button:active {
+  box-shadow: none;
 }
 
 /* Dimmed rather than hidden: a greyed-out button says the action exists and
@@ -119,33 +238,38 @@ textarea {
   cursor: default;
   background: var(--bg-raised);
   border-color: var(--line);
+  box-shadow: none;
 }
 
 .button--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #17130c;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
 .button--primary:hover {
-  background: #f7b75f;
-  border-color: #f7b75f;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .button--ghost {
   background: none;
   border-color: transparent;
+  box-shadow: none;
+  color: var(--text-dim);
 }
 
 .button--ghost:hover {
   background: var(--bg-raised);
   border-color: var(--line);
+  color: var(--text);
 }
 
 .button--danger:hover {
   color: var(--danger);
   border-color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .field {
@@ -156,21 +280,30 @@ textarea {
 
 .field > label {
   font-size: 12px;
-  letter-spacing: 0.04em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--text-dim);
 }
 
 .input {
   padding: 9px 12px;
   border-radius: var(--radius);
-  background: var(--bg-sunken);
-  border: 1px solid var(--line);
+  background: var(--bg-inset);
+  border: 1px solid var(--line-strong);
   outline: none;
+  transition: border-color 120ms, box-shadow 120ms;
 }
 
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+/* The accent ring rather than a bare outline: the field keeps its shape, and
+   the focused one is unmistakable at a glance across a stack of them. */
 .input:focus {
-  border-color: var(--accent-dim);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* Only as wide as a date needs.
@@ -209,11 +342,16 @@ textarea {
   margin-bottom: 44px;
 }
 
+.launch__spacer {
+  flex: 1;
+}
+
 .launch__heading {
   font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--text-dim);
   margin-bottom: 10px;
 }
 
@@ -223,6 +361,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
+  box-shadow: var(--shadow-1);
 }
 
 .recent__row {
@@ -234,11 +373,16 @@ textarea {
   text-align: left;
   overflow: hidden;
   border-bottom: 1px solid var(--line);
-  background: var(--bg-sunken);
+  background: var(--bg-raised);
+  transition: background 120ms;
 }
 
 .recent__row:last-child {
   border-bottom: none;
+}
+
+.recent__row:hover {
+  background: var(--bg-raised-hover);
 }
 
 /* The cover is the row's background, so it sits behind everything and is
@@ -257,28 +401,6 @@ textarea {
   transform: scale(1.03);
 }
 
-/* Covers are photographs, so the name needs its own ground to stay readable
-   over whatever the picture happens to be. */
-.recent__scrim {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(12, 12, 14, 0.94) 0%,
-    rgba(12, 12, 14, 0.82) 55%,
-    rgba(12, 12, 14, 0.58) 100%
-  );
-}
-
-.recent__row:hover .recent__scrim {
-  background: linear-gradient(
-    90deg,
-    rgba(12, 12, 14, 0.86) 0%,
-    rgba(12, 12, 14, 0.66) 55%,
-    rgba(12, 12, 14, 0.34) 100%
-  );
-}
-
 .recent__label {
   position: relative;
   display: flex;
@@ -290,20 +412,26 @@ textarea {
 }
 
 .recent__name {
-  font-weight: 550;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+  font-weight: 600;
 }
 
 .recent__path {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--text-dim);
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   direction: rtl;
   text-align: left;
+}
+
+.recent__row--cover .recent__name {
+  --photo-stroke: 1.5px;
+}
+
+.recent__row--cover .recent__path {
+  --photo-stroke: 1.5px;
 }
 
 .empty {
@@ -317,7 +445,7 @@ textarea {
 .banner {
   position: relative;
   height: 260px;
-  background: linear-gradient(160deg, #22222a, #16161b);
+  background: var(--bg-sunken);
   border-bottom: 1px solid var(--line);
   overflow: hidden;
   cursor: pointer;
@@ -328,18 +456,6 @@ textarea {
   height: 100%;
   object-fit: cover;
   display: block;
-}
-
-.banner__scrim {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    to bottom,
-    rgba(10, 10, 12, 0.5) 0%,
-    rgba(10, 10, 12, 0) 35%,
-    rgba(10, 10, 12, 0.85) 100%
-  );
-  pointer-events: none;
 }
 
 .banner__bar {
@@ -357,7 +473,6 @@ textarea {
   font-size: 30px;
   font-weight: 650;
   letter-spacing: -0.02em;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
   background: none;
   border: none;
   padding: 2px 6px;
@@ -365,17 +480,29 @@ textarea {
   min-width: 2ch;
 }
 
+.banner--cover .banner__name {
+  --photo-stroke: 2px;
+}
+
+/* Being edited is not being read off a photograph: the field takes its own
+   ground, so the outline comes off and the text goes back to the page colour. */
 .banner__name:focus {
   outline: none;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--bg-inset);
+  color: var(--text);
+  -webkit-text-stroke: 0;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .banner__meta {
   color: var(--text-dim);
   font-family: var(--mono);
   font-size: 12px;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
+}
+
+.banner--cover .banner__meta {
+  --photo-stroke: 1.5px;
 }
 
 /* Underlined on hover only: the start date reads as part of the sentence until
@@ -393,15 +520,19 @@ textarea {
   text-decoration: underline;
 }
 
+.banner--cover .banner__start:hover {
+  color: var(--on-photo);
+}
+
 .banner__hint {
   position: absolute;
   top: 16px;
   left: 20px;
   font-size: 12px;
   color: var(--text-dim);
+  --photo-stroke: 1.5px;
   opacity: 0;
   transition: opacity 140ms;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
 }
 
 .banner:hover .banner__hint {
@@ -431,20 +562,23 @@ textarea {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--bg-raised);
+  box-shadow: var(--shadow-1);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 140ms, transform 140ms;
+  transition: border-color 140ms, box-shadow 140ms, transform 140ms;
 }
 
 .card:hover {
   border-color: var(--line-strong);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
 }
 
 .card__head {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 14px 18px 12px;
+  padding: 14px 18px 10px;
 }
 
 /* The clickable date. Monospaced so toggling formats does not reflow the row
@@ -452,7 +586,8 @@ textarea {
 .date-toggle {
   font-family: var(--mono);
   font-size: 13px;
-  color: var(--accent);
+  font-weight: 700;
+  color: var(--accent-text);
   padding: 2px 6px;
   margin: -2px -6px;
   border-radius: 6px;
@@ -460,7 +595,7 @@ textarea {
 }
 
 .date-toggle:hover {
-  background: rgba(240, 168, 74, 0.12);
+  background: var(--accent-soft);
 }
 
 .card__grow {
@@ -469,7 +604,43 @@ textarea {
 
 .card__count {
   font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* The pencil in the header's top right. Faint until the card is under the
+   pointer: it is the second thing a card does, and the first is to be looked
+   at. */
+.card__edit {
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  margin: -4px -6px -4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  line-height: 1;
   color: var(--text-faint);
+  opacity: 0.45;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+
+.card:hover .card__edit,
+.card__edit:focus-visible {
+  opacity: 1;
+}
+
+.card__edit:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* The photograph is inset and ringed rather than bled to the card's edges. A
+   dark photo on the dark theme has no edge of its own, and without the ring it
+   reads as a hole in the card instead of a picture in it. */
+.card__figure {
+  padding: 0 14px 14px;
 }
 
 .card__image {
@@ -479,7 +650,11 @@ textarea {
      entries are visible at once on any window size. */
   max-height: min(440px, 52vh);
   object-fit: cover;
+  border-radius: var(--radius);
   background: var(--bg-sunken);
+  /* A ring rather than a border: it does not take part in layout, so the
+     image's size is the same with it and without. */
+  box-shadow: 0 0 0 1px var(--image-ring);
 }
 
 .card__placeholder {
@@ -487,15 +662,17 @@ textarea {
   align-items: center;
   justify-content: center;
   height: 120px;
+  border-radius: var(--radius);
   background: var(--bg-sunken);
   color: var(--text-faint);
   font-size: 13px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  border: 1px dashed var(--line-strong);
 }
 
+/* Sits between the header and the image, so it only needs the gap below it —
+   the header already supplies the space above. */
 .card__text {
-  padding: 14px 18px 16px;
+  padding: 0 18px 14px;
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -506,14 +683,14 @@ textarea {
   font-style: italic;
 }
 
-/* The dashed rule between two entries that are not on consecutive days. Its
-   height scales with the gap, capped so a long pause stays scrollable. */
+/* The dashed rule between two entries that are not on consecutive days. Always
+   the same height, whatever the gap — the label carries the length. */
 .gap {
   display: flex;
   align-items: center;
   gap: 12px;
   padding-left: 30px;
-  color: var(--text-faint);
+  color: var(--text-dim);
   font-size: 12px;
   font-family: var(--mono);
 }
@@ -526,7 +703,6 @@ textarea {
   border-left: 2px dashed var(--line-strong);
 }
 
-
 .stack {
   height: 10px;
 }
@@ -536,7 +712,7 @@ textarea {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 10, 0.72);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -549,10 +725,10 @@ textarea {
   max-width: 680px;
   max-height: 100%;
   overflow: auto;
-  background: var(--bg);
+  background: var(--bg-raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-3);
 }
 
 .modal__head {
@@ -589,11 +765,268 @@ textarea {
   gap: 10px;
   padding: 16px 20px;
   border-top: 1px solid var(--line);
+  background: var(--bg-inset);
 }
 
 .row {
   display: flex;
   gap: 12px;
+}
+
+/* --- fullscreen entry viewer --------------------------------------------- */
+
+/* The other dialogs are panels laid over a page you can still read; this one
+   is a picture, and the page behind it is competition. So its backdrop goes
+   near-black in both themes, and its margins are thinner. */
+.overlay:has(.modal--viewer) {
+  background: rgba(0, 0, 0, 0.88);
+  padding: 24px;
+}
+
+/* Not a panel over the page but the whole of it: the picture gets every pixel
+   the window has, which is the only reason the viewer exists. */
+.modal--viewer {
+  max-width: none;
+  height: 100%;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.modal--viewer .modal__body {
+  padding: 0;
+  height: 100%;
+}
+
+.viewer {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* The picture takes whatever is left once the caption has its line, and keeps
+   its own proportions inside that — this is the one place it is not cropped. */
+.viewer__stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Fills the stage rather than only shrinking to it: a small picture is exactly
+   the one worth blowing up, and `contain` keeps its proportions either way.
+   No ring here — `contain` letterboxes inside the element, so a ring would
+   trace the stage rather than the picture, and the near-black backdrop gives
+   the edge that the card's ring gives on the page. */
+.viewer__image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* Clicks land on the stage underneath, which dismisses. The element covers
+     its letterbox bars, so without this the margins around a picture would be
+     the one part of the backdrop that did not close. */
+  pointer-events: none;
+}
+
+.viewer__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(420px, 60vw);
+  height: 200px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text-faint);
+  font-size: 13px;
+  border: 1px dashed var(--line-strong);
+}
+
+/* A card of its own rather than text laid straight on the backdrop: the
+   backdrop is a wash over whatever the page was, so nothing written on it can
+   be relied on to stay readable. */
+.viewer__caption {
+  flex: none;
+  align-self: center;
+  max-width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+}
+
+.viewer__text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.viewer__text--empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.viewer__edit {
+  align-self: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-faint);
+  transition: background 120ms, color 120ms;
+}
+
+.viewer__edit:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.viewer__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  line-height: 1;
+  border-radius: 50%;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-2);
+  opacity: 0.7;
+  transition: opacity 120ms;
+}
+
+.viewer__nav:hover {
+  opacity: 1;
+}
+
+/* Kept in place rather than hidden at the ends of the timeline, so the arrows
+   do not move under the pointer halfway through a read. */
+.viewer__nav:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.viewer__nav--prev {
+  left: 0;
+}
+
+.viewer__nav--next {
+  right: 0;
+}
+
+/* --- appearance dialog --------------------------------------------------- */
+
+/* A row of mutually exclusive choices, drawn as one segmented control so the
+   set reads as one setting rather than three buttons that happen to be near
+   each other. */
+.segmented {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 3px;
+  gap: 3px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+}
+
+.segmented__option {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  transition: background 120ms, color 120ms;
+}
+
+.segmented__option:hover {
+  color: var(--text);
+  background: var(--bg-raised-hover);
+}
+
+.segmented__option[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  /* The ring is drawn outside the border so the colour keeps its full size
+     whether or not it is the chosen one. */
+  box-shadow: 0 0 0 1px var(--line-strong);
+  transition: transform 120ms, box-shadow 120ms;
+  padding: 0;
+}
+
+.swatch:hover {
+  transform: scale(1.1);
+}
+
+.swatch[aria-pressed="true"] {
+  border-color: var(--bg-raised);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* The native colour well, sized to match the presets beside it. */
+.swatch--custom {
+  appearance: none;
+  background: none;
+  cursor: pointer;
+  border: 1px dashed var(--line-strong);
+  box-shadow: none;
+}
+
+.swatch--custom::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.swatch--custom::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+/* A live sample of what the accent will look like in use, so the choice is
+   made against real controls rather than against a circle. */
+.appearance__preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+}
+
+.appearance__sample-date {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-text);
 }
 
 /* --- image picker -------------------------------------------------------- */
@@ -607,7 +1040,7 @@ textarea {
 
 .dropzone--over {
   border-color: var(--accent);
-  background: rgba(240, 168, 74, 0.06);
+  background: var(--accent-soft);
 }
 
 .thumbs {
@@ -619,13 +1052,15 @@ textarea {
 .thumb {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   /* On every thumb, transparent until chosen, so nothing shifts when the
      choice moves. Three pixels because the outline is now the only thing
      saying which one is chosen. */
   border: 3px solid transparent;
   background: var(--bg-sunken);
+  /* The same ring the timeline gives a photograph, and for the same reason. */
+  box-shadow: inset 0 0 0 1px var(--image-ring);
   cursor: pointer;
   padding: 0;
 }
@@ -643,7 +1078,7 @@ textarea {
 
 .hint {
   font-size: 12px;
-  color: var(--text-faint);
+  color: var(--text-dim);
   margin: 0;
 }
 
@@ -665,7 +1100,7 @@ textarea {
   background: var(--bg-raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-2);
 }
 
 .menu__item {
@@ -677,11 +1112,12 @@ textarea {
 }
 
 .menu__item:hover {
-  background: var(--bg-sunken);
+  background: var(--accent-soft);
 }
 
 .menu__item--danger:hover {
   color: var(--danger);
+  background: var(--danger-soft);
 }
 
 /* --- toasts -------------------------------------------------------------- */
@@ -704,9 +1140,10 @@ textarea {
   gap: 14px;
   padding: 10px 14px;
   border-radius: var(--radius);
-  background: #26262e;
+  background: var(--bg-raised);
+  color: var(--text);
   border: 1px solid var(--line-strong);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-2);
   pointer-events: auto;
   animation: toast-in 160ms ease-out;
   max-width: 520px;
@@ -714,10 +1151,11 @@ textarea {
 
 .toast--error {
   border-color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .toast__action {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
   white-space: nowrap;
 }

@@ -20,6 +20,7 @@ import {
   trashProject,
   undoDelete,
 } from "./api";
+import { openAppearanceDialog } from "./appearance";
 import { whileBusy } from "./busy";
 import {
   closeContextMenu,
@@ -38,10 +39,16 @@ import {
 } from "./entry-editor";
 import { openExportDialog } from "./export-dialog";
 import { addDroppedPaths } from "./image-picker";
+import {
+  openLightbox,
+  refreshLightbox,
+  type ViewerContext,
+} from "./lightbox";
 import { closeModal, isModalOpen, onModalDismissed } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
-import { renderTimeline } from "./timeline";
+import { startTheme } from "./theme";
+import { displayedEntries, renderTimeline } from "./timeline";
 import { clear, el, isEditing, toast, toastError } from "./ui";
 
 function appRoot(): HTMLElement {
@@ -112,6 +119,12 @@ function launchView(): HTMLElement {
         text: "Open folder…",
         onclick: () => void openFolder(),
       }),
+      el("span", { class: "launch__spacer" }),
+      el("button", {
+        class: "button button--ghost",
+        text: "Appearance…",
+        onclick: () => openHere({ kind: "appearance" }),
+      }),
     ),
     el("div", { class: "launch__heading", text: "Recent" }),
   );
@@ -163,7 +176,9 @@ function recentRow(recent: RecentProject): HTMLElement {
   return el(
     "button",
     {
-      class: "recent__row",
+      // The white, outlined label only makes sense over a photograph, so a row
+      // without a cover is left as a plain surface in whichever theme.
+      class: `recent__row${recent.cover ? " recent__row--cover" : ""}`,
       onclick: () => void openRecent(recent.path),
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
@@ -192,7 +207,6 @@ function recentRow(recent: RecentProject): HTMLElement {
           decoding: "async",
         })
       : null,
-    el("div", { class: "recent__scrim" }),
     el(
       "div",
       { class: "recent__label" },
@@ -236,7 +250,7 @@ function banner(project: Project): HTMLElement {
   return el(
     "header",
     {
-      class: "banner",
+      class: `banner${cover ? " banner--cover" : ""}`,
       title: "Click to change the cover",
       onclick: () => openHere({ kind: "cover" }),
     },
@@ -248,7 +262,6 @@ function banner(project: Project): HTMLElement {
           decoding: "async",
         })
       : null,
-    el("div", { class: "banner__scrim" }),
     el("div", { class: "banner__hint", text: "Click to change the cover" }),
     // No buttons over the cover: Escape and the mouse's Back button leave the
     // project, and Reveal in Explorer is on the project's own right-click menu
@@ -302,6 +315,11 @@ function timelineSection(project: Project): HTMLElement {
       el("span", { class: "timeline__spacer" }),
       el("button", {
         class: "button button--ghost",
+        text: "Appearance…",
+        onclick: () => openHere({ kind: "appearance" }),
+      }),
+      el("button", {
+        class: "button button--ghost",
         text: state.newestFirst ? "Newest first ↓" : "Oldest first ↑",
         title: "Reverse the timeline",
         onclick: () => {
@@ -317,7 +335,8 @@ function timelineSection(project: Project): HTMLElement {
     renderTimeline(
       project,
       {
-        openEntry: (entry: Entry) => openHere({ kind: "entry", id: entry.id }),
+        viewEntry: (entry: Entry) => openHere({ kind: "view", id: entry.id }),
+        editEntry: (entry: Entry) => openHere({ kind: "entry", id: entry.id }),
         deleteEntry: (entry: Entry) =>
           deleteEntry(entry.id, editorContext),
       },
@@ -343,6 +362,18 @@ const editorContext: EditorContext = {
     });
     liveOffers.push(offer);
   },
+};
+
+const viewerContext: ViewerContext = {
+  project: () => {
+    if (!state.project) throw new Error("no project is open");
+    return state.project;
+  },
+  entry: (id) => state.project?.entries.find((e) => e.id === id) ?? null,
+  entries: () =>
+    state.project ? displayedEntries(state.project, state.newestFirst) : [],
+  edit: (id) => openHere({ kind: "entry", id }),
+  moved: (id) => noteViewerMoved(id),
 };
 
 interface UndoOffer {
@@ -566,19 +597,74 @@ function projectCreated(project: Project): void {
 /** A dialog, identified by enough to reopen it. */
 type Modal =
   | { kind: "entry"; id: string }
+  | { kind: "view"; id: string }
   | { kind: "cover" }
   | { kind: "start-date" }
   | { kind: "export" }
-  | { kind: "new-project" };
+  | { kind: "new-project" }
+  | { kind: "appearance" };
 
 interface Place {
   /** Project folder, or null for the launch screen. */
   project: string | null;
   modal: Modal | null;
+  /** How far down the page was, so coming back lands on the same cards. */
+  scroll?: number;
 }
 
-const history: Place[] = [{ project: null, modal: null }];
+/** A fresh launch-screen place; fresh because places are mutated as they are scrolled. */
+const launch = (): Place => ({ project: null, modal: null });
+
+const history: Place[] = [launch()];
 let cursor = 0;
+
+// The whole stack outlives the page: closing the app, or the dev server
+// reloading it after a code change, comes back to the same place with the same
+// Back and Forward still available.
+const HISTORY_KEY = "journaley.history";
+
+function saveHistory(): void {
+  localStorage.setItem(
+    HISTORY_KEY,
+    JSON.stringify({ places: history, cursor }),
+  );
+}
+
+/** What the last session saved, or null when there is nothing usable. */
+function loadSavedHistory(): { places: Place[]; cursor: number } | null {
+  const raw = localStorage.getItem(HISTORY_KEY);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const { places, cursor } = parsed as Record<string, unknown>;
+    if (!Array.isArray(places) || !places.every(isPlace)) return null;
+    if (typeof cursor !== "number" || cursor < 0 || cursor >= places.length) {
+      return null;
+    }
+    return { places, cursor };
+  } catch {
+    return null;
+  }
+}
+
+function isPlace(value: unknown): value is Place {
+  if (!value || typeof value !== "object") return false;
+  const { project, modal, scroll } = value as Record<string, unknown>;
+  if (project !== null && typeof project !== "string") return false;
+  if (scroll !== undefined && typeof scroll !== "number") return false;
+  if (modal === null) return true;
+  if (!modal || typeof modal !== "object") return false;
+  const { kind, id } = modal as Record<string, unknown>;
+  if (kind === "entry" || kind === "view") return typeof id === "string";
+  return (
+    kind === "cover" ||
+    kind === "start-date" ||
+    kind === "export" ||
+    kind === "new-project" ||
+    kind === "appearance"
+  );
+}
 
 /**
  * How many `apply` calls are in flight, so their own closes and opens are not
@@ -596,7 +682,26 @@ function modalKey(place: Place): string | null {
   if (!modal) return null;
   // Qualified by the project, so the same kind of dialog over a different
   // project is not mistaken for the one already up.
-  return `${project}::${modal.kind === "entry" ? `entry:${modal.id}` : modal.kind}`;
+  const which =
+    modal.kind === "entry" || modal.kind === "view"
+      ? `${modal.kind}:${modal.id}`
+      : modal.kind;
+  return `${project}::${which}`;
+}
+
+/**
+ * Record which entry the viewer is showing, without recording a move.
+ *
+ * The arrows walk the timeline a picture at a time; a place each would turn
+ * Back from a long read into a long walk home. So the current place is edited
+ * where it stands, which leaves Back meaning "out of the viewer" throughout.
+ */
+function noteViewerMoved(id: string): void {
+  const place = here();
+  if (place.modal?.kind !== "view") return;
+  place.modal = { kind: "view", id };
+  shownModal = modalKey(place);
+  saveHistory();
 }
 
 function here(): Place {
@@ -608,6 +713,7 @@ async function goTo(place: Place): Promise<void> {
   history.length = cursor + 1;
   history.push(place);
   cursor = history.length - 1;
+  saveHistory();
   await apply(place);
 }
 
@@ -621,12 +727,14 @@ async function goTo(place: Place): Promise<void> {
 async function replaceHere(place: Place): Promise<void> {
   history[cursor] = place;
   history.length = cursor + 1;
+  saveHistory();
   await apply(place);
 }
 
 /** Move the cursor without recording anything, so the way ahead is kept. */
 function stepTo(index: number): void {
   cursor = index;
+  saveHistory();
   void apply(here());
 }
 
@@ -644,7 +752,8 @@ function goForward(): void {
   if (cursor < history.length - 1) stepTo(cursor + 1);
 }
 
-async function apply(place: Place): Promise<void> {
+/** Show a place. False when its project could not be opened. */
+async function apply(place: Place): Promise<boolean> {
   navigating += 1;
   try {
     if (place.project !== (state.project?.root ?? null)) {
@@ -654,12 +763,17 @@ async function apply(place: Place): Promise<void> {
       } else if (!(await loadProject(place.project))) {
         // The folder has been moved or deleted since. Better to stay put than
         // to show a project that is not there.
-        return;
+        return false;
       }
+      restoreScroll(place.scroll ?? 0);
+    } else {
+      // Same page, so it stays where it is — a dialog opening or closing does
+      // not move the timeline behind it — and the place records that.
+      place.scroll = window.scrollY;
     }
 
     const wanted = modalKey(place);
-    if (wanted === shownModal) return;
+    if (wanted === shownModal) return true;
     if (place.modal) {
       showModal(place.modal);
       // An entry deleted since this place was recorded opens nothing.
@@ -668,16 +782,93 @@ async function apply(place: Place): Promise<void> {
       closeModal();
       shownModal = null;
     }
+    return true;
   } finally {
     navigating -= 1;
   }
 }
+
+// --- scroll position -------------------------------------------------------
+//
+// The page scrolls as a whole (`#app` has no scroll container of its own), so
+// `scrollY` is the position. It is recorded into the current place as the user
+// scrolls, and put back whenever a place is shown again.
+
+/** Undoes the listeners of the restore in progress, if there is one. */
+let stopPinning: (() => void) | null = null;
+
+/** Inputs that mean the user has taken the scroll position over. */
+const USER_SCROLL_INPUTS = ["wheel", "keydown", "pointerdown", "touchstart"];
+
+/**
+ * Scroll to `top`, and keep it there while the cards' images load.
+ *
+ * A card has no height until its image arrives, so straight after a render the
+ * page is shorter than it will be and `top` lands on the wrong cards. Each
+ * image that loads pushes everything below it down, so the position is set
+ * again on every load until the last one — unless the user scrolls first, at
+ * which point it is theirs.
+ */
+function restoreScroll(top: number): void {
+  stopPinning?.();
+  window.scrollTo(0, top);
+
+  const pending = Array.from(root.querySelectorAll("img")).filter(
+    (image) => !image.complete,
+  );
+  if (pending.length === 0) return;
+
+  let remaining = pending.length;
+  const stop = (): void => {
+    stopPinning = null;
+    for (const image of pending) {
+      image.removeEventListener("load", settle);
+      image.removeEventListener("error", settle);
+    }
+    for (const type of USER_SCROLL_INPUTS) {
+      window.removeEventListener(type, stop);
+    }
+  };
+  const settle = (): void => {
+    window.scrollTo(0, top);
+    if (--remaining === 0) stop();
+  };
+  for (const image of pending) {
+    image.addEventListener("load", settle);
+    image.addEventListener("error", settle);
+  }
+  for (const type of USER_SCROLL_INPUTS) {
+    window.addEventListener(type, stop);
+  }
+  stopPinning = stop;
+}
+
+let scrollSave: ReturnType<typeof setTimeout> | null = null;
+
+window.addEventListener("scroll", () => {
+  // While a place is being applied the page is mid-rebuild, and where the
+  // browser clamps it to says nothing about where the user was.
+  if (navigating > 0) return;
+  here().scroll = window.scrollY;
+  // Scrolling fires every frame; one write once it settles is plenty.
+  if (scrollSave !== null) clearTimeout(scrollSave);
+  scrollSave = setTimeout(() => {
+    scrollSave = null;
+    saveHistory();
+  }, 200);
+});
+
+// The last scroll before the page goes must not wait for the timer.
+window.addEventListener("pagehide", saveHistory);
 
 function showModal(modal: Modal): void {
   const project = state.project;
   switch (modal.kind) {
     case "entry":
       openEntryEditor(modal.id, editorContext);
+      break;
+    case "view":
+      openLightbox(modal.id, viewerContext);
       break;
     case "cover":
       if (project) openCoverPicker(editorContext);
@@ -690,6 +881,9 @@ function showModal(modal: Modal): void {
       break;
     case "new-project":
       openNewProjectDialog(projectCreated);
+      break;
+    case "appearance":
+      openAppearanceDialog();
       break;
   }
 }
@@ -705,11 +899,10 @@ onModalDismissed(() => {
   if (navigating > 0 || !here().modal) return;
   shownModal = null;
   const underneath = history[cursor - 1];
-  if (
-    underneath &&
-    underneath.project === here().project &&
-    underneath.modal === null
-  ) {
+  // Whatever is underneath, dialog included: the editor reached from the
+  // viewer goes back to the picture it was opened from, not past it to the
+  // page. Only a place from another project is not what dismissing reveals.
+  if (underneath && underneath.project === here().project) {
     stepTo(cursor - 1);
   } else {
     // Arrived here some other way; the place underneath is not on the stack.
@@ -762,6 +955,7 @@ void listen<Project>("project-changed", (event) => {
   render();
   const modal = here().modal;
   if (modal?.kind === "entry") refreshEntryEditor(modal.id, editorContext);
+  else if (modal?.kind === "view") refreshLightbox(modal.id, viewerContext);
   else if (modal?.kind === "cover") refreshCoverPicker(editorContext);
 });
 
@@ -772,7 +966,9 @@ void getCurrentWebview().onDragDropEvent((event) => {
   if (paths.length === 0) return;
   // Into the open entry if there is one, otherwise the cover.
   const modal = here().modal;
-  void addDroppedPaths(modal?.kind === "entry" ? modal.id : null, paths);
+  const into =
+    modal?.kind === "entry" || modal?.kind === "view" ? modal.id : null;
+  void addDroppedPaths(into, paths);
 });
 
 // The mouse's thumb buttons. The webview would otherwise take them as history
@@ -824,7 +1020,20 @@ window.addEventListener("keydown", (event) => {
 
 onDateFormatChange(render);
 
-render();
+// After the inline script in `index.html`, which has already put the theme on
+// the root element; this adds the accent's derived shades and starts following
+// the OS while the choice is `system`.
+startTheme();
+
+// Pick up where the last session left off. The first paint is only drawn here
+// when it is the launch screen; a project is drawn once it has loaded, rather
+// than flashing the launch screen in front of it.
+const saved = loadSavedHistory();
+if (saved) {
+  history.splice(0, history.length, ...saved.places);
+  cursor = saved.cursor;
+}
+if (!here().project) render();
 
 // The other half of the startup timing that `lib.rs` prints to stderr: how long
 // the page's own HTML took to arrive, and when the first render happened, both
@@ -836,11 +1045,23 @@ if (import.meta.env.DEV) {
       ? Math.round(navigation.responseStart)
       : "?";
   console.info(
-    `journaley: html arrived at ${responseStart} ms, first render at ${Math.round(performance.now())} ms`,
+    `journaley: html arrived at ${responseStart} ms, script ran at ${Math.round(performance.now())} ms`,
   );
 }
 
-// `journaley <folder>` opens straight into that project.
-void startupProject().then((path) => {
-  if (path) void openRecent(path);
+// `journaley <folder>` opens straight into that project; otherwise the saved
+// place is shown again, dialog included.
+void startupProject().then(async (path) => {
+  if (path) {
+    await openRecent(path);
+    return;
+  }
+  if (!(await apply(here()))) {
+    // The project folder has gone since last time. Its history is no use
+    // without it, so start over from the launch screen.
+    history.splice(0, history.length, launch());
+    cursor = 0;
+    saveHistory();
+    render();
+  }
 });

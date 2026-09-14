@@ -13,6 +13,7 @@ import {
   exportPushFrame,
 } from "./api";
 import { formatRealWorld } from "./dates";
+import { accentOnDark } from "./theme";
 
 export interface ExportSettings {
   output: string;
@@ -244,7 +245,9 @@ function drawLabels(
 
   // Anchored to its own corner, so the number grows rightward and the word
   // "Day" never moves.
-  ctx.fillStyle = "#f0a84a";
+  // The app's accent, so an export looks like the app it came from. Lightened
+  // first where the chosen colour would be too dark to read on the scrim.
+  ctx.fillStyle = accentOnDark();
   ctx.textAlign = "left";
   ctx.fillText(`Day ${entry.day_number}`, margin, margin);
 

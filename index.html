@@ -5,6 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Journaley</title>
     <link rel="stylesheet" href="/src/styles.css" />
+    <script>
+      // Blocking on purpose, and duplicated from `src/theme.ts` on purpose: the
+      // module graph is fetched after the first paint, so anything left to it
+      // shows a frame of the wrong theme first. Only what is visible at that
+      // size is done here — the accent's derived shades follow a frame later,
+      // which is why the keys and the `system` fallback must match `theme.ts`.
+      (function bootTheme() {
+        try {
+          var choice = localStorage.getItem("journaley.theme") || "system";
+          var dark =
+            choice === "dark" ||
+            (choice !== "light" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          var accent = localStorage.getItem("journaley.accent");
+          if (accent && /^#[0-9a-f]{6}$/i.test(accent)) {
+            document.documentElement.style.setProperty("--accent", accent);
+          }
+        } catch (err) {
+          // Private-mode storage, or none at all. The stylesheet's own defaults
+          // are a complete theme, so there is nothing to fall back to.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

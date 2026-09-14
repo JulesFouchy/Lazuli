@@ -167,6 +167,16 @@ export const exportFinish = () => invoke<string>("export_finish");
 
 export const exportCancel = () => invoke<void>("export_cancel");
 
+/**
+ * Mirror the theme choice into the Rust settings file.
+ *
+ * The page's own copy is in `localStorage`, which is the one that matters for
+ * painting the page. This copy exists so the *window* can be built in the right
+ * theme next launch, before any of this is running — see `theme.rs`.
+ */
+export const setThemePreference = (theme: string) =>
+  invoke<void>("set_theme_preference", { theme });
+
 /** Where the "new project" dialog should open. */
 export const defaultProjectsDir = () => invoke<string>("default_projects_dir");
 

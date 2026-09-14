@@ -9,15 +9,18 @@ pub mod dates;
 pub mod model;
 pub mod paths;
 pub mod store;
+pub mod theme;
 pub mod video;
 pub mod watch;
+
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Startup timing, printed in debug builds only. The gap from process start
     // to "started" is WebView2 coming up; "started" to "finished" is the page
     // and its module graph being served (by Vite, in a dev session). The page
-    // itself logs its first render, so the whole black-window interval can be
+    // itself logs when its script has run, so the whole black-window interval can be
     // split into who was waiting on what.
     let launched = std::time::Instant::now();
 
@@ -35,6 +38,26 @@ pub fn run() {
                     launched.elapsed().as_millis()
                 );
             }
+        })
+        // The window is built here rather than declared in `tauri.conf.json`,
+        // because its frame theme and background colour have to be known at
+        // creation: set afterwards, each one repaints the window in front of
+        // the user, and hiding it meanwhile only turns the flicker into a
+        // window that appears, vanishes and appears again.
+        .setup(|app| {
+            let dress = theme::dress_for(
+                commands::theme_preference(app.handle()).as_deref(),
+            );
+            // "main" is the label the capabilities file grants permissions to.
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                .title("Journaley")
+                .inner_size(1100.0, 820.0)
+                .min_inner_size(640.0, 480.0)
+                .maximized(true)
+                .theme(dress.theme)
+                .background_color(dress.background)
+                .build()?;
+            Ok(())
         })
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
@@ -61,6 +84,7 @@ pub fn run() {
             commands::journal_today,
             commands::startup_project,
             commands::default_projects_dir,
+            commands::set_theme_preference,
             commands::ffmpeg_status,
             commands::export_begin,
             commands::export_push_frame,
