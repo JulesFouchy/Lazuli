@@ -588,10 +588,16 @@ function projectCreated(project: Project): void {
 
 // --- back and forward ------------------------------------------------------
 //
-// A browser-shaped history over the app's own places rather than the webview's,
-// which is about URLs this app does not have. A place is "which project, and
-// which dialog on top of it", which is the whole of where you can be — so Back
-// and Forward move between dialogs as readily as between screens.
+// A stack of the app's own places rather than the webview's history, which is
+// about URLs this app does not have. A place is "which project, and which
+// dialog on top of it", which is the whole of where you can be — so the stack
+// runs from the launch screen inwards, and Back and Forward move between
+// dialogs as readily as between screens.
+//
+// It is deliberately not a browser history. Back never retraces a route: it is
+// the same move as Escape, always one layer out. What it leaves behind stays
+// ahead of the cursor, and Forward is what goes back down to it — to the dialog
+// just dismissed, or to the project just left.
 
 /** A dialog, identified by enough to reopen it. */
 type Modal =
@@ -738,15 +744,33 @@ function stepTo(index: number): void {
   void apply(here());
 }
 
-function goBack(): void {
+/**
+ * Out one layer, and the whole of what Back and Escape both do.
+ *
+ * Neither retraces where you have been: the stack runs from the launch screen
+ * inwards to whatever is on top, and this only ever comes back up it. Going
+ * back down is Forward's job.
+ */
+function goUp(): void {
   // The menu is the topmost layer, and is not itself a place.
   if (isContextMenuOpen()) {
     closeContextMenu();
     return;
   }
+  if (isModalOpen()) {
+    closeModal();
+    return;
+  }
+  // A field that owns its keystrokes is a layer too: this gets out of the
+  // project name before it gets out of the project.
+  if (isEditing()) {
+    (document.activeElement as HTMLElement | null)?.blur();
+    return;
+  }
   if (cursor > 0) stepTo(cursor - 1);
 }
 
+/** Back down into whatever was last left: the dialog, or the project. */
 function goForward(): void {
   closeContextMenu();
   if (cursor < history.length - 1) stepTo(cursor + 1);
@@ -902,7 +926,10 @@ function openHere(modal: Modal): void {
 // — is the same move as pressing Back, so Forward brings the dialog back.
 onModalDismissed(() => {
   if (navigating > 0 || !here().modal) return;
-  shownModal = null;
+  // `shownModal` stays as it is: clearing it here would make the step below
+  // look like a move to the place already on screen, and `apply` would return
+  // without doing the work of leaving — including putting the page back on the
+  // entry the viewer ended on.
   const underneath = history[cursor - 1];
   if (
     underneath &&
@@ -999,7 +1026,7 @@ void getCurrentWebview().onDragDropEvent((event) => {
 // navigation and leave the single-page app, so both halves of the click are
 // swallowed and turned into a move within the app instead.
 const THUMB_BUTTONS = new Map([
-  [3, goBack],
+  [3, goUp],
   [4, goForward],
 ]);
 
@@ -1028,16 +1055,9 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  // Escape peels off one layer at a time: the menu, then the dialog, then
-  // whatever has the cursor.
   if (event.key === "Escape") {
     event.preventDefault();
-    if (isContextMenuOpen()) closeContextMenu();
-    else if (isModalOpen()) closeModal();
-    // A field that owns its keystrokes is a layer too: Escape gets out of the
-    // project name before it gets out of the project.
-    else if (isEditing()) (document.activeElement as HTMLElement | null)?.blur();
-    else if (state.project) void goTo({ project: null, modal: null });
+    goUp();
   }
 });
 
