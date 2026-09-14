@@ -25,7 +25,7 @@ Committing and pushing are allowed in this repo (an exception to the global rule
 
 **Always commit when a piece of work is finished, and push it**, without being asked. This includes work that is only markdown — a design decision recorded in the vault is exactly the kind of thing that is worth a commit of its own.
 
-Commit only the files belonging to the work at hand. The owner's own uncommitted changes stay untouched, unless the work genuinely depends on them, in which case say so. Assume the tree holds unrelated changes: name every path explicitly on `git add` and `git commit`, never `-a`, never `.`, and check `git status` first so a stray file is a decision rather than an accident.
+Commit only the files belonging to the work at hand, AND any edits to wip.md and the projects folder, those are the owner's edit and you are responsible for committing those. The owner's own source code uncommitted changes stay untouched, unless the work genuinely depends on them, in which case say so. Assume the tree holds unrelated changes: name every path explicitly on `git add` and `git commit`, never `-a`, never `.`, and check `git status` first so a stray file is a decision rather than an accident.
 
 **Say in the report that you committed and pushed, and stop there.** Which paths rode along, whose edits were left alone, that the staged set survived — the owner takes all of that as given, so listing it is noise. A commit that departs from the convention is the one thing worth a sentence.
 
