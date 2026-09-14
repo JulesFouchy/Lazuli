@@ -1,11 +1,13 @@
 ---
 summary: A settings UI, and the values that should move into it
-affects: [src-tauri/src/dates.rs, src-tauri/src/commands.rs, src/dates.ts, src/main.ts]
+affects: [src-tauri/src/dates.rs, src-tauri/src/commands.rs, src/dates.ts, src/main.ts, src/appearance.ts, src/theme.ts]
 ---
 
 # User settings
 
 There is already a settings file — `settings.json` in the app config dir, read and written by `commands.rs` — but it holds exactly one value, is written only as a side effect of creating a project, and has no UI. Several things that should be preferences are scattered elsewhere as a result.
+
+There is now one settings surface, `appearance.ts`, holding theme and accent only. It is a dialog, not a settings screen, and it deliberately reads neither `settings.json` nor anything in Rust: the theme has to be on the root element before the first paint, and a Tauri command is a round trip. Anything below that is *not* needed before the first paint should go to `settings.json` instead, whether or not it ends up in the same dialog.
 
 **This file exists to be found on the day someone builds a settings screen.** It lists what should end up in it.
 
@@ -26,10 +28,12 @@ Changing it silently rewrites history: every entry near the old boundary moves t
 
 `dates.ts` and `main.ts` keep these in the webview's `localStorage`. That works, but they are lost if the WebView2 profile is cleared, and they are invisible to anything outside the webview. They belong in `settings.json` with everything else. Low value on their own — worth doing only as part of the same pass.
 
+`theme.ts` keeps the theme and the accent there too, and those two should *stay* in `localStorage`: `index.html` reads them in a blocking inline script so the first paint is already in the right theme, which a Rust round trip cannot do. They are listed here only so a later pass does not sweep them up with the other two.
+
 ### `projects_dir` — already there
 
 Where the "new project" dialog opens. Currently only ever set implicitly, by creating a project somewhere. A settings screen should let it be chosen directly.
 
 ## Why not yet
 
-One hardcoded constant does not justify a settings screen, and 05:00 has not yet been wrong for anyone. Build this when there are two or three things worth putting in it, which this file will tell you.
+One hardcoded constant does not justify a settings screen, and 05:00 has not yet been wrong for anyone. The Appearance dialog is not that screen: it holds the two values that have to be read before the page paints, and nothing else. Build the real one when there are two or three things worth putting in it, which this file will tell you.

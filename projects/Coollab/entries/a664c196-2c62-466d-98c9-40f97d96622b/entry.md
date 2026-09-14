@@ -1,7 +1,9 @@
 ---
 date: 2026-08-23
 created: 2026-08-23T21:30:00+02:00
-image: null
+image: pasted-2026-09-14T08-10-25.png
 ---
 
-A nice multi-scale bloom ISF, and an effect-preview package that renders any effect to a png or a gif.
+Tool to export gif previews of effects:
+- blog article illustrations
+- node thumbnails in the UI

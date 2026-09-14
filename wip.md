@@ -1,17 +1,18 @@
 ## Triage
 
-need a way to see images bigger, probably edit becomes a pencil button in top right (and ctrl+click on card), and clicking the card actually opens it in fullscreen (full image, original aspect ratio, and text line at the bottom, and we can go left/right to see previous/next entry, using back arrow keys and small arrow buttons on screen)
+alt + left/right arrow should work as forward/backward button
 
 we should see the current date at the top
 
 hide top bar, like in zen
-
-more contrast in the ui (eg dark images on the dark background don't read well, they should have a white / accent color outline), also needs both light and dark themes
-make the accent color customizable
-
-in entry card, the sentence should be above the image?
+F11 should toggle fullscreen
 
 the button shouldn't say "Open folder..." but "Open project..."
+
+remove the "1 other attempt" text when there are several pictures
+
+spell checker on text input
+
 
 ## Import initial projects
 
@@ -23,6 +24,9 @@ Add soirée test communaele + screen of wip web ui + conf lgm, ui investigation 
 
 For Coollab images, never show code, always a render or the UI, because it's more visual, and eg we can see the ui evolving over time
 Maybe find some old images on discord ?
+
+Store the Coollab project on the Coollab repo so other collaborators can add entries too
+
 ## Cross-project timeline
 
 So I can see all the things I did in one place, when I was more on a given project, etc
