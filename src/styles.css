@@ -607,9 +607,9 @@ textarea {
   color: var(--text-dim);
 }
 
-/* The pencil in the header's top right. Faint until the card is under the
-   pointer: it is the second thing a card does, and the first is to be looked
-   at. */
+/* The pencil in the header's top right. Not there at all until the card is
+   under the pointer: it is the second thing a card does, and the first is to
+   be looked at. */
 .card__edit {
   align-self: center;
   width: 26px;
@@ -622,7 +622,7 @@ textarea {
   font-size: 14px;
   line-height: 1;
   color: var(--text-faint);
-  opacity: 0.45;
+  opacity: 0;
   transition: opacity 120ms, background 120ms, color 120ms;
 }
 
@@ -808,13 +808,24 @@ textarea {
 }
 
 /* The picture takes whatever is left once the caption has its line, and keeps
-   its own proportions inside that — this is the one place it is not cropped. */
+   its own proportions inside that — this is the one place it is not cropped.
+   Magnified it is larger than the stage, and the stage is what crops it. */
 .viewer__stage {
   flex: 1;
   min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.viewer__stage--zoomed {
+  cursor: grab;
+}
+
+.viewer__stage--zoomed:active {
+  cursor: grabbing;
 }
 
 /* Fills the stage rather than only shrinking to it: a small picture is exactly
@@ -826,9 +837,9 @@ textarea {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  /* Clicks land on the stage underneath, which dismisses. The element covers
-     its letterbox bars, so without this the margins around a picture would be
-     the one part of the backdrop that did not close. */
+  /* The element covers its own letterbox bars, so it cannot be the thing that
+     decides what a click meant. Every pointer event goes to the stage, which
+     works out from the picture's real rectangle whether the click was on it. */
   pointer-events: none;
 }
 
@@ -871,64 +882,6 @@ textarea {
 .viewer__text--empty {
   color: var(--text-faint);
   font-style: italic;
-}
-
-.viewer__edit {
-  align-self: center;
-  width: 26px;
-  height: 26px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  line-height: 1;
-  color: var(--text-faint);
-  transition: background 120ms, color 120ms;
-}
-
-.viewer__edit:hover {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
-.viewer__nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-  line-height: 1;
-  border-radius: 50%;
-  background: var(--bg-raised);
-  border: 1px solid var(--line-strong);
-  box-shadow: var(--shadow-2);
-  opacity: 0.7;
-  transition: opacity 120ms;
-}
-
-.viewer__nav:hover {
-  opacity: 1;
-}
-
-/* Kept in place rather than hidden at the ends of the timeline, so the arrows
-   do not move under the pointer halfway through a read. */
-.viewer__nav:disabled {
-  opacity: 0.2;
-  cursor: default;
-}
-
-.viewer__nav--prev {
-  left: 0;
-}
-
-.viewer__nav--next {
-  right: 0;
 }
 
 /* --- appearance dialog --------------------------------------------------- */

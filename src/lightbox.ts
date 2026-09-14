@@ -1,8 +1,9 @@
 // The fullscreen entry viewer.
 //
 // A card crops its picture to keep several entries on the page at once; this is
-// the one place the picture is shown whole. Left and right walk the timeline
-// without leaving the viewer, so a project can be read straight through.
+// the one place the picture is shown whole, and the one place it can be looked
+// into. The arrows and the wheel walk the timeline without leaving the viewer,
+// so a project can be read straight through.
 
 import type { Entry, Project } from "./api";
 import { assetUrl } from "./api";
@@ -11,20 +12,27 @@ import { closeModal, openModal } from "./modal";
 import { dateToggle } from "./timeline";
 import { el } from "./ui";
 
+/** How far a click into the picture magnifies it. */
+const ZOOM = 2.5;
+
+/** Wheel delta to accumulate before stepping to the next entry. */
+const WHEEL_STEP = 60;
+
+/** Pointer movement, in pixels, past which a press was a drag and not a click. */
+const DRAG_SLOP = 4;
+
 export interface ViewerContext {
   project: () => Project;
   /** Re-read the entry from the latest project state, or null if it is gone. */
   entry: (id: string) => Entry | null;
   /** The entries in the order the page shows them. */
   entries: () => Entry[];
-  /** Open the editor for this entry. */
-  edit: (id: string) => void;
   /**
    * The viewer is showing a different entry.
    *
    * Walking the timeline is not a move: it records which entry is on screen
    * without pushing a place, so Back leaves the viewer rather than retracing
-   * every arrow press one picture at a time.
+   * every step one picture at a time.
    */
   moved: (id: string) => void;
 }
@@ -34,8 +42,14 @@ interface OpenViewer {
   context: ViewerContext;
   stage: HTMLElement;
   caption: HTMLElement;
-  prev: HTMLButtonElement;
-  next: HTMLButtonElement;
+  /** The picture, or null for an entry that has none. */
+  image: HTMLImageElement | null;
+  /** What the stage was last drawn from, so a rescan only rebuilds a changed picture. */
+  shown: string;
+  /** Magnified, and therefore pannable. */
+  zoomed: boolean;
+  panX: number;
+  panY: number;
 }
 
 let viewer: OpenViewer | null = null;
@@ -45,24 +59,9 @@ export function openLightbox(id: string, context: ViewerContext): void {
 
   const stage = el("div", { class: "viewer__stage" });
   const caption = el("div", { class: "viewer__caption" });
+  const body = el("div", { class: "viewer" }, stage, caption);
 
-  const body = el(
-    "div",
-    {
-      class: "viewer",
-      // The viewer fills the overlay, so what looks like backdrop around the
-      // picture is really the viewer's own empty space. Clicking it has to
-      // dismiss, or the one dialog that covers the window would be the one
-      // that cannot be clicked away.
-      onclick: (event: Event) => {
-        if (event.target === body || event.target === stage) closeModal();
-      },
-    },
-    stage,
-    caption,
-    navButton("prev", "‹", "Previous entry (←)"),
-    navButton("next", "›", "Next entry (→)"),
-  );
+  bindPointer(stage);
 
   openModal({
     // No header: the date is in the caption, under the picture it belongs to.
@@ -71,6 +70,7 @@ export function openLightbox(id: string, context: ViewerContext): void {
     body,
     onClose: () => {
       viewer = null;
+      wheelTowards = 0;
     },
   });
 
@@ -80,36 +80,28 @@ export function openLightbox(id: string, context: ViewerContext): void {
     context,
     stage,
     caption,
-    prev: body.querySelector(".viewer__nav--prev") as HTMLButtonElement,
-    next: body.querySelector(".viewer__nav--next") as HTMLButtonElement,
+    image: null,
+    shown: "",
+    zoomed: false,
+    panX: 0,
+    panY: 0,
   };
-  draw();
+  draw({ reset: true });
 }
 
-/** Bring the viewer up to date after a rescan. */
+/**
+ * Bring the viewer up to date after a rescan.
+ *
+ * Keeps the magnification: a rescan is the app's own writes coming back, and
+ * losing your place in a picture every time something on disk settles would
+ * make the viewer unusable while anything else is happening.
+ */
 export function refreshLightbox(id: string, context: ViewerContext): void {
   // Not the entry on screen — or the viewer is not open. Either way there is
   // nothing here to correct.
   if (!viewer || viewer.id !== id) return;
   viewer.context = context;
   draw();
-}
-
-function navButton(
-  side: "prev" | "next",
-  glyph: string,
-  title: string,
-): HTMLElement {
-  return el("button", {
-    class: `viewer__nav viewer__nav--${side}`,
-    title,
-    "aria-label": title,
-    text: glyph,
-    onclick: (event: Event) => {
-      event.stopPropagation();
-      step(side === "prev" ? -1 : 1);
-    },
-  });
 }
 
 /** Move `delta` entries along the page's own order, if there is one to move to. */
@@ -121,70 +113,274 @@ function step(delta: number): void {
   if (!target) return;
   viewer.id = target.id;
   viewer.context.moved(target.id);
-  draw();
+  draw({ reset: true });
 }
 
-function draw(): void {
+/**
+ * Redraw whatever has changed.
+ *
+ * `reset` is for arriving at a different entry, where carrying a magnification
+ * over would land the next picture cropped to a corner of the one before.
+ */
+function draw(options: { reset?: boolean } = {}): void {
   if (!viewer) return;
   const { context, stage, caption } = viewer;
   const entry = context.entry(viewer.id);
 
+  if (options.reset) {
+    viewer.zoomed = false;
+    viewer.panX = 0;
+    viewer.panY = 0;
+  }
+
   if (!entry) {
-    stage.replaceChildren(el("p", { class: "empty", text: "This entry is gone." }));
+    viewer.image = null;
+    viewer.shown = "gone";
+    viewer.zoomed = false;
+    stage.replaceChildren(
+      el("p", { class: "empty", text: "This entry is gone." }),
+    );
     caption.replaceChildren();
-    viewer.prev.disabled = true;
-    viewer.next.disabled = true;
+    applyTransform();
     return;
   }
 
-  stage.replaceChildren(
-    entry.image
-      ? el("img", {
+  // Rebuilding an unchanged picture would reload it, and a reload is a flash of
+  // nothing where the picture was.
+  const shown = `${entry.id}::${entry.image ?? ""}`;
+  if (shown !== viewer.shown) {
+    viewer.shown = shown;
+    viewer.image = entry.image
+      ? (el("img", {
           class: "viewer__image",
-          src: assetUrl(context.project().root, "entries", entry.id, entry.image),
+          src: assetUrl(
+            context.project().root,
+            "entries",
+            entry.id,
+            entry.image,
+          ),
           alt: entry.text || "Entry illustration",
-        })
-      : el("div", { class: "viewer__placeholder", text: "No image chosen" }),
-  );
+        }) as HTMLImageElement)
+      : null;
+    stage.replaceChildren(
+      viewer.image ??
+        el("div", { class: "viewer__placeholder", text: "No image chosen" }),
+    );
+  }
 
-  caption.replaceChildren(
+  drawCaption(entry);
+  applyTransform();
+}
+
+function drawCaption(entry: Entry): void {
+  if (!viewer) return;
+  viewer.caption.replaceChildren(
     dateToggle(entry),
     el(
       "p",
-      { class: entry.text ? "viewer__text" : "viewer__text viewer__text--empty" },
+      {
+        class: entry.text ? "viewer__text" : "viewer__text viewer__text--empty",
+      },
       entry.text || "No note yet",
     ),
-    el("button", {
-      class: "viewer__edit",
-      title: "Edit this entry",
-      text: "✎",
-      "aria-label": "Edit entry",
-      onclick: (event: Event) => {
-        event.stopPropagation();
-        context.edit(entry.id);
-      },
-    }),
   );
-
-  const entries = context.entries();
-  const at = entries.findIndex((other) => other.id === entry.id);
-  viewer.prev.disabled = at <= 0;
-  viewer.next.disabled = at < 0 || at >= entries.length - 1;
 }
 
-// The caption's date is a toggle like any other, and flips the whole page. The
-// page behind redraws itself; the caption has to follow, or the one date the
-// user actually clicked is the one that does not change.
-onDateFormatChange(() => {
-  if (viewer) draw();
-});
+// --- zoom and pan ----------------------------------------------------------
+//
+// The picture is laid out by `object-fit: contain`, so the element is the whole
+// stage and the picture sits letterboxed inside it. Magnifying is therefore a
+// transform on the element, and the geometry below is about the picture's own
+// rectangle within it — which is what panning has to be clamped against, and
+// what tells a click on the picture from a click on the bare stage beside it.
 
-// The arrows, for as long as the viewer is up. Registered once rather than
-// added and removed around each open: the viewer is the only thing that wants
-// them, and a stale listener is one more thing to get wrong.
+/** Where the picture actually is: its size within the stage, and the stage's. */
+function geometry(): {
+  stage: DOMRect;
+  width: number;
+  height: number;
+} | null {
+  const image = viewer?.image;
+  if (!viewer || !image || !image.naturalWidth) return null;
+  const stage = viewer.stage.getBoundingClientRect();
+  const fit = Math.min(
+    stage.width / image.naturalWidth,
+    stage.height / image.naturalHeight,
+  );
+  return {
+    stage,
+    width: image.naturalWidth * fit,
+    height: image.naturalHeight * fit,
+  };
+}
+
+/** Keep the pan within the range that still leaves the picture covering the stage. */
+function clampPan(): void {
+  if (!viewer) return;
+  const geo = geometry();
+  if (!geo || !viewer.zoomed) {
+    viewer.panX = 0;
+    viewer.panY = 0;
+    return;
+  }
+  const limitX = Math.max(0, (geo.width * ZOOM - geo.stage.width) / 2);
+  const limitY = Math.max(0, (geo.height * ZOOM - geo.stage.height) / 2);
+  viewer.panX = Math.max(-limitX, Math.min(limitX, viewer.panX));
+  viewer.panY = Math.max(-limitY, Math.min(limitY, viewer.panY));
+}
+
+function applyTransform(): void {
+  if (!viewer) return;
+  clampPan();
+  const { image, stage, zoomed, panX, panY } = viewer;
+  if (image) {
+    image.style.transform = zoomed
+      ? `translate(${panX}px, ${panY}px) scale(${ZOOM})`
+      : "";
+  }
+  stage.classList.toggle("viewer__stage--zoomed", zoomed);
+}
+
+/** Whether a point in the window is on the picture rather than beside it. */
+function onPicture(clientX: number, clientY: number): boolean {
+  const geo = geometry();
+  if (!geo || !viewer) return false;
+  // Magnified, the picture covers the stage in at least one direction and the
+  // bars are gone; treat the whole stage as picture rather than doing the
+  // arithmetic twice.
+  if (viewer.zoomed) return true;
+  const dx = Math.abs(clientX - (geo.stage.left + geo.stage.width / 2));
+  const dy = Math.abs(clientY - (geo.stage.top + geo.stage.height / 2));
+  return dx <= geo.width / 2 && dy <= geo.height / 2;
+}
+
+/**
+ * Clicking and dragging on the stage.
+ *
+ * A click on the picture magnifies it around the point clicked, and a click on
+ * the magnified picture puts it back. A click on the bare stage beside a
+ * picture that does not fill it dismisses, which is what a click there would do
+ * over any other dialog.
+ */
+function bindPointer(stage: HTMLElement): void {
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  let travelled = 0;
+
+  stage.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    dragging = true;
+    travelled = 0;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    stage.setPointerCapture(event.pointerId);
+  });
+
+  stage.addEventListener("pointermove", (event) => {
+    if (!dragging || !viewer) return;
+    const dx = event.clientX - lastX;
+    const dy = event.clientY - lastY;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    travelled += Math.abs(dx) + Math.abs(dy);
+    if (!viewer.zoomed) return;
+    viewer.panX += dx;
+    viewer.panY += dy;
+    applyTransform();
+  });
+
+  stage.addEventListener("pointerup", (event) => {
+    if (!dragging || !viewer) return;
+    dragging = false;
+    stage.releasePointerCapture(event.pointerId);
+    // A drag that happened to end where it started is still a drag.
+    if (travelled > DRAG_SLOP) return;
+
+    if (viewer.zoomed) {
+      viewer.zoomed = false;
+      applyTransform();
+      return;
+    }
+    if (!onPicture(event.clientX, event.clientY)) {
+      closeModal();
+      return;
+    }
+    zoomAt(event.clientX, event.clientY);
+  });
+
+  stage.addEventListener("pointercancel", () => {
+    dragging = false;
+  });
+}
+
+/** Magnify about a point, so whatever was under the cursor stays under it. */
+function zoomAt(clientX: number, clientY: number): void {
+  const geo = geometry();
+  if (!viewer || !geo) return;
+  const fromCentreX = clientX - (geo.stage.left + geo.stage.width / 2);
+  const fromCentreY = clientY - (geo.stage.top + geo.stage.height / 2);
+  viewer.zoomed = true;
+  // The transform scales about the centre, so a point `d` from it lands at
+  // `ZOOM * d`; this is the translation that undoes that for the point clicked.
+  viewer.panX = fromCentreX * (1 - ZOOM);
+  viewer.panY = fromCentreY * (1 - ZOOM);
+  applyTransform();
+}
+
+// --- walking the timeline ---------------------------------------------------
+
+/**
+ * Wheel travel since the last step, so one flick is one entry.
+ *
+ * A wheel reports a stream of small deltas rather than one event per notch, and
+ * a trackpad reports dozens; without a threshold a single gesture would run off
+ * the end of the project.
+ */
+let wheelTowards = 0;
+
+window.addEventListener(
+  "wheel",
+  (event) => {
+    if (!viewer) return;
+    // The page behind is already locked, but the overlay is not a scroller and
+    // the browser would otherwise look for one.
+    event.preventDefault();
+
+    // Magnified, the wheel is how you get around the picture; the arrow keys
+    // are still the way out to the next entry.
+    if (viewer.zoomed) {
+      viewer.panX -= event.deltaX;
+      viewer.panY -= event.deltaY;
+      applyTransform();
+      return;
+    }
+
+    const delta = event.deltaY + event.deltaX;
+    // Turning back mid-gesture starts the count again rather than cancelling
+    // out what has already been wound up.
+    if (delta * wheelTowards < 0) wheelTowards = 0;
+    wheelTowards += delta;
+    if (Math.abs(wheelTowards) < WHEEL_STEP) return;
+    // Down and right are further along the page, which is the direction the
+    // right arrow goes.
+    step(wheelTowards > 0 ? 1 : -1);
+    wheelTowards = 0;
+  },
+  { passive: false },
+);
+
 window.addEventListener("keydown", (event) => {
   if (!viewer || event.ctrlKey || event.metaKey || event.altKey) return;
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
   event.preventDefault();
   step(event.key === "ArrowLeft" ? -1 : 1);
+});
+
+// The caption's date is a toggle like any other, and flips the whole page. The
+// page behind redraws itself; the caption has to follow, or the one date the
+// user actually clicked is the one that does not change.
+onDateFormatChange(() => {
+  const entry = viewer?.context.entry(viewer.id);
+  if (entry) drawCaption(entry);
 });

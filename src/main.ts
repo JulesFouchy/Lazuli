@@ -372,7 +372,6 @@ const viewerContext: ViewerContext = {
   entry: (id) => state.project?.entries.find((e) => e.id === id) ?? null,
   entries: () =>
     state.project ? displayedEntries(state.project, state.newestFirst) : [],
-  edit: (id) => openHere({ kind: "entry", id }),
   moved: (id) => noteViewerMoved(id),
 };
 
@@ -899,10 +898,11 @@ onModalDismissed(() => {
   if (navigating > 0 || !here().modal) return;
   shownModal = null;
   const underneath = history[cursor - 1];
-  // Whatever is underneath, dialog included: the editor reached from the
-  // viewer goes back to the picture it was opened from, not past it to the
-  // page. Only a place from another project is not what dismissing reveals.
-  if (underneath && underneath.project === here().project) {
+  if (
+    underneath &&
+    underneath.project === here().project &&
+    underneath.modal === null
+  ) {
     stepTo(cursor - 1);
   } else {
     // Arrived here some other way; the place underneath is not on the stack.
