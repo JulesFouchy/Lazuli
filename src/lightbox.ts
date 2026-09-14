@@ -256,8 +256,15 @@ function applyTransform(): void {
 
 /** Whether a point in the window is on the picture rather than beside it. */
 function onPicture(clientX: number, clientY: number): boolean {
+  if (!viewer) return false;
+  // No picture at all: the stage is bare from edge to edge, and a click
+  // anywhere on it is a click beside nothing.
+  if (!viewer.image) return false;
   const geo = geometry();
-  if (!geo || !viewer) return false;
+  // There is a picture, but it has not arrived yet and so has no rectangle to
+  // be inside. A click while it loads must not be read as a click past it and
+  // take the viewer down.
+  if (!geo) return true;
   // Magnified, the picture covers the stage in at least one direction and the
   // bars are gone; treat the whole stage as picture rather than doing the
   // arithmetic twice.
@@ -275,17 +282,24 @@ function onPicture(clientX: number, clientY: number): boolean {
  * picture that does not fill it dismisses, which is what a click there would do
  * over any other dialog.
  *
- * A drag moves the picture by the magnification rather than pixel for pixel.
- * Magnified, the picture is wider than the screen by more than the screen is
- * wide, so a hand-on-the-photograph drag runs the pointer into the edge of the
- * desk with the far side of the picture still out of reach.
+ * A drag moves the picture pixel for pixel with the pointer, so it stays under
+ * the hand that is moving it.
+ *
+ * The way a drag used to get stuck was a release the stage never saw: let go
+ * outside the window and no `pointerup` arrives, so the drag stayed live and
+ * the picture went on following a pointer with no button held. Hence the check
+ * on `buttons` and the two backstops at the bottom of this file.
  */
-function bindPointer(stage: HTMLElement): void {
-  let dragging = false;
-  let lastX = 0;
-  let lastY = 0;
-  let travelled = 0;
+let dragging = false;
+let lastX = 0;
+let lastY = 0;
+let travelled = 0;
 
+function endDrag(): void {
+  dragging = false;
+}
+
+function bindPointer(stage: HTMLElement): void {
   stage.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     dragging = true;
@@ -297,10 +311,8 @@ function bindPointer(stage: HTMLElement): void {
 
   stage.addEventListener("pointermove", (event) => {
     if (!dragging || !viewer) return;
-    // A button released where the window never saw it leaves the drag running,
-    // and the picture then follows a pointer that is not pressed at all.
     if ((event.buttons & 1) === 0) {
-      dragging = false;
+      endDrag();
       return;
     }
     const dx = event.clientX - lastX;
@@ -309,17 +321,20 @@ function bindPointer(stage: HTMLElement): void {
     lastY = event.clientY;
     travelled += Math.abs(dx) + Math.abs(dy);
     if (!viewer.zoomed) return;
-    viewer.panX += dx * ZOOM;
-    viewer.panY += dy * ZOOM;
+    viewer.panX += dx;
+    viewer.panY += dy;
     applyTransform();
   });
 
   stage.addEventListener("pointerup", (event) => {
     if (!dragging || !viewer) return;
-    dragging = false;
-    stage.releasePointerCapture(event.pointerId);
+    const wasDrag = travelled > DRAG_SLOP;
+    endDrag();
+    if (stage.hasPointerCapture(event.pointerId)) {
+      stage.releasePointerCapture(event.pointerId);
+    }
     // A drag that happened to end where it started is still a drag.
-    if (travelled > DRAG_SLOP) return;
+    if (wasDrag) return;
 
     if (viewer.zoomed) {
       viewer.zoomed = false;
@@ -333,10 +348,13 @@ function bindPointer(stage: HTMLElement): void {
     zoomAt(event.clientX, event.clientY);
   });
 
-  stage.addEventListener("pointercancel", () => {
-    dragging = false;
-  });
+  stage.addEventListener("pointercancel", endDrag);
 }
+
+// The release that ends a drag may happen where the stage never sees it —
+// outside the window, or with the window losing focus underneath it.
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("blur", endDrag);
 
 /** Magnify about a point, so whatever was under the cursor stays under it. */
 function zoomAt(clientX: number, clientY: number): void {

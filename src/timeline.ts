@@ -114,11 +114,12 @@ function entryCard(
       // So the viewer can put the page back on whichever card it ended on.
       "data-entry": entry.id,
       // The card is the picture, so a click opens the picture. Editing is the
-      // rarer of the two and has the pencil; Ctrl+click is its shortcut, for
-      // the same reason a modifier opens a link in a new tab.
+      // rarer of the two and has the pencil; a modified click is its shortcut,
+      // for the same reason a modified click opens a link in a new tab.
       onclick: (event: Event) => {
         const mouse = event as MouseEvent;
-        if (mouse.ctrlKey || mouse.metaKey) handlers.editEntry(entry);
+        const modified = mouse.ctrlKey || mouse.metaKey || mouse.shiftKey;
+        if (modified) handlers.editEntry(entry);
         else handlers.viewEntry(entry);
       },
       oncontextmenu: (event: Event) =>
@@ -143,7 +144,7 @@ function entryCard(
       el("button", {
         class: "card__edit",
         "aria-label": "Edit entry",
-        title: "Edit this entry — or Ctrl+click the card",
+        title: "Edit this entry — or Ctrl+click or Shift+click the card",
         text: "✎",
         onclick: (event: Event) => {
           event.stopPropagation();

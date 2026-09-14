@@ -792,6 +792,10 @@ textarea {
   border: none;
   box-shadow: none;
   overflow: hidden;
+  /* A panel's rounded corners, clipping content that reaches the edges: the
+     caption sits flush in the bottom corners and had its own smaller radius
+     shaved off there and nowhere else. There is no panel here to round. */
+  border-radius: 0;
 }
 
 .modal--viewer .modal__body {
@@ -862,7 +866,10 @@ textarea {
 .viewer__caption {
   flex: none;
   display: flex;
-  align-items: stretch;
+  /* The date is one line whatever the note is: a note that wraps grows its own
+     frame downwards, and the date stays beside the last line of it rather than
+     floating up the middle of a tall box. */
+  align-items: flex-end;
   gap: 10px;
 }
 
@@ -882,6 +889,7 @@ textarea {
 
 .viewer__date {
   flex: none;
+  white-space: nowrap;
 }
 
 .viewer__note {

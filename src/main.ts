@@ -700,6 +700,7 @@ function noteViewerMoved(id: string): void {
   if (place.modal?.kind !== "view") return;
   place.modal = { kind: "view", id };
   shownModal = modalKey(place);
+  viewerLeftOn = id;
   saveHistory();
 }
 
@@ -780,6 +781,10 @@ async function apply(place: Place): Promise<boolean> {
     } else {
       closeModal();
       shownModal = null;
+      // Every way out of the viewer arrives here, so this is where the page is
+      // put back on the entry it ended on. After the scroll was recorded just
+      // above, which is the position this replaces.
+      landOnViewerEntry();
     }
     return true;
   } finally {
@@ -867,6 +872,7 @@ function showModal(modal: Modal): void {
       openEntryEditor(modal.id, editorContext);
       break;
     case "view":
+      viewerLeftOn = modal.id;
       openLightbox(modal.id, viewerContext);
       break;
     case "cover":
@@ -896,7 +902,6 @@ function openHere(modal: Modal): void {
 // — is the same move as pressing Back, so Forward brings the dialog back.
 onModalDismissed(() => {
   if (navigating > 0 || !here().modal) return;
-  const dismissed = here().modal;
   shownModal = null;
   const underneath = history[cursor - 1];
   if (
@@ -909,14 +914,22 @@ onModalDismissed(() => {
     // Arrived here some other way; the place underneath is not on the stack.
     void goTo({ project: here().project, modal: null });
   }
-  // The viewer may have walked a long way from the card it was opened on, so
-  // the page comes out onto the entry it ended on rather than where it was
-  // left. After the step, which records the scroll it is about to replace.
-  if (dismissed?.kind === "view") scrollToEntry(dismissed.id);
 });
 
-/** Put the page on an entry's card, as near the middle as it will go. */
-function scrollToEntry(id: string): void {
+/**
+ * The entry the viewer was last showing, until the page has been put back on it.
+ *
+ * The viewer can walk a long way from the card it was opened on, and every way
+ * out of it — Escape, the backdrop, Back, a Forward that steps past it — should
+ * leave the page on the entry it ended on rather than where it was left.
+ */
+let viewerLeftOn: string | null = null;
+
+/** Put the page on the entry the viewer ended on, if it has not been already. */
+function landOnViewerEntry(): void {
+  const id = viewerLeftOn;
+  viewerLeftOn = null;
+  if (!id) return;
   const card = root.querySelector(`[data-entry="${CSS.escape(id)}"]`);
   card?.scrollIntoView({ block: "center" });
 }
