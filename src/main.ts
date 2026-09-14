@@ -896,6 +896,7 @@ function openHere(modal: Modal): void {
 // — is the same move as pressing Back, so Forward brings the dialog back.
 onModalDismissed(() => {
   if (navigating > 0 || !here().modal) return;
+  const dismissed = here().modal;
   shownModal = null;
   const underneath = history[cursor - 1];
   if (
@@ -908,7 +909,17 @@ onModalDismissed(() => {
     // Arrived here some other way; the place underneath is not on the stack.
     void goTo({ project: here().project, modal: null });
   }
+  // The viewer may have walked a long way from the card it was opened on, so
+  // the page comes out onto the entry it ended on rather than where it was
+  // left. After the step, which records the scroll it is about to replace.
+  if (dismissed?.kind === "view") scrollToEntry(dismissed.id);
 });
+
+/** Put the page on an entry's card, as near the middle as it will go. */
+function scrollToEntry(id: string): void {
+  const card = root.querySelector(`[data-entry="${CSS.escape(id)}"]`);
+  card?.scrollIntoView({ block: "center" });
+}
 
 async function addEntry(): Promise<void> {
   try {

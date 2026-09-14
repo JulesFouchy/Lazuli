@@ -856,21 +856,37 @@ textarea {
   border: 1px dashed var(--line-strong);
 }
 
-/* A card of its own rather than text laid straight on the backdrop: the
-   backdrop is a wash over whatever the page was, so nothing written on it can
-   be relied on to stay readable. */
+/* A row across the window, not a pill that fits its sentence: the date keeps
+   the same place on every entry, so walking the timeline does not shuffle it
+   about under the eye. */
 .viewer__caption {
   flex: none;
-  align-self: center;
-  max-width: 100%;
   display: flex;
-  align-items: baseline;
-  gap: 14px;
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* Frames of their own rather than text laid straight on the backdrop: the
+   backdrop is a wash over whatever the page was, so nothing written on it can
+   be relied on to stay readable. */
+.viewer__date,
+.viewer__note {
+  display: flex;
+  align-items: center;
   padding: 10px 16px;
   border-radius: var(--radius);
   background: var(--bg-raised);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-2);
+}
+
+.viewer__date {
+  flex: none;
+}
+
+.viewer__note {
+  flex: 1;
+  min-width: 0;
 }
 
 .viewer__text {

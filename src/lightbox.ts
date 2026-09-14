@@ -172,16 +172,29 @@ function draw(options: { reset?: boolean } = {}): void {
   applyTransform();
 }
 
+/**
+ * The date and the note, each in a frame of its own.
+ *
+ * Two frames rather than one pill that fits its sentence: the date then starts
+ * at the same place on every entry, and walking the timeline does not shuffle
+ * it about under the eye.
+ */
 function drawCaption(entry: Entry): void {
   if (!viewer) return;
   viewer.caption.replaceChildren(
-    dateToggle(entry),
+    el("div", { class: "viewer__date" }, dateToggle(entry)),
     el(
-      "p",
-      {
-        class: entry.text ? "viewer__text" : "viewer__text viewer__text--empty",
-      },
-      entry.text || "No note yet",
+      "div",
+      { class: "viewer__note" },
+      el(
+        "p",
+        {
+          class: entry.text
+            ? "viewer__text"
+            : "viewer__text viewer__text--empty",
+        },
+        entry.text || "No note yet",
+      ),
     ),
   );
 }
@@ -261,6 +274,11 @@ function onPicture(clientX: number, clientY: number): boolean {
  * the magnified picture puts it back. A click on the bare stage beside a
  * picture that does not fill it dismisses, which is what a click there would do
  * over any other dialog.
+ *
+ * A drag moves the picture by the magnification rather than pixel for pixel.
+ * Magnified, the picture is wider than the screen by more than the screen is
+ * wide, so a hand-on-the-photograph drag runs the pointer into the edge of the
+ * desk with the far side of the picture still out of reach.
  */
 function bindPointer(stage: HTMLElement): void {
   let dragging = false;
@@ -279,14 +297,20 @@ function bindPointer(stage: HTMLElement): void {
 
   stage.addEventListener("pointermove", (event) => {
     if (!dragging || !viewer) return;
+    // A button released where the window never saw it leaves the drag running,
+    // and the picture then follows a pointer that is not pressed at all.
+    if ((event.buttons & 1) === 0) {
+      dragging = false;
+      return;
+    }
     const dx = event.clientX - lastX;
     const dy = event.clientY - lastY;
     lastX = event.clientX;
     lastY = event.clientY;
     travelled += Math.abs(dx) + Math.abs(dy);
     if (!viewer.zoomed) return;
-    viewer.panX += dx;
-    viewer.panY += dy;
+    viewer.panX += dx * ZOOM;
+    viewer.panY += dy * ZOOM;
     applyTransform();
   });
 
@@ -347,15 +371,10 @@ window.addEventListener(
     // the browser would otherwise look for one.
     event.preventDefault();
 
-    // Magnified, the wheel is how you get around the picture; the arrow keys
-    // are still the way out to the next entry.
-    if (viewer.zoomed) {
-      viewer.panX -= event.deltaX;
-      viewer.panY -= event.deltaY;
-      applyTransform();
-      return;
-    }
-
+    // The same whether or not the picture is magnified: the wheel is how you
+    // move through the project, and a gesture that changed meaning depending on
+    // how closely you happened to be looking would be a trap. Dragging is how
+    // you get around a magnified picture.
     const delta = event.deltaY + event.deltaX;
     // Turning back mid-gesture starts the count again rather than cancelling
     // out what has already been wound up.
@@ -370,11 +389,20 @@ window.addEventListener(
   { passive: false },
 );
 
+/** Back along the page, and forward. Up and down because the page is a column. */
+const ARROWS = new Map([
+  ["ArrowLeft", -1],
+  ["ArrowUp", -1],
+  ["ArrowRight", 1],
+  ["ArrowDown", 1],
+]);
+
 window.addEventListener("keydown", (event) => {
   if (!viewer || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  const delta = ARROWS.get(event.key);
+  if (delta === undefined) return;
   event.preventDefault();
-  step(event.key === "ArrowLeft" ? -1 : 1);
+  step(delta);
 });
 
 // The caption's date is a toggle like any other, and flips the whole page. The

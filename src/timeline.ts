@@ -111,6 +111,8 @@ function entryCard(
     "article",
     {
       class: "card",
+      // So the viewer can put the page back on whichever card it ended on.
+      "data-entry": entry.id,
       // The card is the picture, so a click opens the picture. Editing is the
       // rarer of the two and has the pencil; Ctrl+click is its shortcut, for
       // the same reason a modifier opens a link in a new tab.
