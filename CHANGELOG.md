@@ -4,6 +4,10 @@ What changed in each release, for the person using Lapis rather than the person 
 
 Each version's section becomes the release notes verbatim, so write it before cutting the release — `scripts/release.mjs` refuses a version that has no section here, or one whose heading still says "unreleased". Headings are `## <version> — <date>`.
 
+## 0.1.1 — 2026-09-16
+
+- **F11** puts Lapis fullscreen, and takes it back out. It works from anywhere — the timeline, an open entry, the image viewer.
+
 ## 0.1.0 — 2026-09-16
 
 First release.

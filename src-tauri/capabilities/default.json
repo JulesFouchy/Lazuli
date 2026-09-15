@@ -14,6 +14,11 @@
       "comment": "Check for, download and install a new version. What makes this safe to expose is the Ed25519 signature: the plugin refuses any artifact not signed by the key whose public half is in `tauri.conf.json`, so a hijacked endpoint can serve nothing the app will run."
     },
     {
+      "identifier": "core:window:allow-set-fullscreen",
+      "comment": "F11. Paired with `is-fullscreen` because the toggle reads the window's own state rather than keeping its own."
+    },
+    "core:window:allow-is-fullscreen",
+    {
       "identifier": "core:window:allow-destroy",
       "comment": "Closing the window is held back for the moment an installer takes to launch, so the close has to be completed by hand afterwards."
     },

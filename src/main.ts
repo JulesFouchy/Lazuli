@@ -2,6 +2,7 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
@@ -1164,8 +1165,31 @@ window.addEventListener("wheel", (event) => {
   else goUp();
 });
 
+/**
+ * Fullscreen, asked for and read back from the window rather than tracked here.
+ *
+ * The window can leave fullscreen without going through this — the OS has its
+ * own ways — so a boolean kept on this side would eventually disagree with the
+ * window and hand the user an F11 that does nothing.
+ */
+async function toggleFullscreen(): Promise<void> {
+  const appWindow = getCurrentWindow();
+  await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
+}
+
 window.addEventListener("keydown", (event) => {
   const ctrl = event.ctrlKey || event.metaKey;
+
+  // Before anything else, and without the usual "not while editing" guard: F11
+  // is not a key that types anything, so it should work from inside a note and
+  // from inside the viewer just as it does from the timeline.
+  if (event.key === "F11") {
+    event.preventDefault();
+    void toggleFullscreen().catch((err) =>
+      toastError("Could not switch fullscreen", err),
+    );
+    return;
+  }
 
   // Alt with the arrows, as a browser has them. The viewer leaves arrows with
   // a modifier alone, so this works from inside it too.
