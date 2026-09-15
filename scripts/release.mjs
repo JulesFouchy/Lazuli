@@ -80,7 +80,15 @@ console.log(`Releasing ${version}\n`);
 // --- the release ------------------------------------------------------------
 
 step(`  version → ${version}`, "node", ["scripts/set-version.mjs", version]);
-step("  commit", "git", ["commit", "-am", `Lapis ${version}`]);
+
+// Normally the line above just changed three files. On a first release, or on
+// a re-run after the bump was committed by hand, it changed nothing and there
+// is no commit to make — which is fine, as long as the tag still gets cut.
+if (dryRun || run("git", ["status", "--porcelain"])) {
+  step("  commit", "git", ["commit", "-am", `Lapis ${version}`]);
+} else {
+  console.log(`  commit — nothing to commit, HEAD is already ${version}`);
+}
 step("  tag", "git", ["tag", `v${version}`]);
 step("  push", "git", ["push", "origin", "main"]);
 step("  push tag", "git", ["push", "origin", `v${version}`]);

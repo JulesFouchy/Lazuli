@@ -10,7 +10,6 @@
 // this build and refuses anything that does not match, so a hijacked endpoint
 // can stop updates arriving and cannot make one arrive.
 
-import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 
@@ -31,14 +30,6 @@ const CHECK_DELAY_MS = 4000;
  * which means killing the app out from under them.
  */
 let staged: Update | null = null;
-
-/** The version this build reports, cached because it cannot change. */
-let version: string | null = null;
-
-export async function appVersion(): Promise<string> {
-  version ??= await getVersion();
-  return version;
-}
 
 /**
  * Check, download, and arrange for the install to happen on close.

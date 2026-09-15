@@ -4,7 +4,7 @@ What changed in each release, for the person using Lapis rather than the person 
 
 Each version's section becomes the release notes verbatim, so write it before cutting the release — `scripts/release.mjs` refuses a version that has no section here, or one whose heading still says "unreleased". Headings are `## <version> — <date>`.
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-09-16
 
 First release.
 

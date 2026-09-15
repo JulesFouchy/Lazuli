@@ -50,7 +50,7 @@ import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
 import { displayedEntries, renderTimeline } from "./timeline";
 import { clear, el, isEditing, toast, toastError } from "./ui";
-import { appVersion, startUpdates } from "./updates";
+import { startUpdates } from "./updates";
 
 function appRoot(): HTMLElement {
   const node = document.getElementById("app");
@@ -136,14 +136,6 @@ function launchView(): HTMLElement {
     el("div", { class: "launch__heading", text: "Recent" }),
   );
 
-  // The only place the version is visible. It has to be somewhere: updates
-  // install themselves silently, so "it changed and now X is broken" is
-  // otherwise a report nobody can act on.
-  const version = el("div", { class: "launch__version", text: "" });
-  void appVersion().then((v) => {
-    version.textContent = `Lapis ${v}`;
-  });
-
   const list = el("div", { class: "recent" });
   view.append(list);
 
@@ -176,7 +168,6 @@ function launchView(): HTMLElement {
     // happens: the window can be up and asking before the backend is ready.
     .catch((err) => toastError("Could not read the recent projects", err));
 
-  view.append(version);
   return view;
 }
 

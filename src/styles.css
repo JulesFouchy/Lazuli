@@ -354,15 +354,6 @@ textarea {
   flex: 1;
 }
 
-/* Faint on purpose. It is not something anyone came here to read — it is here
-   so that it can be read out when something has gone wrong. */
-.launch__version {
-  margin-top: 28px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
 .launch__heading {
   font-size: 12px;
   font-weight: 600;
