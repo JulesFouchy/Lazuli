@@ -196,7 +196,7 @@ impl Encode {
             std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
         }
         eprintln!(
-            "journaley: could not remove the cancelled export at {}",
+            "lapis: could not remove the cancelled export at {}",
             self.output.display()
         );
     }
@@ -314,7 +314,7 @@ mod tests {
         };
 
         let output = std::env::temp_dir()
-            .join(format!("journaley-export-{}.mp4", uuid::Uuid::new_v4()));
+            .join(format!("lapis-export-{}.mp4", uuid::Uuid::new_v4()));
         let options = ExportOptions {
             output: output.clone(),
             seconds_per_frame: 0.5,
@@ -346,7 +346,7 @@ mod tests {
             return;
         };
         let output = std::env::temp_dir()
-            .join(format!("journaley-empty-{}.mp4", uuid::Uuid::new_v4()));
+            .join(format!("lapis-empty-{}.mp4", uuid::Uuid::new_v4()));
         let encode = Encode::start(
             &ffmpeg,
             &ExportOptions {
@@ -368,7 +368,7 @@ mod tests {
             return;
         };
         let output = std::env::temp_dir()
-            .join(format!("journaley-cancel-{}.mp4", uuid::Uuid::new_v4()));
+            .join(format!("lapis-cancel-{}.mp4", uuid::Uuid::new_v4()));
         let mut encode = Encode::start(
             &ffmpeg,
             &ExportOptions {

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::dates;
 
-/// `journaley.yaml` at the root of a project folder.
+/// `lapis.yaml` at the root of a project folder.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectMeta {
     pub name: String,
@@ -21,7 +21,7 @@ pub struct ProjectMeta {
     ///
     /// Per project, not per user: a hundred-day challenge is read by day
     /// number and a work journal by date, and that is a fact about the project
-    /// rather than about whoever opens it. Defaulted, so a `journaley.yaml`
+    /// rather than about whoever opens it. Defaulted, so a `lapis.yaml`
     /// written before the field existed reads as the calendar dates it showed.
     #[serde(default)]
     pub date_format: DateFormat,

@@ -1,4 +1,4 @@
-# Journaley
+# Lapis
 
 Local-first project journal: a project is a folder on disk, each entry is a dated sentence plus a picture, viewable as a timeline or exported as a one-second-per-entry summary video.
 

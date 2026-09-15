@@ -11,7 +11,7 @@ Timeline cards and picker thumbnails point straight at the original files. A car
 
 ## How
 
-Generate downscaled copies into a `.journaley-cache/` folder inside the project, keyed by source path and mtime. Gitignored, safe to delete at any time, and regenerated on demand — which keeps it consistent with everything being files on disk. Serve those to the timeline and the picker; the entry editor's chosen image and the video export keep using the originals.
+Generate downscaled copies into a `.lapis-cache/` folder inside the project, keyed by source path and mtime. Gitignored, safe to delete at any time, and regenerated on demand — which keeps it consistent with everything being files on disk. Serve those to the timeline and the picker; the entry editor's chosen image and the video export keep using the originals.
 
 Purely additive: nothing else has to change, and deleting the folder just makes it slow again rather than losing anything.
 

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Journaley</title>
+    <title>Lapis</title>
     <link rel="stylesheet" href="/src/styles.css" />
     <script>
       // Blocking on purpose, and duplicated from `src/theme.ts` on purpose: the
@@ -13,15 +13,19 @@
       // which is why the keys and the `system` fallback must match `theme.ts`.
       (function bootTheme() {
         try {
-          var choice = localStorage.getItem("journaley.theme") || "system";
+          var choice = localStorage.getItem("lapis.theme") || "system";
           var dark =
             choice === "dark" ||
             (choice !== "light" &&
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           document.documentElement.dataset.theme = dark ? "dark" : "light";
-          var accent = localStorage.getItem("journaley.accent");
+          var accent = localStorage.getItem("lapis.accent");
           if (accent && /^#[0-9a-f]{6}$/i.test(accent)) {
             document.documentElement.style.setProperty("--accent", accent);
+          }
+          var bg = localStorage.getItem(dark ? "lapis.bg.dark" : "lapis.bg.light");
+          if (bg && /^#[0-9a-f]{6}$/i.test(bg)) {
+            document.documentElement.style.setProperty("--bg", bg);
           }
         } catch (err) {
           // Private-mode storage, or none at all. The stylesheet's own defaults

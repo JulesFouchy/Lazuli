@@ -59,7 +59,7 @@ const FALLBACK_FOLDER_NAME: &str = "Project";
 
 /// The folder name a project called `name` gets.
 ///
-/// The project's real name lives in `journaley.yaml` and can be anything; this
+/// The project's real name lives in `lapis.yaml` and can be anything; this
 /// is only the folder it sits in, so it trades exactness for being a name the
 /// user can type in a terminal. Illegal characters become spaces rather than
 /// being dropped, so `Kitchen/Bathroom` reads as two words instead of one.
@@ -142,7 +142,7 @@ mod tests {
 
     impl TempDir {
         fn new(label: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("journaley-{label}-{}", uuid::Uuid::new_v4()));
+            let path = std::env::temp_dir().join(format!("lapis-{label}-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("should be able to create a temp dir");
             Self(path)
         }

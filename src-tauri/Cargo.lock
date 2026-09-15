@@ -1951,27 +1951,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "journaley"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "notify",
- "notify-debouncer-full",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "thiserror 2.0.20",
- "trash",
- "uuid",
- "winreg",
-]
-
-[[package]]
 name = "js-sys"
 version = "0.3.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2033,6 +2012,27 @@ checksum = "07293a4e297ac234359b510362495713f75ea345d5307140414f20c69ffeb087"
 dependencies = [
  "bitflags 2.13.1",
  "libc",
+]
+
+[[package]]
+name = "lapis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "notify",
+ "notify-debouncer-full",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "thiserror 2.0.20",
+ "trash",
+ "uuid",
+ "winreg",
 ]
 
 [[package]]

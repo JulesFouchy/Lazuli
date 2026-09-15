@@ -14,11 +14,20 @@
 use tauri::window::Color;
 use tauri::Theme;
 
-/// `--bg` for the dark theme, from `src/styles.css`. Change both together.
-const DARK_BG: Color = Color(0x0d, 0x0d, 0x10, 0xff);
+/// `--bg` for the dark theme, from `src/styles.css`, and the fallback when the
+/// user has not chosen a ground. Change both together.
+const DARK_BG: Color = Color(0x0b, 0x10, 0x20, 0xff);
 
 /// `--bg` for the light theme, from `src/styles.css`. Change both together.
 const LIGHT_BG: Color = Color(0xf1, 0xf0, 0xed, 0xff);
+
+/// The appearance as `settings.json` holds it: a choice, and a ground per
+/// theme. Any of them may be missing on a first run.
+pub struct Appearance {
+    pub choice: Option<String>,
+    pub dark: Option<String>,
+    pub light: Option<String>,
+}
 
 /// What to build the window with, from the stored choice.
 pub struct WindowDress {
@@ -35,20 +44,35 @@ pub struct WindowDress {
 /// chosen now, so the OS preference is read directly. The page will resolve the
 /// same preference through `prefers-color-scheme` a moment later; they agree
 /// because both read the same Windows setting.
-pub fn dress_for(choice: Option<&str>) -> WindowDress {
-    let theme = match choice {
+pub fn dress_for(appearance: &Appearance) -> WindowDress {
+    let theme = match appearance.choice.as_deref() {
         Some("light") => Some(Theme::Light),
         Some("dark") => Some(Theme::Dark),
         _ => None,
     };
     let resolved = theme.unwrap_or_else(os_theme);
+    let (chosen, fallback) = match resolved {
+        Theme::Light => (&appearance.light, LIGHT_BG),
+        _ => (&appearance.dark, DARK_BG),
+    };
     WindowDress {
         theme,
-        background: match resolved {
-            Theme::Light => LIGHT_BG,
-            _ => DARK_BG,
-        },
+        background: chosen
+            .as_deref()
+            .and_then(parse_hex)
+            .unwrap_or(fallback),
     }
+}
+
+/// `#rrggbb`, as the page writes it. Anything else is ignored rather than
+/// guessed at: the fallback is a colour the app is known to look right in.
+fn parse_hex(text: &str) -> Option<Color> {
+    let digits = text.strip_prefix('#')?;
+    if digits.len() != 6 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let channel = |at: usize| u8::from_str_radix(&digits[at..at + 2], 16).ok();
+    Some(Color(channel(0)?, channel(2)?, channel(4)?, 0xff))
 }
 
 /// The OS-wide light/dark preference, as Windows stores it.

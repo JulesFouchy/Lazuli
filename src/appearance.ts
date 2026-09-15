@@ -4,9 +4,13 @@ import { openModal } from "./modal";
 import {
   ACCENT_PRESETS,
   accentColour,
+  activeTheme,
+  BG_PRESETS,
+  backgroundColour,
   normaliseHex,
   onAppearanceChange,
   setAccent,
+  setBackground,
   setThemeChoice,
   themeChoice,
   type ThemeChoice,
@@ -30,6 +34,16 @@ export function openAppearanceDialog(): void {
 
   const themeRow = el("div", { class: "segmented" });
   const swatchRow = el("div", { class: "swatches" });
+  const groundRow = el("div", { class: "swatches" });
+
+  const customGround = el("input", {
+    class: "swatch swatch--custom",
+    type: "color",
+    title: "Any other colour",
+    "aria-label": "Custom background colour",
+    oninput: (event: Event) =>
+      setBackground((event.target as HTMLInputElement).value),
+  });
 
   // The native colour well. `input` rather than `change`, so dragging around
   // the picker repaints the app as it goes.
@@ -72,6 +86,24 @@ export function openAppearanceDialog(): void {
     // Assigned rather than rebuilt: replacing the input mid-drag would close
     // the picker the drag is happening in.
     custom.value = accent;
+
+    // The grounds on offer are the ones that belong to the theme on screen —
+    // a dark one is no use while the page is paper.
+    const ground = backgroundColour();
+    groundRow.replaceChildren(
+      ...BG_PRESETS[activeTheme()].map(({ name, hex }) =>
+        el("button", {
+          class: "swatch",
+          style: `background: ${hex}`,
+          title: name,
+          "aria-label": name,
+          "aria-pressed": String(ground === normaliseHex(hex)),
+          onclick: () => setBackground(hex),
+        }),
+      ),
+      customGround,
+    );
+    customGround.value = ground;
   };
 
   paint();
@@ -83,6 +115,12 @@ export function openAppearanceDialog(): void {
       { class: "field" },
       el("label", { text: "Theme" }),
       themeRow,
+    ),
+    el(
+      "div",
+      { class: "field" },
+      el("label", { text: "Background" }),
+      groundRow,
     ),
     el(
       "div",

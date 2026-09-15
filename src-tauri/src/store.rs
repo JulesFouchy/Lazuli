@@ -14,7 +14,7 @@ use std::time::SystemTime;
 
 use crate::model::{is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta};
 
-pub const META_FILE: &str = "journaley.yaml";
+pub const META_FILE: &str = "lapis.yaml";
 pub const ENTRIES_DIR: &str = "entries";
 pub const COVER_DIR: &str = "cover";
 pub const ENTRY_FILE: &str = "entry.md";
@@ -75,7 +75,7 @@ impl ProjectStore {
                 // One malformed or half-written entry must not take the whole
                 // project down; skip it and keep going.
                 Err(err) => {
-                    eprintln!("journaley: skipping {}: {err:#}", entry_file.display());
+                    eprintln!("lapis: skipping {}: {err:#}", entry_file.display());
                     continue;
                 }
             };
@@ -143,7 +143,7 @@ impl ProjectStore {
     }
 }
 
-/// Whether a folder looks like a journaley project.
+/// Whether a folder looks like a lapis project.
 pub fn is_project(root: &Path) -> bool {
     root.join(META_FILE).is_file()
 }
@@ -360,7 +360,7 @@ mod tests {
     impl TempDir {
         fn new(label: &str) -> Self {
             let path =
-                std::env::temp_dir().join(format!("journaley-{label}-{}", uuid::Uuid::new_v4()));
+                std::env::temp_dir().join(format!("lapis-{label}-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("should be able to create a temp dir");
             Self(path)
         }

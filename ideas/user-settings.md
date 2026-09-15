@@ -19,7 +19,7 @@ There is now one settings surface, `appearance.ts`, holding theme and accent onl
 
 Two constraints when moving it:
 
-- **It is global, not per-project.** It describes when *you* sleep, not anything about a project. It must not go in `journaley.yaml`, or the same entry would land on different days in different projects.
+- **It is global, not per-project.** It describes when *you* sleep, not anything about a project. It must not go in `lapis.yaml`, or the same entry would land on different days in different projects.
 - **`journal_date_at` already takes the hour as a parameter**, precisely so this is a one-line change at the call site rather than a refactor. Do not thread it through as an argument everywhere; give `dates.rs` a way to read the setting once.
 
 Changing it silently rewrites history: every entry near the old boundary moves to a different journal day, which shifts day numbers and gap lengths. The UI should say so before applying it.
@@ -28,7 +28,7 @@ Changing it silently rewrites history: every entry near the old boundary moves t
 
 `main.ts` keeps it in the webview's `localStorage`. That works, but it is lost if the WebView2 profile is cleared, and it is invisible to anything outside the webview. It belongs in `settings.json` with everything else. Low value on its own — worth doing only as part of the same pass.
 
-The date format was here too, and went the other way: it is a property of the project, so it lives in `journaley.yaml`. Ask of anything else on this list whether the same is true of it before moving it here.
+The date format was here too, and went the other way: it is a property of the project, so it lives in `lapis.yaml`. Ask of anything else on this list whether the same is true of it before moving it here.
 
 `theme.ts` keeps the theme and the accent in `localStorage` too, and those two should *stay* there: `index.html` reads them in a blocking inline script so the first paint is already in the right theme, which a Rust round trip cannot do. They are listed here only so a later pass does not sweep them up.
 

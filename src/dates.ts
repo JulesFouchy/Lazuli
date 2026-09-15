@@ -16,7 +16,7 @@ const MONTHS = [
 /**
  * The format of whichever project is open.
  *
- * A copy of what `journaley.yaml` says, so the renderers do not each have to be
+ * A copy of what `lapis.yaml` says, so the renderers do not each have to be
  * handed the project. [`adoptDateFormat`] is what keeps it a copy.
  */
 let current: DateFormat = "real";
@@ -38,7 +38,7 @@ export function adoptDateFormat(format: DateFormat): void {
  *
  * Clicking any single date toggles all of them: the format is a way of reading
  * the whole project, not a property of one entry — which is why it is stored in
- * `journaley.yaml` rather than against this machine.
+ * `lapis.yaml` rather than against this machine.
  */
 export function toggleDateFormat(): void {
   const previous = current;

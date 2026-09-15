@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities the Journaley window needs.",
+  "description": "Capabilities the Lapis window needs.",
   "windows": ["main"],
   "permissions": [
     "core:default",

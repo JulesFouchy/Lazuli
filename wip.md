@@ -1,22 +1,21 @@
 ## Triage
 
-rename the project to Rupestre (careful, also rename the project in .claude folder to keep memory and conversations)
-remove the project name + tagline from main screen
-Tagline: "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey"
-for the app icon use C:\Users\fouch\Downloads\rupestre.png
 
 transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
 
+when we copy paste an image file it should work to import the image
 
 we should see the current date at the top
 
 hide top bar, like in zen
 F11 should toggle fullscreen
 
-the button shouldn't say "Open folder..." but "Open project...", or "Import project..."?
+the button shouldn't say "Open folder..." but "Open project...", or "Import project..."? (and on hover we explain that each project is just a plain local folder)
 
+setup auto-updates
+make the proper installer (what do we need to setup the app ? are there some info i need to fill in ? I want to do everything properly)
 
-
+bug with the custom color selector it always closes when we start dragging
 
 ## Import initial projects
 

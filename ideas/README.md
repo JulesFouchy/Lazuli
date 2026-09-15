@@ -29,4 +29,4 @@ Worth doing because `affects` works here too: `rg "src/video" ideas/` surfaces *
 
 **Keep the bar high.** Only record a rejection whose reasoning is non-obvious, or that someone would plausibly propose again. Everything else is noise, and a folder nobody trusts to be worth reading is worse than no folder.
 
-A decision that constrains how code must be written is not a rejected idea — that belongs in a comment next to the code, where it cannot be missed. The reason `DAY_START_HOUR` must never go in `journaley.yaml` lives in `dates.rs`, not here.
+A decision that constrains how code must be written is not a rejected idea — that belongs in a comment next to the code, where it cannot be missed. The reason `DAY_START_HOUR` must never go in `lapis.yaml` lives in `dates.rs`, not here.

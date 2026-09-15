@@ -13,6 +13,7 @@ use crate::dates;
 use crate::model::{is_image, DateFormat, Project, ProjectMeta};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
+use crate::theme;
 use crate::video::{self, Encode, ExportOptions};
 use crate::watch::{self, ProjectWatcher};
 
@@ -164,7 +165,7 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
 
     if !store::is_project(&path) {
         bail!(
-            "{} is not a Journaley project (no {} inside)",
+            "{} is not a Lapis project (no {} inside)",
             path.display(),
             store::META_FILE
         );
@@ -229,7 +230,7 @@ pub fn rescan_and_emit(app: &AppHandle) {
                 let _ = app.emit(PROJECT_CHANGED, fresh);
             }
         }
-        Err(err) => eprintln!("journaley: rescan failed: {err:#}"),
+        Err(err) => eprintln!("lapis: rescan failed: {err:#}"),
     }
 }
 
@@ -749,7 +750,7 @@ fn restore(original_path: &Path) -> Result<String> {
         return Ok(name.to_owned());
     }
 
-    let stash = unique_path(parent, &format!("{name}.journaley-restoring"));
+    let stash = unique_path(parent, &format!("{name}.lapis-restoring"));
     fs::rename(original_path, &stash).with_context(|| {
         format!(
             "moving {} aside to make room for the restore",
@@ -851,7 +852,7 @@ pub fn export_cancel(state: State<AppState>) {
 
 // --- misc ----------------------------------------------------------------
 
-/// A project folder named on the command line, so `journaley <folder>` opens
+/// A project folder named on the command line, so `lapis <folder>` opens
 /// straight into it. Also what makes dragging a folder onto the exe work.
 #[tauri::command]
 pub fn startup_project() -> Option<PathBuf> {
@@ -955,7 +956,7 @@ pub async fn trash_project(
     path: PathBuf,
 ) -> CmdResult<Option<usize>> {
     if !store::is_project(&path) {
-        return Err(anyhow!("{} is not a Journaley project", path.display()).into());
+        return Err(anyhow!("{} is not a Lapis project", path.display()).into());
     }
 
     // Closing first so no rescan runs against a folder that is on its way to
@@ -1008,21 +1009,39 @@ struct Settings {
     /// exists so the *window* — its frame and the colour behind the page — is
     /// already right when it opens. See `theme.rs`.
     theme: Option<String>,
+    /// The chosen ground of each theme, as `#rrggbb`. Stored for the same
+    /// reason as `theme`, and useless without it: knowing the window should
+    /// open dark says nothing about *which* dark the user picked.
+    background_dark: Option<String>,
+    background_light: Option<String>,
 }
 
-/// The stored theme choice, for whoever is building the window.
-pub fn theme_preference(app: &AppHandle) -> Option<String> {
-    read_settings(app).theme
+/// The stored appearance, for whoever is building the window.
+pub fn appearance_preference(app: &AppHandle) -> theme::Appearance {
+    let settings = read_settings(app);
+    theme::Appearance {
+        choice: settings.theme,
+        dark: settings.background_dark,
+        light: settings.background_light,
+    }
 }
 
-/// Remember the theme, so the next launch opens a window of the right colour.
+/// Remember the theme and its grounds, so the next launch opens a window of
+/// the right colour.
 ///
 /// Called by the page after it has already applied the theme to itself: nothing
 /// on screen is waiting for this.
 #[tauri::command]
-pub fn set_theme_preference(app: AppHandle, theme: String) {
+pub fn set_theme_preference(
+    app: AppHandle,
+    theme: String,
+    background_dark: String,
+    background_light: String,
+) {
     let mut settings = read_settings(&app);
     settings.theme = Some(theme);
+    settings.background_dark = Some(background_dark);
+    settings.background_light = Some(background_light);
     write_settings(&app, &settings);
 }
 
@@ -1041,7 +1060,7 @@ fn built_in_projects_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .document_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
-        .join("Journaley")
+        .join("Lapis")
 }
 
 /// The folder the "new project" dialog should open in.

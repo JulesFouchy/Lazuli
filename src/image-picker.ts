@@ -160,7 +160,7 @@ export async function addDroppedPaths(
   try {
     const saved = await importImages(entryId, paths);
     if (saved.length === 0) {
-      toast("Nothing added: those files are not images Journaley can show.");
+      toast("Nothing added: those files are not images Lapis can show.");
       return;
     }
     // Names can differ from the originals when something already had them.

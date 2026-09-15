@@ -33,7 +33,7 @@ pub fn watch_project(app: AppHandle, root: &Path) -> Result<ProjectWatcher> {
             Ok(_) => crate::commands::rescan_and_emit(&app),
             Err(errors) => {
                 for error in errors {
-                    eprintln!("journaley: watch error: {error}");
+                    eprintln!("lapis: watch error: {error}");
                 }
             }
         },

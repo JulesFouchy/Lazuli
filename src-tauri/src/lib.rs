@@ -1,4 +1,4 @@
-//! Journaley: a local-first project journal.
+//! Lapis: a local-first project journal.
 //!
 //! A project is a folder on disk and nothing else. Everything the app knows is
 //! re-read from that folder; see [`store`] for the read path and [`watch`] for
@@ -34,7 +34,7 @@ pub fn run() {
                     tauri::webview::PageLoadEvent::Finished => "finished",
                 };
                 eprintln!(
-                    "journaley: page load {what} at {} ms",
+                    "lapis: page load {what} at {} ms",
                     launched.elapsed().as_millis()
                 );
             }
@@ -45,12 +45,11 @@ pub fn run() {
         // the user, and hiding it meanwhile only turns the flicker into a
         // window that appears, vanishes and appears again.
         .setup(|app| {
-            let dress = theme::dress_for(
-                commands::theme_preference(app.handle()).as_deref(),
-            );
+            let dress =
+                theme::dress_for(&commands::appearance_preference(app.handle()));
             // "main" is the label the capabilities file grants permissions to.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("Journaley")
+                .title("Lapis")
                 .inner_size(1100.0, 820.0)
                 .min_inner_size(640.0, 480.0)
                 .maximized(true)
@@ -93,5 +92,5 @@ pub fn run() {
             commands::export_cancel,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Journaley");
+        .expect("error while running Lapis");
 }

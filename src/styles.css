@@ -1,30 +1,30 @@
-/* Journaley — a quiet reading surface for a timeline of days, in two themes. */
+/* Lapis — a quiet reading surface for a timeline of days, in two themes. */
 
 /* Bundled rather than relying on installed fonts: the video frames are drawn
    with these, and an export should look the same on any machine. */
 @font-face {
-  font-family: "JournaleyMono";
+  font-family: "LapisMono";
   src: url("./fonts/jetbrains-mono-400.woff2") format("woff2");
   font-weight: 400;
   font-display: block;
 }
 
 @font-face {
-  font-family: "JournaleyMono";
+  font-family: "LapisMono";
   src: url("./fonts/jetbrains-mono-700.woff2") format("woff2");
   font-weight: 700;
   font-display: block;
 }
 
 @font-face {
-  font-family: "JournaleySans";
+  font-family: "LapisSans";
   src: url("./fonts/inter-500.woff2") format("woff2");
   font-weight: 500;
   font-display: block;
 }
 
 @font-face {
-  font-family: "JournaleySans";
+  font-family: "LapisSans";
   src: url("./fonts/inter-600.woff2") format("woff2");
   font-weight: 600;
   font-display: block;
@@ -47,8 +47,8 @@
   --radius: 10px;
   --radius-lg: 16px;
 
-  --sans: "JournaleySans", system-ui, "Segoe UI", Roboto, sans-serif;
-  --mono: "JournaleyMono", ui-monospace, Consolas, monospace;
+  --sans: "LapisSans", system-ui, "Segoe UI", Roboto, sans-serif;
+  --mono: "LapisMono", ui-monospace, Consolas, monospace;
 
   /* Text laid over a photograph. A cover is any brightness, so this is white
      in both themes, and the outline below is what makes it readable rather
@@ -57,13 +57,14 @@
   --on-photo-outline: rgba(0, 0, 0, 0.85);
 
   /* The default accent, and the shades `theme.ts` derives from it. Kept in
-     step with `DEFAULT_ACCENT` in `theme.ts`. */
-  --accent: #f0a84a;
-  --accent-hover: #f4bb72;
-  --accent-soft: rgba(240, 168, 74, 0.16);
-  --accent-line: rgba(240, 168, 74, 0.55);
+     step with `DEFAULT_ACCENT` in `theme.ts`. Gold, because the app is named
+     after the stone that gold is flecked through. */
+  --accent: #e3b04a;
+  --accent-hover: #e9c274;
+  --accent-soft: rgba(227, 176, 74, 0.16);
+  --accent-line: rgba(227, 176, 74, 0.55);
   --on-accent: #14140f;
-  --accent-text: #f0a84a;
+  --accent-text: #e3b04a;
 }
 
 /* Dark, and the fallback when nothing has set a theme.
@@ -74,21 +75,29 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0d0d10;
-  --bg-raised: #191920;
-  --bg-raised-hover: #23232c;
-  --bg-sunken: #08080a;
-  --bg-inset: #131319;
+  /* Lapis: a blue dark enough to read a page on, but never mistakable for
+     grey. The whole ramp keeps the same hue so that a raised card reads as
+     the same stone catching more light, not as a different material.
 
-  --line: #30303b;
-  --line-strong: #4a4a58;
+     The four surfaces are what `backgroundVariables` in `theme.ts` derives
+     from `--bg`, written out so the page is complete before any script runs.
+     They must stay the derived values, or the cards shift colour one frame
+     after the window opens. */
+  --bg: #0b1020;
+  --bg-raised: #121a33;
+  --bg-raised-hover: #172142;
+  --bg-sunken: #070a14;
+  --bg-inset: #0f162b;
 
-  --text: #f5f5f8;
-  --text-dim: #b0b0be;
-  --text-faint: #83838f;
+  --line: #2b3554;
+  --line-strong: #44507a;
 
-  --danger: #ff6f61;
-  --danger-soft: rgba(255, 111, 97, 0.14);
+  --text: #f2f4fb;
+  --text-dim: #aab2cc;
+  --text-faint: #7d86a3;
+
+  --danger: #ff7a6b;
+  --danger-soft: rgba(255, 122, 107, 0.14);
 
   /* The ring around a photograph. Its whole job is to stop a dark image
      dissolving into a dark page, so it is light here and dark on the light
@@ -99,26 +108,28 @@
   --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.45);
   --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.6);
 
-  --overlay: rgba(4, 4, 6, 0.74);
+  --overlay: rgba(3, 5, 14, 0.74);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* Warm off-white rather than pure white: photographs sit better on it, and
-     it stops the cards from disappearing into the page. */
+  /* The other half of the same image: ink on vellum rather than gold on
+     stone. The paper stays warm — photographs sit better on it, and it stops
+     the cards disappearing into the page — while the ink carries the blue, so
+     the two themes are one palette seen in two lights. */
   --bg: #f1f0ed;
-  --bg-raised: #ffffff;
-  --bg-raised-hover: #f6f5f2;
-  --bg-sunken: #e4e3de;
-  --bg-inset: #fbfaf8;
+  --bg-raised: #fefefe;
+  --bg-raised-hover: #f7f7f5;
+  --bg-sunken: #e4e3e0;
+  --bg-inset: #fcfbfb;
 
   --line: #d2d0ca;
   --line-strong: #a9a69e;
 
-  --text: #16161a;
-  --text-dim: #55555f;
-  --text-faint: #74747f;
+  --text: #141a2c;
+  --text-dim: #4d5468;
+  --text-faint: #717a8f;
 
   --danger: #c33a2c;
   --danger-soft: rgba(195, 58, 44, 0.1);
@@ -322,18 +333,6 @@ textarea {
   max-width: 640px;
   margin: 0 auto;
   padding: 96px 24px 64px;
-}
-
-.launch__title {
-  margin: 0;
-  font-size: 34px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-
-.launch__tagline {
-  margin: 6px 0 40px;
-  color: var(--text-dim);
 }
 
 .launch__actions {

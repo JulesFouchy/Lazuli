@@ -10,8 +10,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { setThemePreference } from "./api";
 
-const THEME_KEY = "journaley.theme";
-const ACCENT_KEY = "journaley.accent";
+const THEME_KEY = "lapis.theme";
+const ACCENT_KEY = "lapis.accent";
+
+/** One per theme: a background chosen against paper is not a dark ground. */
+const BG_KEY: Record<Theme, string> = {
+  dark: "lapis.bg.dark",
+  light: "lapis.bg.light",
+};
 
 /** What the user chose. `system` follows the OS and is the default. */
 export type ThemeChoice = "system" | "light" | "dark";
@@ -19,23 +25,55 @@ export type ThemeChoice = "system" | "light" | "dark";
 /** What that resolves to once the OS has been asked. */
 export type Theme = "light" | "dark";
 
-export const DEFAULT_ACCENT = "#f0a84a";
+export const DEFAULT_ACCENT = "#e3b04a";
 
 /** The offered accents. The first is the default, and the app's own colour. */
 export const ACCENT_PRESETS: { name: string; hex: string }[] = [
-  { name: "Amber", hex: DEFAULT_ACCENT },
+  { name: "Gold", hex: DEFAULT_ACCENT },
+  { name: "Amber", hex: "#f0a84a" },
   { name: "Coral", hex: "#f2705d" },
   { name: "Rose", hex: "#e8618f" },
   { name: "Violet", hex: "#9b7bf0" },
-  { name: "Blue", hex: "#4d9df0" },
+  { name: "Sky", hex: "#4d9df0" },
   { name: "Teal", hex: "#31b8a6" },
   { name: "Lime", hex: "#8bc44a" },
 ];
+
+/**
+ * The default ground for each theme. Kept in step with `--bg` in `styles.css`
+ * and with the constants in `src-tauri/src/theme.rs`, which paints the window
+ * with one of them before the page exists.
+ */
+export const DEFAULT_BG: Record<Theme, string> = {
+  dark: "#0b1020",
+  light: "#f1f0ed",
+};
+
+/** The offered grounds, per theme. The first of each is that theme's default. */
+export const BG_PRESETS: Record<Theme, { name: string; hex: string }[]> = {
+  dark: [
+    { name: "Lapis", hex: DEFAULT_BG.dark },
+    { name: "Ink", hex: "#0d0d10" },
+    { name: "Bistre", hex: "#17120d" },
+    { name: "Verdigris", hex: "#071613" },
+    { name: "Porphyry", hex: "#150b14" },
+  ],
+  light: [
+    { name: "Vellum", hex: DEFAULT_BG.light },
+    { name: "Paper", hex: "#fbfbfa" },
+    { name: "Chalk", hex: "#eef0f4" },
+    { name: "Linen", hex: "#f3ece1" },
+  ],
+};
 
 const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 let choice = readChoice();
 let accent = readAccent();
+const background: Record<Theme, string> = {
+  dark: readBackground("dark"),
+  light: readBackground("light"),
+};
 
 const listeners = new Set<() => void>();
 
@@ -47,6 +85,9 @@ export function onAppearanceChange(listener: () => void): () => void {
 
 export const themeChoice = (): ThemeChoice => choice;
 export const accentColour = (): string => accent;
+
+/** The ground of the theme currently on screen. */
+export const backgroundColour = (): string => background[activeTheme()];
 
 /** The theme actually on screen, with `system` resolved. */
 export function activeTheme(): Theme {
@@ -68,6 +109,16 @@ export function setAccent(hex: string): void {
   apply();
 }
 
+/** Set the ground of the theme currently on screen. */
+export function setBackground(hex: string): void {
+  const normalised = normaliseHex(hex);
+  if (!normalised) return;
+  const theme = activeTheme();
+  background[theme] = normalised;
+  localStorage.setItem(BG_KEY[theme], normalised);
+  apply();
+}
+
 /** Put the stored appearance on the document, and keep it in step with the OS. */
 export function startTheme(): void {
   apply();
@@ -82,8 +133,13 @@ function apply(): void {
   const theme = activeTheme();
   const root = document.documentElement;
   root.dataset.theme = theme;
+  const ground = background[theme];
   applyWindowTheme();
-  for (const [name, value] of Object.entries(accentVariables(accent, theme))) {
+  const variables = {
+    ...accentVariables(accent, theme),
+    ...backgroundVariables(ground, theme),
+  };
+  for (const [name, value] of Object.entries(variables)) {
     root.style.setProperty(name, value);
   }
   for (const listener of listeners) listener();
@@ -104,9 +160,11 @@ function applyWindowTheme(): void {
   void getCurrentWindow()
     .setTheme(choice === "system" ? null : choice)
     .catch(() => {});
-  // The same choice, written where the next launch can find it before the
-  // window is built. Nothing on screen waits for it.
-  void setThemePreference(choice).catch(() => {});
+  // The same choice and the same grounds, written where the next launch can
+  // find them before the window is built. Nothing on screen waits for it.
+  void setThemePreference(choice, background.dark, background.light).catch(
+    () => {},
+  );
 }
 
 /**
@@ -136,6 +194,56 @@ export function accentVariables(
     // contrast as text, so on light it is darkened until it does not.
     "--accent-text": theme === "dark" ? hex : darkenUntilReadable(hex),
   };
+}
+
+/**
+ * The surfaces derived from the chosen ground.
+ *
+ * Only the surfaces: text, lines and shadows stay with the theme in
+ * `styles.css`. A ground is picked within its theme's range — a darker blue,
+ * a warmer black — and within that range the theme's ink already reads. Let
+ * this compute the ink as well and every override becomes a chance to produce
+ * an unreadable page.
+ *
+ * The two themes need different arithmetic, not one formula with different
+ * numbers. On a dark ground a raised card is the same material catching more
+ * light, which is a *scaling* of the channels — that holds the hue exactly,
+ * where mixing toward white would grey it out. A pale ground cannot be scaled
+ * without clipping to white, so it mixes instead; and its hover is not a
+ * lighter white but a less white one, because on paper there is nowhere
+ * lighter than the card to go.
+ */
+export function backgroundVariables(
+  hex: string,
+  theme: Theme,
+): Record<string, string> {
+  const ramp =
+    theme === "dark"
+      ? {
+          raised: scale(hex, 1.6),
+          hover: scale(hex, 2.05),
+          sunken: scale(hex, 0.62),
+          inset: scale(hex, 1.35),
+        }
+      : {
+          raised: lighten(hex, 0.95),
+          hover: lighten(hex, 0.45),
+          sunken: darken(hex, 0.055),
+          inset: lighten(hex, 0.75),
+        };
+  return {
+    "--bg": hex,
+    "--bg-raised": ramp.raised,
+    "--bg-raised-hover": ramp.hover,
+    "--bg-sunken": ramp.sunken,
+    "--bg-inset": ramp.inset,
+  };
+}
+
+/** Every channel multiplied by the same factor, which is what holds the hue. */
+function scale(hex: string, factor: number): string {
+  const [r, g, b] = toRgb(hex);
+  return fromRgb(r * factor, g * factor, b * factor);
 }
 
 /**
@@ -234,5 +342,11 @@ function readChoice(): ThemeChoice {
 function readAccent(): string {
   return (
     normaliseHex(localStorage.getItem(ACCENT_KEY) ?? "") ?? DEFAULT_ACCENT
+  );
+}
+
+function readBackground(theme: Theme): string {
+  return (
+    normaliseHex(localStorage.getItem(BG_KEY[theme]) ?? "") ?? DEFAULT_BG[theme]
   );
 }
