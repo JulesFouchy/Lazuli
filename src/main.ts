@@ -1043,8 +1043,64 @@ window.addEventListener("mouseup", (event) => {
   move();
 });
 
+// A two-finger sideways swipe on a trackpad, which reaches the page as a
+// horizontal wheel. Fingers to the right is out one layer and fingers to the
+// left is back down, the way every browser reads the same gesture.
+//
+// One gesture is one move. The wheel arrives as a stream of small deltas
+// followed by momentum that keeps running after the fingers have lifted, so
+// crossing the threshold makes the move and the rest of the gesture is then
+// ignored until the wheel has been quiet long enough to be a new one.
+const SWIPE_STEP = 120;
+const SWIPE_GAP = 400;
+
+let swipeTowards = 0;
+let lastWheelAt = 0;
+let swiped = false;
+
+window.addEventListener("wheel", (event) => {
+  // The viewer claims the wheel to walk the timeline, sideways included, and
+  // preventing the default is how it says so — its listener is registered as
+  // this module imports it, so it has always run by the time this one does.
+  if (event.defaultPrevented) return;
+
+  if (event.timeStamp - lastWheelAt > SWIPE_GAP) {
+    swipeTowards = 0;
+    swiped = false;
+  }
+  lastWheelAt = event.timeStamp;
+  if (swiped) return;
+
+  // A swipe that is mostly up or down is scrolling the timeline, however
+  // crooked it happens to be.
+  if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) {
+    swipeTowards = 0;
+    return;
+  }
+  // Turning back mid-gesture starts the count again rather than cancelling out
+  // what has already been wound up.
+  if (event.deltaX * swipeTowards < 0) swipeTowards = 0;
+  swipeTowards += event.deltaX;
+  if (Math.abs(swipeTowards) < SWIPE_STEP) return;
+
+  swiped = true;
+  if (swipeTowards > 0) goForward();
+  else goUp();
+  swipeTowards = 0;
+});
+
 window.addEventListener("keydown", (event) => {
   const ctrl = event.ctrlKey || event.metaKey;
+
+  // Alt with the arrows, as a browser has them. The viewer leaves arrows with
+  // a modifier alone, so this works from inside it too.
+  const arrow = event.key === "ArrowLeft" || event.key === "ArrowRight";
+  if (event.altKey && !ctrl && arrow) {
+    event.preventDefault();
+    if (event.key === "ArrowLeft") goUp();
+    else goForward();
+    return;
+  }
 
   // Ctrl+Z inside a text field stays the browser's own text undo. Hijacking it
   // globally would make writing a note maddening; the toast keeps the delete

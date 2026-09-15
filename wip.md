@@ -1,7 +1,5 @@
 ## Triage
 
-swipe with two fingers left / right to back back/forward
-
 rename the project to Rupestre (careful, also rename the project in .claude folder to keep memory and conversations)
 remove the project name + tagline from main screen
 Tagline: "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey"
@@ -12,8 +10,6 @@ transparent images background, eg the transition isf demo in coollab timeline, i
 date format should be per-project
 
 when renaming a project it should also rename the folder
-
-alt + left/right arrow should work as forward/backward button
 
 we should see the current date at the top
 
