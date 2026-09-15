@@ -53,10 +53,9 @@ jobs:
             libxdo-dev \
             build-essential
 
-      # No `cargo fmt --check`: the tree is not rustfmt-clean and never has
-      # been — roughly thirty places are hand-wrapped narrower than rustfmt
-      # wants — so the check would fail on arrival. Adopting it means one
-      # reformatting commit first.
+      # No `cargo fmt --check`, deliberately: the tree is hand-wrapped narrower
+      # than rustfmt wants in about thirty places, and the formatting it would
+      # impose is not wanted. Run `cargo fmt` here and it will reflow them.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
