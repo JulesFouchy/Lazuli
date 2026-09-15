@@ -171,6 +171,11 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
         );
     }
 
+    // Before anything reads the folder, and before the watcher exists to see
+    // it happen: a project written by a build from before the rename gets its
+    // marker file renamed here, once.
+    store::migrate_meta(&path)?;
+
     // Without this the webview silently refuses to load any image in the
     // folder: `file://` is blocked, and `convertFileSrc` only works for paths
     // the asset scope allows.

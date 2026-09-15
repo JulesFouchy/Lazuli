@@ -15,6 +15,15 @@ use std::time::SystemTime;
 use crate::model::{is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta};
 
 pub const META_FILE: &str = "lapis.yaml";
+
+/// What the marker file was called before the app was renamed.
+///
+/// A folder written by an older build is still a project: it is detected and
+/// read, and [`migrate_meta`] gives it the current name the first time it is
+/// opened. Delete this and its three uses once no one is running a build from
+/// before the rename.
+pub const LEGACY_META_FILE: &str = "journaley.yaml";
+
 pub const ENTRIES_DIR: &str = "entries";
 pub const COVER_DIR: &str = "cover";
 pub const ENTRY_FILE: &str = "entry.md";
@@ -145,11 +154,47 @@ impl ProjectStore {
 
 /// Whether a folder looks like a lapis project.
 pub fn is_project(root: &Path) -> bool {
-    root.join(META_FILE).is_file()
+    root.join(META_FILE).is_file() || root.join(LEGACY_META_FILE).is_file()
+}
+
+/// The marker file this folder actually has, the current name winning if both
+/// are somehow there. Falls back to the current name when neither exists, so a
+/// caller about to write one gets the right path.
+fn meta_path(root: &Path) -> PathBuf {
+    let current = root.join(META_FILE);
+    if current.is_file() {
+        return current;
+    }
+    let legacy = root.join(LEGACY_META_FILE);
+    if legacy.is_file() {
+        return legacy;
+    }
+    current
+}
+
+/// Give an older build's marker file the current name.
+///
+/// Called once, as a project is opened, and deliberately not from `read_meta`:
+/// the folder is rescanned on every filesystem event, so a rename done while
+/// reading would be a write that the read's own scan then sees. At the door it
+/// happens once, before the watcher exists, and everything afterwards reads the
+/// current name.
+///
+/// A folder that already has both files is left alone rather than having one
+/// written over the other.
+pub fn migrate_meta(root: &Path) -> Result<()> {
+    let legacy = root.join(LEGACY_META_FILE);
+    let current = root.join(META_FILE);
+    if !legacy.is_file() || current.exists() {
+        return Ok(());
+    }
+    fs::rename(&legacy, &current).with_context(|| {
+        format!("renaming {} to {}", legacy.display(), current.display())
+    })
 }
 
 pub fn read_meta(root: &Path) -> Result<ProjectMeta> {
-    let path = root.join(META_FILE);
+    let path = meta_path(root);
     let contents =
         fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     serde_yaml::from_str(&contents).with_context(|| format!("parsing {}", path.display()))
@@ -570,6 +615,59 @@ mod tests {
             read_meta(&dir.0).expect("should read").cover.as_deref(),
             Some("sunset.jpg")
         );
+    }
+
+    /// Turn a project's marker file back into the name an older build wrote.
+    fn make_legacy(root: &Path) {
+        fs::rename(root.join(META_FILE), root.join(LEGACY_META_FILE))
+            .expect("should be able to rename the marker file");
+    }
+
+    #[test]
+    fn a_folder_from_before_the_rename_is_still_a_project() {
+        let dir = TempDir::new("legacy-detect");
+        create_project(&dir.0, "Old", date(2026, 6, 1)).expect("should create");
+        make_legacy(&dir.0);
+
+        assert!(is_project(&dir.0));
+        assert_eq!(read_meta(&dir.0).expect("should read").name, "Old");
+    }
+
+    #[test]
+    fn opening_a_folder_from_before_the_rename_renames_its_marker_file() {
+        let dir = TempDir::new("legacy-migrate");
+        create_project(&dir.0, "Old", date(2026, 6, 1)).expect("should create");
+        make_legacy(&dir.0);
+
+        migrate_meta(&dir.0).expect("should migrate");
+
+        assert!(dir.0.join(META_FILE).is_file());
+        assert!(!dir.0.join(LEGACY_META_FILE).exists());
+        assert_eq!(read_meta(&dir.0).expect("should read").name, "Old");
+    }
+
+    #[test]
+    fn migrating_a_folder_holding_both_files_writes_over_neither() {
+        let dir = TempDir::new("legacy-both");
+        create_project(&dir.0, "Current", date(2026, 6, 1)).expect("should create");
+        fs::write(dir.0.join(LEGACY_META_FILE), "name: Stale\nstart_date: 2020-01-01\n")
+            .expect("should write the stale file");
+
+        migrate_meta(&dir.0).expect("should be a no-op");
+
+        assert!(dir.0.join(LEGACY_META_FILE).is_file());
+        assert_eq!(read_meta(&dir.0).expect("should read").name, "Current");
+    }
+
+    #[test]
+    fn migrating_a_folder_that_never_had_the_old_name_does_nothing() {
+        let dir = TempDir::new("legacy-none");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+
+        migrate_meta(&dir.0).expect("should be a no-op");
+
+        assert!(dir.0.join(META_FILE).is_file());
+        assert!(!dir.0.join(LEGACY_META_FILE).exists());
     }
 
     #[test]
