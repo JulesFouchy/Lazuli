@@ -92,7 +92,7 @@ function body(project: Project): HTMLElement {
       if (!ffmpeg) {
         toastError(
           "ffmpeg is needed to export",
-          "put an ffmpeg executable in src-tauri/binaries, or install one on your PATH",
+          "install ffmpeg and make sure it is on your PATH, then try again",
         );
         return;
       }

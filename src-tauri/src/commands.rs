@@ -792,7 +792,7 @@ pub fn export_begin(app: AppHandle, state: State<AppState>, options: ExportOptio
     let resources = app.path().resource_dir().ok();
     let (ffmpeg, _) = video::find_ffmpeg(resources.as_deref()).ok_or_else(|| {
         anyhow!(
-            "ffmpeg was not found. Put an ffmpeg executable in the app folder,              or install one on your PATH."
+            "ffmpeg was not found. Install ffmpeg and make sure it is on your PATH."
         )
     })?;
 
