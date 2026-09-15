@@ -16,8 +16,6 @@ the button shouldn't say "Open folder..." but "Open project...", or "Import proj
 
 bug with the custom color selector it always closes when we start dragging
 
-- timeline entry with the new style + name + icon
-
 - consider using this as the icon : "C:\Users\fouch\Downloads\ChatGPT Image Sep 15, 2026, 10_13_29 PM.png"
 
 - the "could not open" popup doesn't stay long enough on screen i couldn't read
