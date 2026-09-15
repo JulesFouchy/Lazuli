@@ -114,18 +114,20 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* The other half of the same image: ink on vellum rather than gold on
-     stone. The paper stays warm — photographs sit better on it, and it stops
-     the cards disappearing into the page — while the ink carries the blue, so
-     the two themes are one palette seen in two lights. */
-  --bg: #f1f0ed;
-  --bg-raised: #fefefe;
-  --bg-raised-hover: #f7f7f5;
-  --bg-sunken: #e4e3e0;
-  --bg-inset: #fcfbfb;
+  /* The same stone held up to the light: pale lapis rather than a dark one,
+     so the two themes are one colour at two depths instead of a blue app and
+     a white one. Blue rather than neutral grey on purpose — a page this light
+     reads as plain white unless the tint is enough to name.
 
-  --line: #d2d0ca;
-  --line-strong: #a9a69e;
+     The four surfaces are the derived values, as on the dark theme above. */
+  --bg: #eaeff8;
+  --bg-raised: #fefeff;
+  --bg-raised-hover: #f3f6fb;
+  --bg-sunken: #dde2ea;
+  --bg-inset: #fafbfd;
+
+  --line: #c9d1e0;
+  --line-strong: #99a4bb;
 
   --text: #141a2c;
   --text-dim: #4d5468;
@@ -136,11 +138,11 @@
 
   --image-ring: rgba(0, 0, 0, 0.18);
 
-  --shadow-1: 0 1px 2px rgba(30, 28, 24, 0.08);
-  --shadow-2: 0 6px 20px rgba(30, 28, 24, 0.12);
-  --shadow-3: 0 24px 64px rgba(30, 28, 24, 0.22);
+  --shadow-1: 0 1px 2px rgba(20, 26, 44, 0.08);
+  --shadow-2: 0 6px 20px rgba(20, 26, 44, 0.12);
+  --shadow-3: 0 24px 64px rgba(20, 26, 44, 0.22);
 
-  --overlay: rgba(28, 26, 22, 0.42);
+  --overlay: rgba(18, 24, 40, 0.42);
 }
 
 * {

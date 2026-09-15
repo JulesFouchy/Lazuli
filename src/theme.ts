@@ -19,8 +19,15 @@ const BG_KEY: Record<Theme, string> = {
   light: "lapis.bg.light",
 };
 
-/** What the user chose. `system` follows the OS and is the default. */
+/**
+ * What the user chose. `system` follows the OS; `dark` is what they get until
+ * they choose anything, because the app is a dark blue one and opening it as a
+ * white page on a light machine shows the wrong app.
+ */
 export type ThemeChoice = "system" | "light" | "dark";
+
+/** The theme before anyone has picked one. Mirrored in `index.html` and `theme.rs`. */
+export const DEFAULT_THEME: ThemeChoice = "dark";
 
 /** What that resolves to once the OS has been asked. */
 export type Theme = "light" | "dark";
@@ -46,7 +53,7 @@ export const ACCENT_PRESETS: { name: string; hex: string }[] = [
  */
 export const DEFAULT_BG: Record<Theme, string> = {
   dark: "#0b1020",
-  light: "#f1f0ed",
+  light: "#eaeff8",
 };
 
 /** The offered grounds, per theme. The first of each is that theme's default. */
@@ -59,9 +66,9 @@ export const BG_PRESETS: Record<Theme, { name: string; hex: string }[]> = {
     { name: "Porphyry", hex: "#150b14" },
   ],
   light: [
-    { name: "Vellum", hex: DEFAULT_BG.light },
+    { name: "Haze", hex: DEFAULT_BG.light },
     { name: "Paper", hex: "#fbfbfa" },
-    { name: "Chalk", hex: "#eef0f4" },
+    { name: "Vellum", hex: "#f1f0ed" },
     { name: "Linen", hex: "#f3ece1" },
   ],
 };
@@ -276,7 +283,7 @@ export function readableInk(hex: string): string {
  * is barely more than a highlighter stripe.
  */
 function darkenUntilReadable(hex: string): string {
-  const paper = 0.9; // Roughly the light theme's `--bg`.
+  const paper = 0.86; // Roughly the light theme's `--bg`.
   let current = hex;
   for (let step = 0; step < 24; step += 1) {
     if ((paper + 0.05) / (luminance(current) + 0.05) >= 4.5) return current;
@@ -336,7 +343,7 @@ function readChoice(): ThemeChoice {
   const stored = localStorage.getItem(THEME_KEY);
   return stored === "light" || stored === "dark" || stored === "system"
     ? stored
-    : "system";
+    : DEFAULT_THEME;
 }
 
 function readAccent(): string {

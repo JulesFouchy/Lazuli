@@ -19,7 +19,7 @@ use tauri::Theme;
 const DARK_BG: Color = Color(0x0b, 0x10, 0x20, 0xff);
 
 /// `--bg` for the light theme, from `src/styles.css`. Change both together.
-const LIGHT_BG: Color = Color(0xf1, 0xf0, 0xed, 0xff);
+const LIGHT_BG: Color = Color(0xea, 0xef, 0xf8, 0xff);
 
 /// The appearance as `settings.json` holds it: a choice, and a ground per
 /// theme. Any of them may be missing on a first run.
@@ -40,6 +40,9 @@ pub struct WindowDress {
 /// Resolve the raw setting — `light`, `dark`, `system`, or nothing at all on a
 /// first run — into a frame theme and a background.
 ///
+/// Nothing at all means dark, not `system`: the default is a choice the app
+/// makes, and only a stored `system` means "ask the machine".
+///
 /// For `system` the frame is left to the OS, but a background still has to be
 /// chosen now, so the OS preference is read directly. The page will resolve the
 /// same preference through `prefers-color-scheme` a moment later; they agree
@@ -47,7 +50,10 @@ pub struct WindowDress {
 pub fn dress_for(appearance: &Appearance) -> WindowDress {
     let theme = match appearance.choice.as_deref() {
         Some("light") => Some(Theme::Light),
-        Some("dark") => Some(Theme::Dark),
+        // Nothing stored is a first run, which opens dark — the same default
+        // as `DEFAULT_THEME` in `theme.ts`. Only an explicit `system` hands
+        // the frame back to the OS.
+        Some("dark") | None => Some(Theme::Dark),
         _ => None,
     };
     let resolved = theme.unwrap_or_else(os_theme);

@@ -13,7 +13,7 @@
       // which is why the keys and the `system` fallback must match `theme.ts`.
       (function bootTheme() {
         try {
-          var choice = localStorage.getItem("lapis.theme") || "system";
+          var choice = localStorage.getItem("lapis.theme") || "dark";
           var dark =
             choice === "dark" ||
             (choice !== "light" &&
