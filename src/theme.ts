@@ -53,7 +53,7 @@ export const ACCENT_PRESETS: { name: string; hex: string }[] = [
  */
 export const DEFAULT_BG: Record<Theme, string> = {
   dark: "#0b1020",
-  light: "#eaeff8",
+  light: "#dde7f8",
 };
 
 /** The offered grounds, per theme. The first of each is that theme's default. */
@@ -67,6 +67,7 @@ export const BG_PRESETS: Record<Theme, { name: string; hex: string }[]> = {
   ],
   light: [
     { name: "Haze", hex: DEFAULT_BG.light },
+    { name: "Mist", hex: "#eaeff8" },
     { name: "Paper", hex: "#fbfbfa" },
     { name: "Vellum", hex: "#f1f0ed" },
     { name: "Linen", hex: "#f3ece1" },
@@ -112,7 +113,7 @@ export function setAccent(hex: string): void {
   const normalised = normaliseHex(hex);
   if (!normalised) return;
   accent = normalised;
-  localStorage.setItem(ACCENT_KEY, normalised);
+  remember(ACCENT_KEY, normalised, DEFAULT_ACCENT);
   apply();
 }
 
@@ -122,8 +123,22 @@ export function setBackground(hex: string): void {
   if (!normalised) return;
   const theme = activeTheme();
   background[theme] = normalised;
-  localStorage.setItem(BG_KEY[theme], normalised);
+  remember(BG_KEY[theme], normalised, DEFAULT_BG[theme]);
   apply();
+}
+
+/**
+ * Store a chosen colour, or forget it when the choice *is* the default.
+ *
+ * The two look identical right up until the default moves, and then the people
+ * who never wanted anything other than the default are exactly the ones left
+ * behind on the old one — they are pinned to it by a click that, at the time,
+ * changed nothing. Forgetting it keeps "the default" a live answer instead of
+ * a snapshot of what it happened to be the day the swatch was pressed.
+ */
+function remember(key: string, chosen: string, fallback: string): void {
+  if (chosen === fallback) localStorage.removeItem(key);
+  else localStorage.setItem(key, chosen);
 }
 
 /** Put the stored appearance on the document, and keep it in step with the OS. */
@@ -283,7 +298,7 @@ export function readableInk(hex: string): string {
  * is barely more than a highlighter stripe.
  */
 function darkenUntilReadable(hex: string): string {
-  const paper = 0.86; // Roughly the light theme's `--bg`.
+  const paper = 0.79; // Roughly the light theme's `--bg`.
   let current = hex;
   for (let step = 0; step < 24; step += 1) {
     if ((paper + 0.05) / (luminance(current) + 0.05) >= 4.5) return current;

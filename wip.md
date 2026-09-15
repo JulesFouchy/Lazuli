@@ -23,6 +23,9 @@ bug with the custom color selector it always closes when we start dragging
 - the "could not open" popup doesn't stay long enough on screen i couldn't read
 - "open folder" button shouldn't open the project page
 
+- release version 1.0
+- setup store to sell for 1€
+
 ## Import initial projects
 
 projects:

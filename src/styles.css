@@ -114,24 +114,31 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* The same stone held up to the light: pale lapis rather than a dark one,
-     so the two themes are one colour at two depths instead of a blue app and
-     a white one. Blue rather than neutral grey on purpose — a page this light
-     reads as plain white unless the tint is enough to name.
+  /* The same stone held up to the light: lapis thinned rather than lapis
+     abandoned, so the two themes are one colour at two depths instead of a
+     blue app and a white one. The ground is blue enough to be called blue —
+     a light theme that only hints at it reads as plain white, and then the
+     app has no colour at all when it is not dark.
+
+     The cards stay near-white against it on purpose: the page carries the
+     hue and the things on the page are paper laid on it.
 
      The four surfaces are the derived values, as on the dark theme above. */
-  --bg: #eaeff8;
-  --bg-raised: #fefeff;
-  --bg-raised-hover: #f3f6fb;
-  --bg-sunken: #dde2ea;
-  --bg-inset: #fafbfd;
+  --bg: #dde7f8;
+  --bg-raised: #fdfeff;
+  --bg-raised-hover: #ecf2fb;
+  --bg-sunken: #d1daea;
+  --bg-inset: #f7f9fd;
 
-  --line: #c9d1e0;
-  --line-strong: #99a4bb;
+  --line: #c0cde3;
+  --line-strong: #8e9db9;
 
   --text: #141a2c;
   --text-dim: #4d5468;
-  --text-faint: #717a8f;
+  /* Darker than it looks like it needs to be: the ground came down in
+     lightness when it went blue, and this is the one text colour that was
+     already close to the floor for contrast. */
+  --text-faint: #6b758c;
 
   --danger: #c33a2c;
   --danger-soft: rgba(195, 58, 44, 0.1);
