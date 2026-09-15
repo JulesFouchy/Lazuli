@@ -12,7 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::model::{is_image, Entry, EntryFrontmatter, Project, ProjectMeta};
+use crate::model::{is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta};
 
 pub const META_FILE: &str = "journaley.yaml";
 pub const ENTRIES_DIR: &str = "entries";
@@ -207,6 +207,7 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
         name: name.to_owned(),
         start_date,
         cover: None,
+        date_format: DateFormat::default(),
     };
     write_meta(root, &meta)?;
     Ok(meta)
@@ -584,6 +585,7 @@ mod tests {
             name: "Woodworking bench".into(),
             start_date: date(2026, 6, 1),
             cover: Some("sunset-take2.jpg".into()),
+            date_format: DateFormat::Day,
         };
         let yaml = serde_yaml::to_string(&meta).expect("should serialise");
         assert!(yaml.contains("start_date: 2026-06-01"));

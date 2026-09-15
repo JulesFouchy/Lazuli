@@ -7,9 +7,6 @@ for the app icon use C:\Users\fouch\Downloads\rupestre.png
 
 transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
 
-date format should be per-project
-
-when renaming a project it should also rename the folder
 
 we should see the current date at the top
 
@@ -18,9 +15,7 @@ F11 should toggle fullscreen
 
 the button shouldn't say "Open folder..." but "Open project...", or "Import project..."?
 
-remove the "1 other attempt" text when there are several pictures
 
-spell checker on text input
 
 
 ## Import initial projects

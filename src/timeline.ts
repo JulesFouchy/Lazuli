@@ -105,8 +105,6 @@ function entryCard(
   entry: Entry,
   handlers: TimelineHandlers,
 ): HTMLElement {
-  const extras = entry.images.length - (entry.image ? 1 : 0);
-
   const card = el(
     "article",
     {
@@ -136,11 +134,6 @@ function entryCard(
       { class: "card__head" },
       dateToggle(entry),
       el("span", { class: "card__grow" }),
-      extras > 0 &&
-        el("span", {
-          class: "card__count",
-          text: `${extras} other ${extras === 1 ? "attempt" : "attempts"}`,
-        }),
       el("button", {
         class: "card__edit",
         "aria-label": "Edit entry",

@@ -17,6 +17,25 @@ pub struct ProjectMeta {
     /// other files in `cover/` are attempts that were kept.
     #[serde(default)]
     pub cover: Option<String>,
+    /// How this project's dates are read.
+    ///
+    /// Per project, not per user: a hundred-day challenge is read by day
+    /// number and a work journal by date, and that is a fact about the project
+    /// rather than about whoever opens it. Defaulted, so a `journaley.yaml`
+    /// written before the field existed reads as the calendar dates it showed.
+    #[serde(default)]
+    pub date_format: DateFormat,
+}
+
+/// Which of an entry's two dates is shown: `Sep 05, 2026` or `Day 39`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DateFormat {
+    /// The calendar date.
+    #[default]
+    Real,
+    /// Days since the project's start date.
+    Day,
 }
 
 /// The frontmatter block of an `entries/<uuid>/entry.md`.

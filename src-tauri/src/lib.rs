@@ -74,6 +74,7 @@ pub fn run() {
             commands::set_project_name,
             commands::set_start_date,
             commands::set_cover,
+            commands::set_date_format,
             commands::create_entry,
             commands::update_entry,
             commands::import_images,

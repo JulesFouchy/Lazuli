@@ -100,6 +100,25 @@ pub fn folder_name_for(name: &str) -> String {
     folder
 }
 
+/// Whether `folder` is the folder name `name` would have produced, allowing for
+/// the ` (2)` a collision may have added when it was created.
+///
+/// Asked before a project's folder is renamed to follow its name: a folder the
+/// user named themselves, or a repository a journal happens to live in, is not
+/// something renaming the journal should move.
+pub fn is_named_after(folder: &str, name: &str) -> bool {
+    match folder.strip_prefix(&folder_name_for(name)) {
+        Some("") => true,
+        Some(rest) => rest
+            .strip_prefix(" (")
+            .and_then(|rest| rest.strip_suffix(')'))
+            .is_some_and(|digits| {
+                !digits.is_empty() && digits.chars().all(|digit| digit.is_ascii_digit())
+            }),
+        None => false,
+    }
+}
+
 /// Split a filename into its stem and its extension *including* the dot.
 ///
 /// Hand-rolled rather than using `Path::extension` so that dotfiles and
@@ -214,6 +233,25 @@ mod tests {
         assert_eq!(folder_name_for("LPT1.old"), "LPT1.old_");
         // Only the exact device names; `console` is a perfectly good folder.
         assert_eq!(folder_name_for("console"), "console");
+    }
+
+    #[test]
+    fn a_folder_named_after_its_project_is_recognised() {
+        assert!(is_named_after("Woodworking bench", "Woodworking bench"));
+        // Sanitised the same way it was on the way in.
+        assert!(is_named_after("Trip Iceland", "Trip: Iceland"));
+        // The suffix a collision added when the folder was created.
+        assert!(is_named_after("Woodworking bench (2)", "Woodworking bench"));
+    }
+
+    #[test]
+    fn a_folder_the_user_named_themselves_is_not() {
+        // The journal lives at the root of the repository it is about; renaming
+        // the journal must not rename that.
+        assert!(!is_named_after("coollab", "Coollab"));
+        assert!(!is_named_after("Woodworking bench old", "Woodworking bench"));
+        assert!(!is_named_after("Woodworking bench ()", "Woodworking bench"));
+        assert!(!is_named_after("Woodworking bench (final)", "Woodworking bench"));
     }
 
     #[test]

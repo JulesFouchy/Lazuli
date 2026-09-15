@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dates;
-use crate::model::{is_image, Project, ProjectMeta};
-use crate::paths::{folder_name_for, unique_path};
+use crate::model::{is_image, DateFormat, Project, ProjectMeta};
+use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
 use crate::video::{self, Encode, ExportOptions};
 use crate::watch::{self, ProjectWatcher};
@@ -260,12 +260,95 @@ fn root_of(open: &OpenProject) -> PathBuf {
 
 // --- project metadata ----------------------------------------------------
 
+/// Rename the project, and the folder it lives in along with it.
+///
+/// Async because the rename closes and reopens the project, which waits for the
+/// watcher thread.
 #[tauri::command]
-pub fn set_project_name(app: AppHandle, state: State<AppState>, name: String) -> CmdResult<()> {
+pub async fn set_project_name(app: AppHandle, name: String) -> CmdResult<()> {
+    Ok(off_thread(move || {
+        let state = app.state::<AppState>();
+        let (root, was_called) = with_project(&app, &state, |open| {
+            let root = root_of(open);
+            let mut meta = store::read_meta(&root)?;
+            let was_called = std::mem::replace(&mut meta.name, name.clone());
+            store::write_meta(&root, &meta)?;
+            Ok((root, was_called))
+        })?;
+        follow_with_folder(&app, &root, &was_called, &name)
+    })
+    .await?)
+}
+
+/// Move the project folder so it still matches the project's name.
+///
+/// Only when the folder was named after the project to begin with. A project
+/// kept at the root of its own repository, or in a folder the user named
+/// themselves, stays where it is: typing in the title is a rename of the
+/// journal, and it should not silently rename someone's source tree.
+fn follow_with_folder(app: &AppHandle, root: &Path, was_called: &str, name: &str) -> Result<()> {
+    let Some(parent) = root.parent() else {
+        return Ok(());
+    };
+    let current = file_name_of(root);
+    if !is_named_after(&current, was_called) {
+        return Ok(());
+    }
+    let desired = folder_name_for(name);
+    if desired == current {
+        return Ok(());
+    }
+
+    let direct = parent.join(&desired);
+    // A change of case only: Windows says the destination already exists,
+    // because it *is* this folder, and `unique_path` would answer with a
+    // ` (2)`. Compare the real paths rather than the spellings.
+    let target = if fs::canonicalize(&direct).ok() == fs::canonicalize(root).ok() {
+        direct
+    } else {
+        // Nothing is ever overwritten, here as everywhere else.
+        unique_path(parent, &desired)
+    };
+
+    // Closed first, so no rescan runs against a folder that is moving. The
+    // session's undo stack goes with it: the paths it holds are all about to
+    // stop existing.
+    close_open(app);
+    let moved = fs::rename(root, &target)
+        .with_context(|| format!("renaming {} to {}", root.display(), target.display()));
+    // Something has to be open either way — the page is showing a project. When
+    // the move failed, the folder is still at the path it was opened from.
+    let reopened = open_at(
+        app,
+        if moved.is_ok() {
+            target.clone()
+        } else {
+            root.to_path_buf()
+        },
+    );
+    moved?;
+    let project = reopened?;
+    // The row pointing at the folder it used to be: `open_at` has already put
+    // the new path at the top of the list.
+    forget_recent(app.clone(), root.to_path_buf());
+    // `open_at` returns the snapshot rather than emitting it, and the page is
+    // still holding the old root — which every image URL is built from.
+    let _ = app.emit(PROJECT_CHANGED, project);
+    Ok(())
+}
+
+/// How this project's dates are read. A property of the project: see
+/// [`DateFormat`].
+#[tauri::command]
+pub fn set_date_format(
+    app: AppHandle,
+    state: State<AppState>,
+    format: DateFormat,
+) -> CmdResult<()> {
     with_project(&app, &state, |open| {
         let root = root_of(open);
         let mut meta = store::read_meta(&root)?;
-        meta.name = name;
+        meta.date_format = format;
         store::write_meta(&root, &meta)
     })?;
     Ok(())

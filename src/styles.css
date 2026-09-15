@@ -602,11 +602,6 @@ textarea {
   flex: 1;
 }
 
-.card__count {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
 /* The pencil in the header's top right. Not there at all until the card is
    under the pointer: it is the second thing a card does, and the first is to
    be looked at. */

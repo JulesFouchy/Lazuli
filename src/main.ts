@@ -27,7 +27,7 @@ import {
   isContextMenuOpen,
   openContextMenu,
 } from "./context-menu";
-import { formatRealWorld, onDateFormatChange } from "./dates";
+import { adoptDateFormat, formatRealWorld, onDateFormatChange } from "./dates";
 import {
   announceDeletion,
   deleteEntry,
@@ -69,6 +69,17 @@ const state: AppState = {
   project: null,
   newestFirst: localStorage.getItem("journaley.newestFirst") !== "false",
 };
+
+/**
+ * Put a project fresh from Rust on screen. The caller renders.
+ *
+ * Everything that reads as a preference but belongs to the project travels in
+ * `journaley.yaml` and so arrives with it, the date format included.
+ */
+function adopt(project: Project): void {
+  state.project = project;
+  adoptDateFormat(project.meta.date_format);
+}
 
 /** The recents list as last read, so redrawing the launch screen is instant. */
 let knownRecents: RecentProject[] | null = null;
@@ -226,7 +237,6 @@ function banner(project: Project): HTMLElement {
   const nameField = el("h1", {
     class: "banner__name",
     contenteditable: "true",
-    spellcheck: "false",
     text: project.meta.name,
   });
   nameField.addEventListener("click", (event) => event.stopPropagation());
@@ -419,7 +429,7 @@ async function loadProject(path: string): Promise<boolean> {
   try {
     const project = await whileBusy(openProject(path));
     if (asked !== opensAsked) return false;
-    state.project = project;
+    adopt(project);
     render();
     return true;
   } catch (err) {
@@ -581,7 +591,7 @@ function projectCreated(project: Project): void {
   // rather than opening the folder a second time. It replaces the dialog's own
   // place instead of following it, so Back goes to the launch screen rather
   // than back into a form whose project already exists.
-  state.project = project;
+  adopt(project);
   render();
   void replaceHere({ project: project.root, modal: null });
 }
@@ -712,6 +722,20 @@ function noteViewerMoved(id: string): void {
 
 function here(): Place {
   return history[cursor];
+}
+
+/**
+ * The open project's folder has moved, because renaming the project renamed it.
+ *
+ * A place remembers a folder, and every place that named the old one still
+ * means this project. Without this, the next dialog opened would try to open a
+ * folder that is no longer there and silently do nothing.
+ */
+function followRename(from: string, to: string): void {
+  for (const place of history) {
+    if (place.project === from) place.project = to;
+  }
+  saveHistory();
 }
 
 /** Go somewhere new. Anything that was ahead of here is dropped, as in a browser. */
@@ -1002,7 +1026,11 @@ async function runUndo(): Promise<void> {
 // A rescan found the folder genuinely different. Redraw, and put any open
 // editor back the way it was.
 void listen<Project>("project-changed", (event) => {
-  state.project = event.payload;
+  const was = state.project?.root;
+  adopt(event.payload);
+  // The same project at a different path is a rename, and nothing else: a
+  // different project arrives through an open, not through a rescan.
+  if (was && was !== event.payload.root) followRename(was, event.payload.root);
   render();
   const modal = here().modal;
   if (modal?.kind === "entry") refreshEntryEditor(modal.id, editorContext);

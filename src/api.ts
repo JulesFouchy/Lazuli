@@ -12,7 +12,12 @@ export interface ProjectMeta {
   start_date: string;
   /** Filename within `cover/`, or null. */
   cover: string | null;
+  /** How this project's dates are read. A property of the project, not of the machine. */
+  date_format: DateFormat;
 }
+
+/** `Sep 05, 2026`, or `Day 39`. */
+export type DateFormat = "real" | "day";
 
 export interface Entry {
   /** The entry folder's name. Stable across date edits. */
@@ -102,6 +107,9 @@ export const setStartDate = (startDate: string) =>
 
 export const setCover = (filename: string | null) =>
   invoke<void>("set_cover", { filename });
+
+export const setDateFormat = (format: DateFormat) =>
+  invoke<void>("set_date_format", { format });
 
 /** Add an entry. `date` is `YYYY-MM-DD`, defaulting to the journal day in progress. */
 export const createEntry = (date?: string) =>

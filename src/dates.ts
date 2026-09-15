@@ -1,36 +1,58 @@
-// Date presentation, and the global format toggle.
+// Date presentation, and the open project's format toggle.
 //
 // This mirrors the *formatting* half of `src-tauri/src/dates.rs`. It
 // deliberately does not reimplement the 5am rule: `journal_date` and
 // `day_number` arrive already computed on every entry, so there is exactly one
 // implementation of the rule that matters.
 
+import { setDateFormat, type DateFormat } from "./api";
+import { toastError } from "./ui";
+
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-export type DateFormat = "real" | "day";
-
-const STORAGE_KEY = "journaley.dateFormat";
-
-let current: DateFormat =
-  (localStorage.getItem(STORAGE_KEY) as DateFormat | null) ?? "real";
+/**
+ * The format of whichever project is open.
+ *
+ * A copy of what `journaley.yaml` says, so the renderers do not each have to be
+ * handed the project. [`adoptDateFormat`] is what keeps it a copy.
+ */
+let current: DateFormat = "real";
 
 const listeners = new Set<() => void>();
 
-export const dateFormat = () => current;
+/**
+ * Take the format from a project that has just arrived from Rust.
+ *
+ * Deliberately silent: every caller redraws immediately afterwards, and firing
+ * the listeners here would make the toggle's own rescan redraw a second time.
+ */
+export function adoptDateFormat(format: DateFormat): void {
+  current = format;
+}
 
 /**
  * Flip every date on the page at once.
  *
  * Clicking any single date toggles all of them: the format is a way of reading
- * the timeline, not a property of one entry.
+ * the whole project, not a property of one entry — which is why it is stored in
+ * `journaley.yaml` rather than against this machine.
  */
 export function toggleDateFormat(): void {
+  const previous = current;
   current = current === "real" ? "day" : "real";
-  localStorage.setItem(STORAGE_KEY, current);
   for (const listener of listeners) listener();
+  // Shown first and written afterwards: a click should not wait for a file
+  // write. The rescan the write triggers says the same thing, so nothing moves
+  // when it lands — unless the write failed, and then the page goes back to
+  // what is actually on disk.
+  void setDateFormat(current).catch((err) => {
+    current = previous;
+    for (const listener of listeners) listener();
+    toastError("Could not save the date format", err);
+  });
 }
 
 export function onDateFormatChange(listener: () => void): () => void {

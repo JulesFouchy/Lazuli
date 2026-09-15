@@ -34,7 +34,6 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
     // A label, not an example: the example read as a suggestion of what kind
     // of thing a project is supposed to be.
     placeholder: "Project name",
-    spellcheck: "false",
   }) as HTMLInputElement;
 
   // Typed as well as browsed: pasting a path is often quicker than walking a
