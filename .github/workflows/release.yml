@@ -130,7 +130,14 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          # Separates the two macOS targets, which share a runner label but not
+          # a single object file.
           key: ${{ matrix.args }}
+          # Save the dependency cache even when the build fails. Without this a
+          # release that dies in Lapis's own code — which is the usual way for
+          # one to die — throws away the twenty minutes of dependencies it had
+          # already compiled, and the re-run after the fix starts cold.
+          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:

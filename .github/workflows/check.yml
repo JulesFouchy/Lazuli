@@ -1,10 +1,17 @@
-# Does it compile, and do the tests pass, on each platform Lapis is released for.
+# Does it compile, and do the tests pass.
 #
-# Worth having specifically because Lapis is developed on Windows and released
-# for three platforms: the macOS and Linux code paths are the ones nobody runs
-# by accident, and a tag is a bad moment to discover one of them stopped
-# compiling. This does not bundle installers — that is the release workflow's
-# job — so it costs a fraction of the minutes.
+# Linux only, deliberately. This repository is private, so Actions minutes are
+# metered and weighted: Linux counts 1x, Windows 2x and macOS **10x**. A push
+# that checked all three cost about 80 billable minutes, roughly 70 of which
+# were macOS alone — out of 2000 a month. Checking one platform costs about two.
+#
+# What that gives up is macOS- and Windows-specific breakage, which now surfaces
+# when a release is built. That is survivable: a failed release publishes
+# nothing (the publish job needs all four builds), and re-cutting a tag is
+# cheap. Windows is covered anyway — it is the machine this is developed on.
+#
+# Before a release, it is still worth running `cargo clippy -j 1 --all-targets`
+# and `cargo test -j 1` locally, which costs nothing at all.
 
 name: Check
 
@@ -33,16 +40,11 @@ jobs:
       - run: npm run build
 
   rust:
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [windows-latest, ubuntu-22.04, macos-latest]
-    runs-on: ${{ matrix.platform }}
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -63,6 +65,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          cache-on-failure: true
 
       # `tauri build` runs this first, and the Rust build needs `../dist` to
       # exist before it will compile at all.
