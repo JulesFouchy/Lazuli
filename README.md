@@ -47,7 +47,8 @@ npm run tauri dev
 ## Development
 
 ```
-cargo test -j 1                 # in src-tauri/
+cargo test -j 1                              # in src-tauri/
+cargo clippy -j 1 --all-targets -- -D warnings
 npx tsc --noEmit
 node scripts/make-fixture.mjs   # a throwaway project, in the temp folder
 node scripts/make-icon.mjs icon.png 1024 && npx tauri icon icon.png
@@ -56,6 +57,8 @@ node scripts/make-banner.mjs assets/banner.png 1280 640
 ```
 
 Always single-job: parallel builds exhaust the Windows page file. See [CLAUDE.md](CLAUDE.md) for the invariants worth knowing before changing anything.
+
+**Nothing runs in CI on a push.** Those three commands are the whole check, and running them here costs nothing where a private repository's Actions minutes do not. A release runs them once on Linux before it fans out to four runners.
 
 ## Releasing
 

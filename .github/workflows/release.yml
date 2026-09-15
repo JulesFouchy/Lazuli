@@ -14,6 +14,10 @@
 # version mismatch produces an update that every client downloads and then
 # declines to apply.
 #
+# This is the only workflow. Ordinary pushes run nothing: the checks that would
+# catch a bad commit are the same ones run locally, and a private repo's Actions
+# minutes are better spent on releases.
+#
 # The release is built as a draft and published by the last job, once all four
 # platforms have uploaded. Publishing is the moment existing installs begin
 # seeing the new version, so it must not happen while assets are still missing.
@@ -79,8 +83,49 @@ jobs:
             echo "LAPIS_EOF"
           } >> "$GITHUB_OUTPUT"
 
-  build:
+  # Clippy and the tests, on the cheapest runner, before anything expensive
+  # starts. There is no CI on ordinary pushes — this is developed and tested on
+  # one machine, and paying for a second opinion on every commit is not worth
+  # it. But a release fans out to four runners, two of them macOS at 10x, and
+  # discovering a broken build after those have run costs about 240 billable
+  # minutes. Discovering it here costs three.
+  verify:
     needs: check-version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y             libwebkit2gtk-4.1-dev             libappindicator3-dev             librsvg2-dev             patchelf             libxdo-dev             build-essential
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          cache-on-failure: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Also `tsc --noEmit`, and the Rust build needs `../dist` to exist.
+      - run: npm run build
+
+      # No `cargo fmt --check`: the tree is hand-wrapped narrower than rustfmt
+      # wants in about thirty places, and that formatting is not wanted.
+      - run: cargo clippy -j 1 --all-targets -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test -j 1
+        working-directory: src-tauri
+
+  build:
+    needs: verify
     permissions:
       contents: read
     strategy:
