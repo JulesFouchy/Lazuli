@@ -732,6 +732,12 @@ fn trash_with_retry(path: &Path) -> Result<()> {
 /// The suffix goes to the restored file deliberately: the occupant is the file
 /// the user just put there, may already be referenced as a chosen image, and
 /// should not change name under them.
+///
+/// Windows and Linux only. `trash::os_limited` — the half of the crate that can
+/// read the bin back — does not exist on macOS, because macOS offers no API for
+/// it: the Finder's own "Put Back" reads a private file nothing else may touch.
+/// See the macOS arm below for what happens there instead.
+#[cfg(not(target_os = "macos"))]
 fn restore(original_path: &Path) -> Result<String> {
     let parent = original_path
         .parent()
@@ -778,6 +784,28 @@ fn restore(original_path: &Path) -> Result<String> {
         format!("restoring {} to its own name", original_path.display())
     })?;
     outcome
+}
+
+/// What undoing a delete does on macOS, where it cannot be done.
+///
+/// Nothing is lost — the entry or image is in the Trash and Finder's "Put Back"
+/// will return it — but the app cannot do it, so the offer has to be withdrawn
+/// honestly rather than failing with something about a missing item. The toast
+/// that carries this is the same one that offered the undo.
+///
+/// The way out is not a macOS restore API; there is none. It is to stop using
+/// the system trash for this and keep a trash folder inside the project, which
+/// would behave the same on all three platforms — see
+/// `ideas/portable-undo-delete.md`.
+#[cfg(target_os = "macos")]
+fn restore(original_path: &Path) -> Result<String> {
+    let name = original_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("it");
+    bail!(
+        "Lapis cannot take {name} back out of the Trash on macOS.          It is still there — open the Trash and use Put Back."
+    )
 }
 
 // --- video export ---------------------------------------------------------
