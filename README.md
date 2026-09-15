@@ -59,15 +59,19 @@ Always single-job: parallel builds exhaust the Windows page file. See [CLAUDE.md
 
 ## Releasing
 
+Write the `## 0.2.0` section in [CHANGELOG.md](CHANGELOG.md) first — it becomes the release notes. Then:
+
 ```
-node scripts/set-version.mjs 0.2.0     # the three files that each hold a copy
-git commit -am "Lapis 0.2.0" && git push
-git tag v0.2.0 && git push origin v0.2.0
+node scripts/release.mjs 0.2.0
 ```
 
-That tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds for Windows, macOS (Apple Silicon and Intel) and Linux, signs each installer with the updater key, and opens a **draft** release on the public [`lapis-releases`](https://github.com/JulesFouchy/lapis-releases) repo. Nothing reaches anyone, and the in-app updater sees nothing, until that draft is published by hand.
+That is the whole thing. It refuses to start if you are not on `main`, if the tree is dirty, if the tag exists, or if the CHANGELOG has nothing to say; otherwise it sets the version in all three manifests, commits, tags and pushes. `--dry-run` prints what it would do.
 
-The updater fetches `latest.json` from that repo's *latest* release, so publishing the draft is the moment every existing install starts being offered the new version.
+Everything after that is unattended. [`.github/workflows/release.yml`](.github/workflows/release.yml) builds for Windows, macOS (Apple Silicon and Intel) and Linux, signs each installer with the updater key, uploads them to the public [`lapis-releases`](https://github.com/JulesFouchy/lapis-releases) repo as a draft, and publishes that draft once all four have landed. About fifteen minutes.
+
+The draft matters: the updater reads `latest.json` from the *latest published* release, so publishing early would offer everyone an update while three of the four installers were still building.
+
+Once it publishes, every install picks the new version up on its own — downloaded quietly in the background, installed as the app closes, running the next time it opens.
 
 ### What the repository needs, once
 

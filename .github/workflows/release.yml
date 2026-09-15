@@ -6,16 +6,17 @@
 # need a token to download, and the updater has none. Only the built installers
 # cross over; the source does not.
 #
-# To cut a release, tag a commit here and push the tag:
+# To cut a release, run `node scripts/release.mjs 0.2.0`, which does the whole
+# thing. Everything after the tag is pushed happens here, unattended.
 #
-#     git tag v0.2.0 && git push origin v0.2.0
+# The tag must match the version in all three manifests, and `CHANGELOG.md`
+# must have a section for it — the first job refuses the build otherwise. A
+# version mismatch produces an update that every client downloads and then
+# declines to apply.
 #
-# The tag must match the `version` in `src-tauri/tauri.conf.json` — the check
-# job below refuses the build otherwise, because a mismatch produces an update
-# that every client downloads and then declines to apply.
-#
-# The release is created as a draft. Nothing reaches users, and the updater sees
-# nothing, until it is published by hand from the lapis-releases repo.
+# The release is built as a draft and published by the last job, once all four
+# platforms have uploaded. Publishing is the moment existing installs begin
+# seeing the new version, so it must not happen while assets are still missing.
 
 name: Release
 
@@ -34,6 +35,8 @@ jobs:
   # Cheap, and it runs before three platform builds rather than after them.
   check-version:
     runs-on: ubuntu-22.04
+    outputs:
+      notes: ${{ steps.notes.outputs.notes }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,6 +56,28 @@ jobs:
             exit 1
           fi
           echo "releasing $tag"
+
+      # The release notes are the CHANGELOG's section for this version, so the
+      # file in the repo and the text on the release cannot drift apart.
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          body=$(awk -v v="$tag" '
+            $0 ~ "^## " v { want = 1; next }
+            want && /^## / { exit }
+            want { print }
+          ' CHANGELOG.md)
+          if [ -z "$(echo "$body" | tr -d '[:space:]')" ]; then
+            echo "::error::CHANGELOG.md has no '## $tag' section"
+            exit 1
+          fi
+          {
+            echo "notes<<LAPIS_EOF"
+            echo "$body"
+            echo "LAPIS_EOF"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: check-version
@@ -132,10 +157,11 @@ jobs:
           releaseCommitish: main
           tagName: ${{ github.ref_name }}
           releaseName: "Lapis ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install this version."
-          # Published by hand. Until then the updater's `releases/latest`
-          # endpoint still resolves to the previous version, so a half-uploaded
-          # release cannot be handed to anyone.
+          releaseBody: ${{ needs.check-version.outputs.notes }}
+          # Draft until every platform has uploaded, then published by the job
+          # below. A release that is public the moment the first job finishes
+          # is a release whose `latest.json` offers an update to everyone while
+          # three of the four installers do not exist yet.
           releaseDraft: true
           prerelease: false
           # `latest.json`, which is the file the app actually fetches.
@@ -144,3 +170,25 @@ jobs:
           # means it updates without an administrator prompt.
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
+
+  # Flips the draft to published, which is the moment every existing install
+  # starts being offered the new version. Only once all four builds have
+  # uploaded, so `latest.json` never advertises an installer that is missing.
+  publish:
+    needs: build
+    # A `workflow_dispatch` on a branch has no tag and no release to publish.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          repo=repos/JulesFouchy/lapis-releases
+          id=$(gh api "$repo/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          if [ -z "$id" ]; then
+            echo "::error::no release found for $TAG"
+            exit 1
+          fi
+          gh api -X PATCH "$repo/releases/$id" -F draft=false --jq '.html_url'

@@ -57,7 +57,7 @@
         "https://github.com/JulesFouchy/lapis-releases/releases/latest/download/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }

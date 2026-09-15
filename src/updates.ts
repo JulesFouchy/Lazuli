@@ -1,25 +1,36 @@
-// Finding, offering and installing a new version.
+// Keeping Lapis up to date without ever saying so.
 //
-// The check talks to a public endpoint named in `tauri.conf.json`, but nothing
-// it says is trusted: the plugin verifies an Ed25519 signature over the
-// downloaded installer against the public key baked into this build, and
-// refuses anything that does not match. A hostile endpoint can therefore stop
-// updates from arriving, and cannot make one arrive.
+// The shape is: check a few seconds after launch, download in the background if
+// there is something, and install it as the window closes. The user is never
+// asked and never interrupted, and the version they get is the one they find
+// the next time they open the app.
+//
+// Nothing the endpoint says is trusted. The plugin verifies an Ed25519
+// signature over the downloaded installer against the public key baked into
+// this build and refuses anything that does not match, so a hijacked endpoint
+// can stop updates arriving and cannot make one arrive.
 
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
-
-import { closeModal, openModal } from "./modal";
-import { el, toast, toastError } from "./ui";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 
 /**
- * How long after launch the silent check runs.
+ * How long after launch the check runs.
  *
  * Not on the first frame: startup is already competing for the network and the
- * disk, and an update the user learns about four seconds late costs nothing.
+ * disk, and nothing here is urgent — the result is not acted on until the app
+ * closes anyway.
  */
-const STARTUP_DELAY_MS = 4000;
+const CHECK_DELAY_MS = 4000;
+
+/**
+ * A downloaded update, waiting for the window to close.
+ *
+ * Held rather than installed immediately because installing is the one part of
+ * this the user would notice: on Windows it replaces the running executable,
+ * which means killing the app out from under them.
+ */
+let staged: Update | null = null;
 
 /** The version this build reports, cached because it cannot change. */
 let version: string | null = null;
@@ -30,139 +41,61 @@ export async function appVersion(): Promise<string> {
 }
 
 /**
- * Look for a new version.
+ * Check, download, and arrange for the install to happen on close.
  *
- * `quiet` is the startup call: a machine that is offline, or behind a proxy
- * that eats the request, must not be told about it — the user did not ask.
- * The same failure when they pressed a button is worth reporting, because
- * otherwise the button looks broken.
+ * Every failure here is swallowed. The user did not ask for any of this, so a
+ * machine that is offline, behind a proxy that eats the request, or pointed at
+ * an endpoint that has moved must not be interrupted to be told — it simply
+ * stays on the version it has. The cost of that choice is that a permanently
+ * broken endpoint is invisible, which is why the release checklist says to
+ * install a build and watch it update at least once.
  */
-export async function checkForUpdate(quiet: boolean): Promise<void> {
-  let update: Update | null;
+export function startUpdates(): void {
+  setTimeout(() => void checkAndStage(), CHECK_DELAY_MS);
+  void installOnClose();
+}
+
+async function checkAndStage(): Promise<void> {
   try {
-    update = await check();
-  } catch (err) {
-    if (!quiet) toastError("Could not check for updates", err);
-    return;
+    const update = await check();
+    if (!update) return;
+    await update.download();
+    staged = update;
+  } catch {
+    // Deliberately silent; see above.
   }
-
-  if (!update) {
-    if (!quiet) toast(`Lapis ${await appVersion()} is up to date.`);
-    return;
-  }
-  offer(update);
 }
 
-/** Run the startup check once, without ever getting in the way. */
-export function checkForUpdateOnStartup(): void {
-  setTimeout(() => void checkForUpdate(true), STARTUP_DELAY_MS);
-}
-
-function offer(update: Update): void {
-  const progress = el("p", { class: "hint", text: "" });
-  const install = el("button", {
-    class: "button button--primary",
-    text: "Install and restart",
-  });
-  const later = el("button", { class: "button", text: "Later" });
-
-  install.onclick = () => {
-    install.disabled = true;
-    later.disabled = true;
-    void run(update, progress);
-  };
-  later.onclick = () => closeModal();
-
-  const body = el("div", { class: "modal__body-inner" });
-  body.append(
-    el("p", {
-      text: `Lapis ${update.version} is available. You have ${update.currentVersion}.`,
-    }),
-  );
-  // Release notes are whatever the endpoint chose to send, so they go in as
-  // text and never as markup.
-  if (update.body?.trim()) {
-    body.append(el("pre", { class: "release-notes", text: update.body.trim() }));
-  }
-  body.append(progress);
-
-  openModal({
-    title: "Update available",
-    body,
-    foot: el(
-      "div",
-      { class: "modal__foot" },
-      later,
-      el("span", { class: "card__grow" }),
-      install,
-    ),
-  });
-}
-
-async function run(update: Update, progress: HTMLElement): Promise<void> {
-  let total = 0;
-  let soFar = 0;
-  try {
-    await update.downloadAndInstall((event) => {
-      switch (event.event) {
-        case "Started":
-          total = event.data.contentLength ?? 0;
-          progress.textContent = "Downloading…";
-          break;
-        case "Progress":
-          soFar += event.data.chunkLength;
-          progress.textContent = total
-            ? `Downloading… ${Math.round((soFar / total) * 100)}%`
-            : `Downloading… ${Math.round(soFar / 1024 / 1024)} MB`;
-          break;
-        case "Finished":
-          progress.textContent = "Installing…";
-          break;
-      }
-    });
-  } catch (err) {
-    progress.textContent = "";
-    toastError("The update could not be installed", err);
-    return;
-  }
-
-  // On Windows the NSIS installer has already taken over and will restart the
-  // app itself; this is what handles the platforms where it does not. It may
-  // simply never return, which is fine — there is nothing after it.
-  await relaunch();
-}
-
-/** Version, and the only place that offers a check the user asked for. */
-export function openAboutDialog(): void {
-  const line = el("p", { class: "about__version", text: "Lapis" });
-  void appVersion().then((v) => {
-    line.textContent = `Lapis ${v}`;
-  });
-
-  openModal({
-    title: "About Lapis",
-    body: el(
-      "div",
-      { class: "modal__body-inner" },
-      el(
-        "div",
-        { class: "field" },
-        line,
-        el("p", {
-          class: "hint",
-          text: "A project is a folder on disk. Nothing is kept anywhere else, and nothing about you is sent anywhere — the only request Lapis makes is the one that asks whether a newer version exists.",
-        }),
-      ),
-    ),
-    foot: el(
-      "div",
-      { class: "modal__foot" },
-      el("span", { class: "card__grow" }),
-      el("button", {
-        class: "button",
-        text: "Check for updates",
-        onclick: () => void checkForUpdate(false),
-      }),
-    ),
+/**
+ * Install whatever is staged as the window goes away.
+ *
+ * `restartAfterInstall: false` is the whole point: the app has just been closed
+ * on purpose, and reopening it because an update happened would be the single
+ * most annoying thing this code could do.
+ *
+ * On Windows `install` hands over to the NSIS installer and exits this process,
+ * so nothing after it runs. On macOS and Linux it swaps the files in place and
+ * returns, and the close then continues normally — either way the new version
+ * is what opens next time.
+ */
+async function installOnClose(): Promise<void> {
+  // Not named `window`: that would shadow the global one for the rest of this
+  // function, in a file where both are plausible.
+  const appWindow = getCurrentWindow();
+  await appWindow.onCloseRequested(async (event) => {
+    if (!staged) return;
+    // Hold the window open for the moment the handover takes. Without this the
+    // process can be gone before the installer has been launched.
+    event.preventDefault();
+    const update = staged;
+    // Cleared first, so a failure cannot leave a close that never completes.
+    staged = null;
+    try {
+      await update.install({ restartAfterInstall: false });
+    } catch {
+      // An update that will not install is not a reason to trap someone in the
+      // app. It stays on disk and the next launch will find it again.
+    }
+    await appWindow.destroy();
   });
 }

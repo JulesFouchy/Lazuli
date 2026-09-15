@@ -48,9 +48,9 @@ import { closeModal, isModalOpen, onModalDismissed } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
-import { checkForUpdateOnStartup, openAboutDialog } from "./updates";
 import { displayedEntries, renderTimeline } from "./timeline";
 import { clear, el, isEditing, toast, toastError } from "./ui";
+import { appVersion, startUpdates } from "./updates";
 
 function appRoot(): HTMLElement {
   const node = document.getElementById("app");
@@ -132,14 +132,17 @@ function launchView(): HTMLElement {
         text: "Appearance…",
         onclick: () => openHere({ kind: "appearance" }),
       }),
-      el("button", {
-        class: "button button--ghost",
-        text: "About…",
-        onclick: () => openHere({ kind: "about" }),
-      }),
     ),
     el("div", { class: "launch__heading", text: "Recent" }),
   );
+
+  // The only place the version is visible. It has to be somewhere: updates
+  // install themselves silently, so "it changed and now X is broken" is
+  // otherwise a report nobody can act on.
+  const version = el("div", { class: "launch__version", text: "" });
+  void appVersion().then((v) => {
+    version.textContent = `Lapis ${v}`;
+  });
 
   const list = el("div", { class: "recent" });
   view.append(list);
@@ -173,6 +176,7 @@ function launchView(): HTMLElement {
     // happens: the window can be up and asking before the backend is ready.
     .catch((err) => toastError("Could not read the recent projects", err));
 
+  view.append(version);
   return view;
 }
 
@@ -617,8 +621,7 @@ type Modal =
   | { kind: "start-date" }
   | { kind: "export" }
   | { kind: "new-project" }
-  | { kind: "appearance" }
-  | { kind: "about" };
+  | { kind: "appearance" };
 
 interface Place {
   /** Project folder, or null for the launch screen. */
@@ -678,8 +681,7 @@ function isPlace(value: unknown): value is Place {
     kind === "start-date" ||
     kind === "export" ||
     kind === "new-project" ||
-    kind === "appearance" ||
-    kind === "about"
+    kind === "appearance"
   );
 }
 
@@ -939,9 +941,6 @@ function showModal(modal: Modal): void {
       break;
     case "appearance":
       openAppearanceDialog();
-      break;
-    case "about":
-      openAboutDialog();
       break;
   }
 }
@@ -1210,9 +1209,10 @@ onDateFormatChange(render);
 // the OS while the choice is `system`.
 startTheme();
 
-// Asks the release endpoint whether there is a newer version, a few seconds
-// from now. Silent about everything except a version actually being available.
-checkForUpdateOnStartup();
+// Checks for a new version a few seconds from now, downloads it in the
+// background if there is one, and installs it as the window closes. Says
+// nothing at any point.
+startUpdates();
 
 // Pick up where the last session left off. The first paint is only drawn here
 // when it is the launch screen; a project is drawn once it has loaded, rather

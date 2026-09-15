@@ -17,10 +17,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset", "image-png"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
-# Only for `relaunch` after an update has been installed. On Windows the NSIS
-# updater restarts the app itself, but a macOS or Linux update leaves the old
-# process running against the new files, so it has to ask.
-tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

@@ -27,7 +27,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_process::init())
         .on_page_load(move |_webview, payload| {
             if cfg!(debug_assertions) {
                 let what = match payload.event() {
