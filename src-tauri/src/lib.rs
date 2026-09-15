@@ -50,6 +50,7 @@ pub fn run() {
             // "main" is the label the capabilities file grants permissions to.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Lapis")
+                .icon(icon()?)?
                 .inner_size(1100.0, 820.0)
                 .min_inner_size(640.0, 480.0)
                 .maximized(true)
@@ -93,4 +94,16 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lapis");
+}
+
+/// The window's icon — its title bar, its taskbar button, and Alt-Tab.
+///
+/// Given explicitly rather than left to the executable's own icon resource.
+/// That resource is embedded by the build script, which only re-runs when
+/// `tauri.conf.json` changes — replace the files in `icons/` alone and the
+/// binary keeps the icon it was first built with, which is exactly how the old
+/// one survived the rename. This reads the PNG the icons were generated from,
+/// so the window cannot disagree with the folder.
+fn icon() -> tauri::Result<tauri::image::Image<'static>> {
+    tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
 }

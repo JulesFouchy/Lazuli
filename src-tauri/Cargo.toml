@@ -12,7 +12,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+# `image-png` is what lets the window be given its icon from the PNG in
+# `icons/`, rather than inheriting whatever icon the executable was built with.
+tauri = { version = "2", features = ["protocol-asset", "image-png"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
