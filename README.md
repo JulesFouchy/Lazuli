@@ -60,6 +60,12 @@ Always single-job: parallel builds exhaust the Windows page file. See [CLAUDE.md
 
 **Nothing runs in CI on a push.** Those three commands are the whole check, and running them here costs nothing where a private repository's Actions minutes do not. A release runs them once on Linux before it fans out to four runners.
 
+### Keeping releases from starting cold
+
+Actions caches are readable only from the ref that wrote them and from the default branch. The release workflow runs on tags, so each release writes its caches onto its own tag where the next release cannot reach them. [`warm-cache.yml`](.github/workflows/warm-cache.yml) puts the same caches on `main`, where every tag run can read them — run it by hand from the Actions tab, **with `main` selected**.
+
+Worth running after anything that changes `Cargo.lock`, when `rustc` goes up a stable release, and if more than a week has passed since the last release — GitHub deletes a cache that has not been read for seven days, and each release that restores one resets that clock.
+
 ## Releasing
 
 Write the `## 0.2.0` section in [CHANGELOG.md](CHANGELOG.md) first — it becomes the release notes. Then:

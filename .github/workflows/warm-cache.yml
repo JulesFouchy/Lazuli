@@ -1,0 +1,112 @@
+# Builds the dependency tree on `main`, so that releases can reuse it.
+#
+# Actions caches are readable from the ref that wrote them and from the default
+# branch, and nothing else. The release workflow only ever runs on tags, so
+# every release writes its caches onto its own tag where the next release cannot
+# see them — each release starts cold. This job exists to put the same caches on
+# `main`, which every tag run can read.
+#
+# **Run it from `main`.** A run from any other ref writes the cache onto that
+# ref and helps nobody.
+#
+# It compiles with `cargo build`, not `tauri build`: what is being cached is the
+# dependency tree, and packaging a .dmg or an installer adds minutes that cache
+# nothing. The keys must match the release workflow's `shared-key` exactly, so
+# the two matrices have to stay identical — that is the one thing to check if a
+# release ever starts cold again.
+#
+# ## When to run it
+#
+# - After anything that changes `src-tauri/Cargo.lock`.
+# - When `rustc` goes up a stable release, every six weeks or so, because the
+#   compiler's version is part of every cache key.
+# - If more than a week has passed since the last release. GitHub deletes a
+#   cache that has not been *read* for seven days, and a release that restores
+#   one resets that clock — so frequent releases keep themselves warm and a
+#   quiet fortnight silently undoes this.
+#
+# ## What it costs
+#
+# About 160 billable minutes, against roughly 90 saved per release, so it pays
+# for itself on the second release that uses it. Measured: the Windows build
+# went 16m22s cold to 4m47s warm, and Linux 9m00s to 4m30s.
+
+name: Warm build cache
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: warm-cache
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      # Identical to the release workflow's build matrix. If they drift, the
+      # cache keys drift with them and the warming silently stops working.
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+            rust-targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+            rust-targets: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run anywhere but main
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::run this from main — a cache written on $GITHUB_REF is readable only from $GITHUB_REF"
+            exit 1
+          fi
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            build-essential \
+            file
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: lapis${{ matrix.args }}
+          cache-on-failure: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # `generate_context!` reads the built frontend, so the Rust build will not
+      # compile without `../dist` present.
+      - run: npm run build
+
+      # Release profile, because that is what a release builds and debug
+      # artifacts would not be reused. Single-job for the same reason as
+      # everywhere else.
+      - run: cargo build -j 1 --release ${{ matrix.args }}
+        working-directory: src-tauri
