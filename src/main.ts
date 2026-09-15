@@ -1053,31 +1053,39 @@ window.addEventListener("mouseup", (event) => {
 // for a second and a half, far longer than the pause between two swipes, so a
 // second swipe lands in the tail of the first with a gap of 30ms.
 //
-// Momentum dies away instead: a measured flick ran 248, 95, 93, 16, 60, 58 and
-// on down through a long tail to deltas of 1. So the gesture is over once the
-// deltas have shrunk to nothing, and the next one starts at the first delta
-// worth having after that — or at the first delta the other way, since
-// momentum never turns around either. The quiet gap stays as a backstop.
+// Momentum only ever slows down, so the next gesture starts where the wheel
+// speeds up again — fingers are back on the glass — or where it turns around,
+// which momentum never does either. The quiet gap stays as a backstop.
+//
+// Speed, not delta: a stalled frame folds several deltas into one fat event,
+// and a measured tail ran 12, 11, then 39 after a 67ms gap, which is the same
+// speed and no push at all. Divided by the time since the last event, the
+// stream is a curve that only falls. Two things still break it:
+//
+// - A push is not smooth. One ran 16, 63, 66, 82, 232, 0, 1, 42, 31 — two
+//   deltas of nothing in the middle of it, then a rise. So a rise is measured
+//   against the fastest of the last few events, which the dip does not erase.
+// - The move is made on the way up, and the rest of the rise would look like a
+//   push. So nothing counts as one until the flick has clearly turned down.
 const SWIPE_STEP = 120;
 const SWIPE_GAP = 400;
-/** Below this the wheel is coasting to a halt rather than being pushed. */
-const SWIPE_FLOOR = 8;
-/**
- * How long it has to coast before a rise counts as a new gesture.
- *
- * A push is not a smooth curve: one measured swipe ran 16, 63, 66, 82, 232, 0,
- * 1, 42, 31 — two deltas of nothing in the middle of it, 2ms apart, and a rise
- * straight after. A tail that has truly ended stays down for a second or more,
- * so a dip has to last to be believed.
- */
-const SWIPE_COAST = 120;
+/** How much faster than the recent envelope, in px/ms, fingers have to be. */
+const SWIPE_RISE = 0.5;
+/** How many recent speeds make up that envelope. */
+const SWIPE_WINDOW = 4;
+/** The fraction of its peak speed below which a flick has turned down. */
+const SWIPE_FALL = 0.6;
+/** A delta after a stall is spread over at most this long, ms. */
+const SWIPE_STALL = 100;
 
 let swipeTowards = 0;
 let lastWheelAt = 0;
 let lastDelta = 0;
-/** When the gesture already moved started coasting, or null while it is not. */
-let coastingSince: number | null = null;
 let swiped = false;
+/** Since the move was made: the last few speeds, the fastest, and whether it has turned down. */
+let recentSpeeds: number[] = [];
+let peakSpeed = 0;
+let fallen = false;
 
 window.addEventListener("wheel", (event) => {
   // The viewer claims the up-and-down wheel to walk the timeline, and
@@ -1086,7 +1094,8 @@ window.addEventListener("wheel", (event) => {
   if (event.defaultPrevented) return;
 
   const delta = event.deltaX;
-  if (event.timeStamp - lastWheelAt > SWIPE_GAP) {
+  const since = event.timeStamp - lastWheelAt;
+  if (since > SWIPE_GAP) {
     swipeTowards = 0;
     lastDelta = 0;
     swiped = false;
@@ -1103,17 +1112,14 @@ window.addEventListener("wheel", (event) => {
 
   const reversed = delta * lastDelta < 0;
   lastDelta = delta;
+  const speed = Math.abs(delta) / Math.min(Math.max(since, 1), SWIPE_STALL);
 
   if (swiped) {
-    let pushed = false;
-    if (Math.abs(delta) < SWIPE_FLOOR) {
-      coastingSince ??= event.timeStamp;
-    } else {
-      // Fingers back on the glass, if what came before was a wheel at rest.
-      pushed =
-        coastingSince !== null && event.timeStamp - coastingSince >= SWIPE_COAST;
-      coastingSince = null;
-    }
+    peakSpeed = Math.max(peakSpeed, speed);
+    if (speed < SWIPE_FALL * peakSpeed) fallen = true;
+    const pushed = fallen && speed > Math.max(...recentSpeeds) + SWIPE_RISE;
+    recentSpeeds.push(speed);
+    if (recentSpeeds.length > SWIPE_WINDOW) recentSpeeds.shift();
     if (!pushed && !reversed) return;
     swiped = false;
     swipeTowards = 0;
@@ -1127,8 +1133,10 @@ window.addEventListener("wheel", (event) => {
   if (Math.abs(swipeTowards) < SWIPE_STEP) return;
 
   swiped = true;
-  coastingSince = null;
   swipeTowards = 0;
+  recentSpeeds = [speed];
+  peakSpeed = speed;
+  fallen = false;
   if (delta > 0) goForward();
   else goUp();
 });
