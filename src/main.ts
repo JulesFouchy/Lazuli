@@ -1047,15 +1047,36 @@ window.addEventListener("mouseup", (event) => {
 // horizontal wheel. Fingers to the right is out one layer and fingers to the
 // left is back down, the way every browser reads the same gesture.
 //
-// One gesture is one move. The wheel arrives as a stream of small deltas
-// followed by momentum that keeps running after the fingers have lifted, so
-// crossing the threshold makes the move and the rest of the gesture is then
-// ignored until the wheel has been quiet long enough to be a new one.
+// One gesture is one move: crossing the threshold makes the move, and the rest
+// of that gesture is then ignored. Which needs an answer to where one gesture
+// ends, and a pause in the stream is not it — a flick keeps reporting momentum
+// for a second and a half, far longer than the pause between two swipes, so a
+// second swipe lands in the tail of the first with a gap of 30ms.
+//
+// Momentum dies away instead: a measured flick ran 248, 95, 93, 16, 60, 58 and
+// on down through a long tail to deltas of 1. So the gesture is over once the
+// deltas have shrunk to nothing, and the next one starts at the first delta
+// worth having after that — or at the first delta the other way, since
+// momentum never turns around either. The quiet gap stays as a backstop.
 const SWIPE_STEP = 120;
 const SWIPE_GAP = 400;
+/** Below this the wheel is coasting to a halt rather than being pushed. */
+const SWIPE_FLOOR = 8;
+/**
+ * How long it has to coast before a rise counts as a new gesture.
+ *
+ * A push is not a smooth curve: one measured swipe ran 16, 63, 66, 82, 232, 0,
+ * 1, 42, 31 — two deltas of nothing in the middle of it, 2ms apart, and a rise
+ * straight after. A tail that has truly ended stays down for a second or more,
+ * so a dip has to last to be believed.
+ */
+const SWIPE_COAST = 120;
 
 let swipeTowards = 0;
 let lastWheelAt = 0;
+let lastDelta = 0;
+/** When the gesture already moved started coasting, or null while it is not. */
+let coastingSince: number | null = null;
 let swiped = false;
 
 window.addEventListener("wheel", (event) => {
@@ -1064,29 +1085,52 @@ window.addEventListener("wheel", (event) => {
   // this module imports it, so it has always run by the time this one does.
   if (event.defaultPrevented) return;
 
+  const delta = event.deltaX;
   if (event.timeStamp - lastWheelAt > SWIPE_GAP) {
     swipeTowards = 0;
+    lastDelta = 0;
     swiped = false;
   }
   lastWheelAt = event.timeStamp;
-  if (swiped) return;
 
   // A swipe that is mostly up or down is scrolling the timeline, however
-  // crooked it happens to be.
-  if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) {
+  // crooked it happens to be. A wheel that reports nothing sideways at all
+  // lands here too, and leaves the gesture it interrupts as it found it.
+  if (Math.abs(delta) <= Math.abs(event.deltaY)) {
     swipeTowards = 0;
     return;
   }
-  // Turning back mid-gesture starts the count again rather than cancelling out
-  // what has already been wound up.
-  if (event.deltaX * swipeTowards < 0) swipeTowards = 0;
-  swipeTowards += event.deltaX;
+
+  const reversed = delta * lastDelta < 0;
+  lastDelta = delta;
+
+  if (swiped) {
+    let pushed = false;
+    if (Math.abs(delta) < SWIPE_FLOOR) {
+      coastingSince ??= event.timeStamp;
+    } else {
+      // Fingers back on the glass, if what came before was a wheel at rest.
+      pushed =
+        coastingSince !== null && event.timeStamp - coastingSince >= SWIPE_COAST;
+      coastingSince = null;
+    }
+    if (!pushed && !reversed) return;
+    swiped = false;
+    swipeTowards = 0;
+  } else if (reversed) {
+    // Turning back mid-gesture starts the count again rather than cancelling
+    // out what has already been wound up.
+    swipeTowards = 0;
+  }
+
+  swipeTowards += delta;
   if (Math.abs(swipeTowards) < SWIPE_STEP) return;
 
   swiped = true;
-  if (swipeTowards > 0) goForward();
-  else goUp();
+  coastingSince = null;
   swipeTowards = 0;
+  if (delta > 0) goForward();
+  else goUp();
 });
 
 window.addEventListener("keydown", (event) => {
