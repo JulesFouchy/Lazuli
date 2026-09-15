@@ -1,6 +1,6 @@
 ---
 summary: A settings UI, and the values that should move into it
-affects: [src-tauri/src/dates.rs, src-tauri/src/commands.rs, src/dates.ts, src/main.ts, src/appearance.ts, src/theme.ts]
+affects: [src-tauri/src/dates.rs, src-tauri/src/commands.rs, src/main.ts, src/appearance.ts, src/theme.ts]
 ---
 
 # User settings
@@ -24,11 +24,13 @@ Two constraints when moving it:
 
 Changing it silently rewrites history: every entry near the old boundary moves to a different journal day, which shifts day numbers and gap lengths. The UI should say so before applying it.
 
-### `dateFormat` and `newestFirst` — currently in `localStorage`
+### `newestFirst` — currently in `localStorage`
 
-`dates.ts` and `main.ts` keep these in the webview's `localStorage`. That works, but they are lost if the WebView2 profile is cleared, and they are invisible to anything outside the webview. They belong in `settings.json` with everything else. Low value on their own — worth doing only as part of the same pass.
+`main.ts` keeps it in the webview's `localStorage`. That works, but it is lost if the WebView2 profile is cleared, and it is invisible to anything outside the webview. It belongs in `settings.json` with everything else. Low value on its own — worth doing only as part of the same pass.
 
-`theme.ts` keeps the theme and the accent there too, and those two should *stay* in `localStorage`: `index.html` reads them in a blocking inline script so the first paint is already in the right theme, which a Rust round trip cannot do. They are listed here only so a later pass does not sweep them up with the other two.
+The date format was here too, and went the other way: it is a property of the project, so it lives in `journaley.yaml`. Ask of anything else on this list whether the same is true of it before moving it here.
+
+`theme.ts` keeps the theme and the accent in `localStorage` too, and those two should *stay* there: `index.html` reads them in a blocking inline script so the first paint is already in the right theme, which a Rust round trip cannot do. They are listed here only so a later pass does not sweep them up.
 
 ### `projects_dir` — already there
 
