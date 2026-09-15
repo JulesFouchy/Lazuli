@@ -1,6 +1,5 @@
 ## Triage
 
-
 transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
 
 when we copy paste an image file it should work to import the image
@@ -10,7 +9,6 @@ tagline ideas : "tell your story/journey through pictures"? "Let pictures tell y
 we should see the current date at the top
 
 hide top bar, like in zen (also make it a custom titlebar with our own style)
-F11 should toggle fullscreen
 
 the button shouldn't say "Open folder..." but "Open project...", or "Import project..."? (and on hover we explain that each project is just a plain local folder)
 
@@ -20,6 +18,7 @@ bug with the custom color selector it always closes when we start dragging
 
 - the "could not open" popup doesn't stay long enough on screen i couldn't read
 - "open folder" button shouldn't open the project page
+
 
 - release version 1.0
 - setup store to sell for 1€
