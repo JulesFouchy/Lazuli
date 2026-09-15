@@ -1080,7 +1080,7 @@ let coastingSince: number | null = null;
 let swiped = false;
 
 window.addEventListener("wheel", (event) => {
-  // The viewer claims the wheel to walk the timeline, sideways included, and
+  // The viewer claims the up-and-down wheel to walk the timeline, and
   // preventing the default is how it says so — its listener is registered as
   // this module imports it, so it has always run by the time this one does.
   if (event.defaultPrevented) return;

@@ -3,7 +3,8 @@
 // A card crops its picture to keep several entries on the page at once; this is
 // the one place the picture is shown whole, and the one place it can be looked
 // into. The arrows and the wheel walk the timeline without leaving the viewer,
-// so a project can be read straight through.
+// so a project can be read straight through; sideways is left alone, and is
+// the app's back and forward in here as much as anywhere else.
 
 import type { Entry, Project } from "./api";
 import { assetUrl } from "./api";
@@ -428,6 +429,10 @@ window.addEventListener(
   "wheel",
   (event) => {
     if (!viewer) return;
+    // Sideways is the app's back and forward, in here as much as anywhere
+    // else, so it is left for the shell to read — untouched, default and all,
+    // which is how the shell knows the viewer has not claimed it.
+    if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
     // The page behind is already locked, but the overlay is not a scroller and
     // the browser would otherwise look for one.
     event.preventDefault();
@@ -436,14 +441,14 @@ window.addEventListener(
     // move through the project, and a gesture that changed meaning depending on
     // how closely you happened to be looking would be a trap. Dragging is how
     // you get around a magnified picture.
-    const delta = event.deltaY + event.deltaX;
+    const delta = event.deltaY;
     // Turning back mid-gesture starts the count again rather than cancelling
     // out what has already been wound up.
     if (delta * wheelTowards < 0) wheelTowards = 0;
     wheelTowards += delta;
     if (Math.abs(wheelTowards) < WHEEL_STEP) return;
-    // Down and right are further along the page, which is the direction the
-    // right arrow goes.
+    // Down is further along the page, which is the direction the right arrow
+    // goes.
     step(wheelTowards > 0 ? 1 : -1);
     wheelTowards = 0;
   },
