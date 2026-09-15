@@ -104,9 +104,14 @@ jobs:
         with:
           components: clippy
 
+      # `shared-key` rather than the default, which folds the job's *name* into
+      # the cache key and so gives `verify` and `build` separate copies of the
+      # same dependency tree. With this, the Linux build below restores what
+      # this job just compiled.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          shared-key: lapis
           cache-on-failure: true
 
       - uses: actions/setup-node@v4
@@ -172,12 +177,21 @@ jobs:
         with:
           targets: ${{ matrix.rust-targets }}
 
+      # Shared with the `verify` job above, which has already compiled this on
+      # Linux by the time this runs. The runner's OS and architecture are part
+      # of the key regardless, so Windows and Linux do not collide; the target
+      # is spelled out because the two macOS builds share a runner label.
+      #
+      # Note that none of this survives *between* releases. Actions caches are
+      # scoped to the ref that wrote them plus the default branch, and this
+      # workflow only ever runs on tags — so each release writes caches onto
+      # its own tag, where the next release cannot see them. Warming them would
+      # mean building all four platforms on `main`, which costs more than it
+      # saves at this release rate.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-          # Separates the two macOS targets, which share a runner label but not
-          # a single object file.
-          key: ${{ matrix.args }}
+          shared-key: lapis${{ matrix.args }}
           # Save the dependency cache even when the build fails. Without this a
           # release that dies in Lapis's own code — which is the usual way for
           # one to die — throws away the twenty minutes of dependencies it had
