@@ -5,6 +5,8 @@ transparent images background, eg the transition isf demo in coollab timeline, i
 
 when we copy paste an image file it should work to import the image
 
+tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey".
+
 we should see the current date at the top
 
 hide top bar, like in zen (also make it a custom titlebar with our own style)
@@ -12,15 +14,14 @@ F11 should toggle fullscreen
 
 the button shouldn't say "Open folder..." but "Open project...", or "Import project..."? (and on hover we explain that each project is just a plain local folder)
 
-setup auto-updates
-make the proper installer (what do we need to setup the app ? are there some info i need to fill in ? I want to do everything properly)
-
 bug with the custom color selector it always closes when we start dragging
 
 - timeline entry with the new style + name + icon
-- make a wide image for a banner, in the same style as the icon, like an extended version of the icon
-- make Dark theme the default theme, not system
-- consider here is the image to use as the icon : "C:\Users\fouch\Downloads\ChatGPT Image Sep 15, 2026, 10_13_29 PM.png"
+
+- consider using this as the icon : "C:\Users\fouch\Downloads\ChatGPT Image Sep 15, 2026, 10_13_29 PM.png"
+
+- the "could not open" popup doesn't stay long enough on screen i couldn't read
+- "open folder" button shouldn't open the project page
 
 ## Import initial projects
 

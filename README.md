@@ -1,8 +1,12 @@
+![](assets/banner.png)
+
 # Lapis
 
 **One picture a day, until the project is done.**
 
-A local-first journal for a long project. One picture and one sentence for each day you worked on it, shown as a timeline where the gaps between entries are named as plainly as the entries themselves — and exportable as a one-second-per-entry summary video.
+A local-first journal for a long project. One picture and one sentence for each day you worked on it, shown as a timeline where the gaps between entries are named as plainly as the entries themselves.
+
+A one-second-per-entry summary video is written and working, but not reachable from the UI yet — see [ideas/ship-video-export.md](ideas/ship-video-export.md) for what it is waiting on.
 
 ## Local-first
 
@@ -40,8 +44,6 @@ npm run tauri dev
 
 `lapis <folder>` opens straight into a project. New projects default into [`projects/`](projects/).
 
-Video export needs ffmpeg: have one on `PATH`, or put an `ffmpeg.exe` next to the installed app.
-
 ## Development
 
 ```
@@ -49,22 +51,23 @@ cargo test -j 1                 # in src-tauri/
 npx tsc --noEmit
 node scripts/make-fixture.mjs   # a throwaway project, in the temp folder
 node scripts/make-icon.mjs icon.png 1024 && npx tauri icon icon.png
+node scripts/make-icon.mjs src-tauri/icons/256x256.png 256   # tauri icon skips this one
+node scripts/make-banner.mjs assets/banner.png 1280 640
 ```
 
 Always single-job: parallel builds exhaust the Windows page file. See [CLAUDE.md](CLAUDE.md) for the invariants worth knowing before changing anything.
 
 ## Why "Lapis"
 
-Because the word turned out to mean everything the app is already doing.
+- it's pretty (both the sonorities of the name, and the gem)
+- short and memorable
+- gives a good idea for the logo and overall theme / artistic direction
+- reference to Obsidian, which is a software I really like, and we share some philosophy : local-first, "note taking" app
+- minecraft origin: the idea for Lapis emerged when i was coding a minecraft mod, and I added the exact same timeline inside minecraft, and enjoyed it so much i wanted to make samilar timelines for all my projects not only my minecraft world, and so I made Lapis
+- I love cakes, so I don't mind the Indonesian lapis cake
 
-**It is a stone, and stones keep a record.** *Lapis* is Latin for stone. Lapis lazuli is the deep blue one, shot through with flecks of gold — which is where the app's colours come from, ground and accent, and where its icon comes from too.
-
-**It also means layer.** In Indonesian, *lapis* is a layer; *kue lapis* is the layer cake. A journal is exactly that: days laid down one on top of the last, and readable afterwards precisely because none of them was flattened into the others. That was the idea the name was chosen for, and it was a small surprise to find it already inside the word.
-
-**Ground lapis is ultramarine** — the blue of illuminated manuscripts, once the most expensive pigment there was, saved for the page you wanted looked at. An app for arranging pictures so they tell a story has no business being named after anything else.
+**It means layer**: in Indonesian, *lapis* is a layer; *kue lapis* is the layer cake. A journal is exactly that: days laid down one on top of the last, and readable afterwards precisely because none of them was flattened into the others. That was the idea the name was chosen for, and it was a small surprise to find it already inside the word.
 
 **It started in Minecraft.** The first version of this timeline was a mod: a dated picture for each session in one world. It worked well enough that it became obvious every long project deserved the same thing, not just that world. Lapis lazuli is a Minecraft ore, so the name carries where it came from.
 
 **It nods to [Obsidian](https://obsidian.md).** Another app named for a stone, and one this shares a position with: your notes are plain files in a folder you own, the app is a way of reading them, and it can be uninstalled without taking anything with it.
-
-And it is two syllables that sound the same in French and in English, which the earlier candidates — *Rupestre*, *Fresque* — were not.
