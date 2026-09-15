@@ -1068,6 +1068,34 @@ textarea {
   color: var(--danger);
 }
 
+/* --- about and updates --------------------------------------------------- */
+
+/* The version, which is the one thing someone opens this dialog to read out. */
+.about__version {
+  font-family: var(--mono);
+  font-size: 15px;
+  margin: 0;
+}
+
+/* Release notes arrive as plain text from the update endpoint and are inserted
+   as text, so the only job here is to keep their line breaks and stop a long
+   line widening the dialog. */
+.release-notes {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* --- right-click menu ---------------------------------------------------- */
 
 .menu {

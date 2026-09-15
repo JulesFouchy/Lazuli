@@ -239,6 +239,11 @@ mod tests {
 
     /// A minimal valid PNG of a solid colour, so the pipe can be tested
     /// without pulling in an image crate.
+    // `same_item_push` fires on the per-row filter byte below and is wrong
+    // about it: the zero is not a repeated fill but one byte interleaved with
+    // each row's pixels, which is the PNG scanline format. Collapsing it into a
+    // `vec![0; n]` the way the lint suggests would produce a corrupt image.
+    #[allow(clippy::same_item_push)]
     fn solid_png(width: u32, height: u32, shade: u8) -> Vec<u8> {
         use std::io::Write as _;
 

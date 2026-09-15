@@ -48,6 +48,7 @@ import { closeModal, isModalOpen, onModalDismissed } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
+import { checkForUpdateOnStartup, openAboutDialog } from "./updates";
 import { displayedEntries, renderTimeline } from "./timeline";
 import { clear, el, isEditing, toast, toastError } from "./ui";
 
@@ -130,6 +131,11 @@ function launchView(): HTMLElement {
         class: "button button--ghost",
         text: "Appearance…",
         onclick: () => openHere({ kind: "appearance" }),
+      }),
+      el("button", {
+        class: "button button--ghost",
+        text: "About…",
+        onclick: () => openHere({ kind: "about" }),
       }),
     ),
     el("div", { class: "launch__heading", text: "Recent" }),
@@ -312,11 +318,10 @@ function timelineSection(project: Project): HTMLElement {
         text: "New entry",
         onclick: () => void addEntry(),
       }),
-      el("button", {
-        class: "button",
-        text: "Export video…",
-        onclick: () => openHere({ kind: "export" }),
-      }),
+      // No "Export video…" button: the export needs an ffmpeg the app has not
+      // decided how to ship yet, so it would offer the user a feature that
+      // fails on any machine without one on PATH. The dialog and the encoder
+      // below it are intact — see ideas/ship-video-export.md.
       el("span", { class: "timeline__spacer" }),
       el("button", {
         class: "button button--ghost",
@@ -612,7 +617,8 @@ type Modal =
   | { kind: "start-date" }
   | { kind: "export" }
   | { kind: "new-project" }
-  | { kind: "appearance" };
+  | { kind: "appearance" }
+  | { kind: "about" };
 
 interface Place {
   /** Project folder, or null for the launch screen. */
@@ -672,7 +678,8 @@ function isPlace(value: unknown): value is Place {
     kind === "start-date" ||
     kind === "export" ||
     kind === "new-project" ||
-    kind === "appearance"
+    kind === "appearance" ||
+    kind === "about"
   );
 }
 
@@ -932,6 +939,9 @@ function showModal(modal: Modal): void {
       break;
     case "appearance":
       openAppearanceDialog();
+      break;
+    case "about":
+      openAboutDialog();
       break;
   }
 }
@@ -1199,6 +1209,10 @@ onDateFormatChange(render);
 // the root element; this adds the accent's derived shades and starts following
 // the OS while the choice is `system`.
 startTheme();
+
+// Asks the release endpoint whether there is a newer version, a few seconds
+// from now. Silent about everything except a version actually being available.
+checkForUpdateOnStartup();
 
 // Pick up where the last session left off. The first paint is only drawn here
 // when it is the launch screen; a project is drawn once it has loaded, rather

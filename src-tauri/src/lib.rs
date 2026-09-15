@@ -27,6 +27,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .on_page_load(move |_webview, payload| {
             if cfg!(debug_assertions) {
                 let what = match payload.event() {
@@ -45,6 +46,12 @@ pub fn run() {
         // the user, and hiding it meanwhile only turns the flicker into a
         // window that appears, vanishes and appears again.
         .setup(|app| {
+            // Registered here rather than in the chain above because the crate
+            // is only a dependency on desktop targets — see `Cargo.toml`.
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             let dress =
                 theme::dress_for(&commands::appearance_preference(app.handle()));
             // "main" is the label the capabilities file grants permissions to.

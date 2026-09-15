@@ -1,0 +1,146 @@
+# Builds Lapis for Windows, macOS and Linux and publishes the installers to the
+# public JulesFouchy/lapis-releases repository, which is where the in-app
+# updater looks.
+#
+# Two repositories because this one is private: a private repo's release assets
+# need a token to download, and the updater has none. Only the built installers
+# cross over; the source does not.
+#
+# To cut a release, tag a commit here and push the tag:
+#
+#     git tag v0.2.0 && git push origin v0.2.0
+#
+# The tag must match the `version` in `src-tauri/tauri.conf.json` — the check
+# job below refuses the build otherwise, because a mismatch produces an update
+# that every client downloads and then declines to apply.
+#
+# The release is created as a draft. Nothing reaches users, and the updater sees
+# nothing, until it is published by hand from the lapis-releases repo.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Two releases building into the same tag would race over the same assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Cheap, and it runs before three platform builds rather than after them.
+  check-version:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tag must match every version in the tree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          node scripts/set-version.mjs
+          bad=0
+          for v in $(node scripts/set-version.mjs | awk '{print $1}'); do
+            [ "$v" = "$tag" ] || bad=1
+          done
+          if [ "$bad" = 1 ]; then
+            echo "::error::tag v$tag does not match the versions above — run: node scripts/set-version.mjs $tag"
+            exit 1
+          fi
+          echo "releasing $tag"
+
+  build:
+    needs: check-version
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Two macOS bundles rather than one universal binary: a universal
+          # build doubles the download for every user to spare a second
+          # architecture's build minutes, and minutes are the cheaper of the two.
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+            rust-targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+            rust-targets: x86_64-apple-darwin
+          # Not `ubuntu-latest`: the AppImage and the .deb link against the
+          # glibc of whatever built them, so building on the oldest supported
+          # runner is what decides the oldest distro Lapis will start on.
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            build-essential \
+            file
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: ${{ matrix.args }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          # Writes to a different repository than this workflow runs in, so the
+          # built-in GITHUB_TOKEN is no use. A fine-grained PAT scoped to
+          # lapis-releases with Contents: read and write.
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          # The half of the updater keypair that proves an installer came from
+          # here. Losing it means never being able to update an install again.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          owner: JulesFouchy
+          repo: lapis-releases
+          # The tag is cut against a commit in *this* repo, which does not exist
+          # over there, so the release has to be anchored to a ref that does.
+          releaseCommitish: main
+          tagName: ${{ github.ref_name }}
+          releaseName: "Lapis ${{ github.ref_name }}"
+          releaseBody: "See the assets below to download and install this version."
+          # Published by hand. Until then the updater's `releases/latest`
+          # endpoint still resolves to the previous version, so a half-uploaded
+          # release cannot be handed to anyone.
+          releaseDraft: true
+          prerelease: false
+          # `latest.json`, which is the file the app actually fetches.
+          uploadUpdaterJson: true
+          # Prefer the NSIS setup.exe over the MSI: `installMode: currentUser`
+          # means it updates without an administrator prompt.
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}

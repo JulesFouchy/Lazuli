@@ -132,13 +132,9 @@ export function openAppearanceDialog(): void {
         { class: "appearance__preview" },
         el("span", { class: "appearance__sample-date", text: "Day 12" }),
         el("button", { class: "button button--primary", text: "New entry" }),
-        el("button", { class: "button", text: "Export video…" }),
+        el("button", { class: "button", text: "Appearance…" }),
       ),
     ),
-    el("p", {
-      class: "hint",
-      text: "The accent is used for the export's day label too.",
-    }),
   );
 
   openModal({ title: "Appearance", body, onClose: stop });

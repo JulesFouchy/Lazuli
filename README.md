@@ -57,6 +57,30 @@ node scripts/make-banner.mjs assets/banner.png 1280 640
 
 Always single-job: parallel builds exhaust the Windows page file. See [CLAUDE.md](CLAUDE.md) for the invariants worth knowing before changing anything.
 
+## Releasing
+
+```
+node scripts/set-version.mjs 0.2.0     # the three files that each hold a copy
+git commit -am "Lapis 0.2.0" && git push
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+That tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds for Windows, macOS (Apple Silicon and Intel) and Linux, signs each installer with the updater key, and opens a **draft** release on the public [`lapis-releases`](https://github.com/JulesFouchy/lapis-releases) repo. Nothing reaches anyone, and the in-app updater sees nothing, until that draft is published by hand.
+
+The updater fetches `latest.json` from that repo's *latest* release, so publishing the draft is the moment every existing install starts being offered the new version.
+
+### What the repository needs, once
+
+Three secrets on this repo, under Settings → Secrets and variables → Actions:
+
+| Secret | What |
+| --- | --- |
+| `RELEASES_TOKEN` | A fine-grained PAT scoped to `lapis-releases` with **Contents: read and write**. The workflow's own token cannot write to another repository. |
+| `TAURI_SIGNING_PRIVATE_KEY` | The contents of `~/.tauri/lapis.key`. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Empty, as the key was generated without one. The secret still has to exist. |
+
+**Back up `~/.tauri/lapis.key` somewhere that is not this machine.** It is the only thing that can sign an update Lapis will accept. Lose it and every existing install is stranded on its current version for good — there is no recovery, only asking each user to download and reinstall by hand. The matching public key is in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json), baked into every build, and changing it is exactly the break just described.
+
 ## Why "Lapis"
 
 - it's pretty (both the sonorities of the name, and the gem)

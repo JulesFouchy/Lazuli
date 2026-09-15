@@ -12,7 +12,7 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-src 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": []
@@ -21,22 +21,43 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "app", "dmg", "deb", "appimage"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.icns",
       "icons/icon.ico"
     ],
     "publisher": "Jules Fouchy",
     "copyright": "Copyright © 2026 Jules Fouchy",
     "category": "Productivity",
     "shortDescription": "A local-first project journal.",
-    "longDescription": "Lapis keeps a project journal as a folder on disk: each entry is a dated sentence and a picture, read back as a timeline or exported as a one-second-per-entry summary video.",
+    "longDescription": "Lapis keeps a project journal as a folder on disk: each entry is a dated sentence and a picture, read back as a timeline of the days you worked on it.",
     "windows": {
       "nsis": {
         "installMode": "currentUser",
         "languages": ["English"]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk1RDQzRTcyMjAxNTNDRTAKUldUZ1BCVWdjajdVbFIreDM5MExDalFpMDV3cmMxUWVheE41THJjRkdESFlxeG0zazFtYk0wZ3EK",
+      "endpoints": [
+        "https://github.com/JulesFouchy/lapis-releases/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

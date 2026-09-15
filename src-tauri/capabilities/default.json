@@ -9,6 +9,14 @@
       "identifier": "core:window:allow-set-theme",
       "comment": "The title bar is drawn by Windows, not by the page, so the only way it follows the app's own light/dark choice is to tell the window about it."
     },
+    {
+      "identifier": "updater:default",
+      "comment": "Check for, download and install a new version. What makes this safe to expose is the Ed25519 signature: the plugin refuses any artifact not signed by the key whose public half is in `tauri.conf.json`, so a hijacked endpoint can serve nothing the app will run."
+    },
+    {
+      "identifier": "process:allow-restart",
+      "comment": "Restart into the new version once an update is installed. Named `restart` here and `relaunch()` in the JS API — the same command."
+    },
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-confirm",

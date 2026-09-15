@@ -1,0 +1,82 @@
+# Does it compile, and do the tests pass, on each platform Lapis is released for.
+#
+# Worth having specifically because Lapis is developed on Windows and released
+# for three platforms: the macOS and Linux code paths are the ones nobody runs
+# by accident, and a tag is a bad moment to discover one of them stopped
+# compiling. This does not bundle installers — that is the release workflow's
+# job — so it costs a fraction of the minutes.
+
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # `npm run build` is `tsc --noEmit && vite build`, so this covers both the
+      # types and the bundle the Rust side will be handed.
+      - run: npm run build
+
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest, ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            build-essential
+
+      # No `cargo fmt --check`: the tree is not rustfmt-clean and never has
+      # been — roughly thirty places are hand-wrapped narrower than rustfmt
+      # wants — so the check would fail on arrival. Adopting it means one
+      # reformatting commit first.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      # `tauri build` runs this first, and the Rust build needs `../dist` to
+      # exist before it will compile at all.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      # Single-job everywhere, for the same reason the project builds that way
+      # locally: a runner has less memory than the dev machine, not more.
+      - run: cargo clippy -j 1 --all-targets -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test -j 1
+        working-directory: src-tauri
