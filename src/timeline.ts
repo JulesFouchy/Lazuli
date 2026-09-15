@@ -157,21 +157,22 @@ function entryCard(
       { class: entry.text ? "card__text" : "card__text card__text--empty" },
       entry.text || "No note yet",
     ),
-    el(
-      "div",
-      { class: "card__figure" },
-      entry.image
-        ? el("img", {
-            class: "card__image",
-            src: assetUrl(project.root, "entries", entry.id, entry.image),
-            alt: entry.text || "Entry illustration",
-            // Thousands of full-resolution photos would otherwise all decode at
-            // once; the browser skips the offscreen ones.
-            loading: "lazy",
-            decoding: "async",
-          })
-        : el("div", { class: "card__placeholder", text: "No image chosen" }),
-    ),
+    // No picture, no frame for one: an entry that is only a sentence is a
+    // small card, not a card with a hole in it.
+    entry.image !== null &&
+      el(
+        "div",
+        { class: "card__figure" },
+        el("img", {
+          class: "card__image",
+          src: assetUrl(project.root, "entries", entry.id, entry.image),
+          alt: entry.text || "Entry illustration",
+          // Thousands of full-resolution photos would otherwise all decode at
+          // once; the browser skips the offscreen ones.
+          loading: "lazy",
+          decoding: "async",
+        }),
+      ),
   );
 
   return card;

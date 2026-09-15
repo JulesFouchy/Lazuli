@@ -657,20 +657,9 @@ textarea {
   box-shadow: 0 0 0 1px var(--image-ring);
 }
 
-.card__placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 120px;
-  border-radius: var(--radius);
-  background: var(--bg-sunken);
-  color: var(--text-faint);
-  font-size: 13px;
-  border: 1px dashed var(--line-strong);
-}
-
 /* Sits between the header and the image, so it only needs the gap below it —
-   the header already supplies the space above. */
+   the header already supplies the space above. When there is no image it is
+   the card's last row, and the same padding closes the card. */
 .card__text {
   padding: 0 18px 14px;
   margin: 0;
