@@ -27,8 +27,14 @@ import { el, focusWhenActive, toastError } from "./ui";
  * The folder is created rather than chosen: picking an existing empty folder
  * meant making one in the file dialog first, and offered the app a folder with
  * someone else's files in it as the normal case rather than the mistake.
+ *
+ * `tab` is the tab the launch screen was showing, which is where the project
+ * is filed: making one while looking at Wip puts it in Wip.
  */
-export function openNewProjectDialog(onCreated: (project: Project) => void): void {
+export function openNewProjectDialog(
+  tab: number,
+  onCreated: (project: Project) => void,
+): void {
   // Markdown, and shown working as it is typed, because this is the same text
   // as the name in the banner and typing it here should look like typing it
   // there. One line, so no headings and no lists.
@@ -131,7 +137,7 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
         // new project; closing it here would record an extra step back to the
         // launch screen on the way.
         onCreated(
-          await whileBusy(createProject(parent, name, dateInput.value)),
+          await whileBusy(createProject(parent, name, dateInput.value, tab)),
         );
       } catch (err) {
         toastError("Could not create the project", err);

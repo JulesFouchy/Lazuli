@@ -582,13 +582,113 @@ input {
   flex: 1;
 }
 
-.launch__heading {
-  font-size: 12px;
+/* --- the tabs -------------------------------------------------------------
+ *
+ * One tab is not a tab: with nothing to switch to, the strip is the heading
+ * the list has always had, and only the + gives away that there could be more.
+ * The second tab turns the same row into a real strip.
+ */
+
+.launch__strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tab {
+  max-width: 200px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    background 120ms,
+    color 120ms;
+}
+
+.tab:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text);
+}
+
+.tab--active {
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* The single-tab case: the heading the launch screen had before tabs existed,
+   right down to the uppercasing, so nothing changed for someone who never
+   makes a second one. */
+.launch__strip--bare .tab {
+  padding-left: 0;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  background: none;
+  box-shadow: none;
   color: var(--text-dim);
-  margin-bottom: 10px;
+}
+
+.launch__strip--bare .tab:hover {
+  color: var(--text);
+}
+
+/* Renaming a tab, and naming a new one: the field stands where the tab does,
+   so the strip does not jump as it opens. */
+/* Two classes deep so the single-tab styling above, which is also two, does
+   not leave the field uppercased and borderless. */
+.tabs .tab--field {
+  min-width: 90px;
+  padding-left: 12px;
+  letter-spacing: normal;
+  text-transform: none;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.launch__add {
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-faint);
+  opacity: 0;
+  transition:
+    opacity 120ms,
+    background 120ms,
+    color 120ms;
+}
+
+/* On hover of the strip rather than of the button itself, which cannot be
+   hovered while it is invisible. Kept up while the keyboard is on it, so it
+   is reachable by Tab as well as by pointer. */
+.launch__strip:hover .launch__add,
+.launch__add:focus-visible {
+  opacity: 1;
+}
+
+.launch__add:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text);
 }
 
 .recent {
@@ -668,6 +768,46 @@ input {
 
 .recent__row--cover .recent__path {
   --photo-stroke: 1.5px;
+}
+
+/* --- dragging a row or a tab ---------------------------------------------
+ *
+ * The thing under the pointer is a copy: the original stays in the list and is
+ * moved along it as the pointer passes each neighbour, which is what shows
+ * where the drop will land. See `drag.ts`.
+ */
+
+.drag-ghost {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-2);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.drag-source {
+  opacity: 0.25;
+}
+
+/* No text selection anywhere while a drag is on, and the grabbing hand
+   wherever the pointer goes rather than only over the row it left. */
+body.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.dragging * {
+  cursor: grabbing !important;
+}
+
+/* The tab a drop would file the project under. */
+.drop-target {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .empty {

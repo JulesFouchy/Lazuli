@@ -7,6 +7,7 @@
 pub mod commands;
 pub mod dates;
 pub mod keys;
+pub mod library;
 pub mod model;
 pub mod paths;
 pub mod store;
@@ -108,10 +109,16 @@ pub fn run() {
             commands::new_project_target,
             commands::close_project,
             commands::peek_project,
-            commands::recent_projects,
-            commands::add_recent,
-            commands::forget_recent,
-            commands::restore_recent,
+            commands::project_tabs,
+            commands::add_project,
+            commands::move_project,
+            commands::forget_project,
+            commands::restore_listing,
+            commands::add_tab,
+            commands::rename_tab,
+            commands::delete_tab,
+            commands::restore_tab,
+            commands::move_tab,
             commands::trash_project,
             commands::restore_project,
             commands::set_project_name,

@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dates;
+use crate::library::{self, Slot};
 use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
@@ -144,6 +145,9 @@ pub fn new_project_target(parent: PathBuf, folder: String) -> NewProjectTarget {
 /// only the frontend can strip the markers, so only the frontend can say what
 /// the folder is called. Sanitising it for the filesystem still happens here,
 /// so the path is the one [`new_project_target`] previewed from the same string.
+///
+/// `tab` is the tab that was on screen when the project was asked for, which
+/// is where it is filed: creating one while looking at Wip puts it in Wip.
 #[tauri::command]
 pub async fn create_project(
     app: AppHandle,
@@ -151,12 +155,17 @@ pub async fn create_project(
     folder: String,
     name: String,
     start_date: NaiveDate,
+    tab: usize,
 ) -> CmdResult<Project> {
     let path = parent.join(folder_name_for(&folder));
     Ok(off_thread(move || {
         store::create_project(&path, &name, start_date)?;
         remember_projects_dir(&app, &path);
-        open_at(&app, path)
+        let project = open_at(&app, path.clone())?;
+        library::update(&app, |library| {
+            library.insert(path, Slot { tab, index: 0 })
+        });
+        Ok(project)
     })
     .await?)
 }
@@ -189,7 +198,10 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
     let snapshot = store.scan()?;
     let watcher = watch::watch_project(app.clone(), &path)?;
 
-    remember_recent(app, &path);
+    // Listed if it is not already, and left exactly where it is if it is: the
+    // order on the launch screen is the user's arrangement, and opening a
+    // project is not a request to rearrange it.
+    library::update(app, |library| library.ensure(&path));
     // Swapped in one step, so there is never a moment with no project open
     // that another thread could see. The project being replaced then gets the
     // same orderly shutdown as a close — outside the lock, because `close`
@@ -339,6 +351,14 @@ fn follow_with_folder(app: &AppHandle, root: &Path, was_called: &str, name: &str
     close_open(app);
     let moved = fs::rename(root, &target)
         .with_context(|| format!("renaming {} to {}", root.display(), target.display()));
+    // Before the reopen, which lists whatever it opens: the same project under
+    // a new path, so the row follows the folder instead of being re-filed at
+    // the top of the first tab.
+    if moved.is_ok() {
+        library::update(app, |library| {
+            library.replace_path(root, target.clone())
+        });
+    }
     // Something has to be open either way — the page is showing a project. When
     // the move failed, the folder is still at the path it was opened from.
     let reopened = open_at(
@@ -351,9 +371,6 @@ fn follow_with_folder(app: &AppHandle, root: &Path, was_called: &str, name: &str
     );
     moved?;
     let project = reopened?;
-    // The row pointing at the folder it used to be: `open_at` has already put
-    // the new path at the top of the list.
-    forget_recent(app.clone(), root.to_path_buf());
     // `open_at` returns the snapshot rather than emitting it, and the page is
     // still holding the old root — which every image URL is built from.
     let _ = app.emit(PROJECT_CHANGED, project);
@@ -877,59 +894,78 @@ pub fn journal_today() -> NaiveDate {
     dates::today()
 }
 
-/// The list of recently opened project folders.
+/// Every project the app knows about, in the tabs the user filed them under.
 ///
 /// The one piece of state that is not in a project folder, because it is about
-/// the app rather than any one project.
+/// the app rather than any one project. See [`library`].
 ///
 /// Off the main thread like every other read of the disk: this is what draws
 /// the launch screen, and it should never sit behind anything.
 #[tauri::command]
-pub async fn recent_projects(app: AppHandle) -> CmdResult<Vec<RecentProject>> {
-    Ok(off_thread(move || Ok(read_recent_projects(&app))).await?)
+pub async fn project_tabs(app: AppHandle) -> CmdResult<Vec<TabView>> {
+    Ok(off_thread(move || Ok(read_tabs(&app))).await?)
 }
 
-fn read_recent_projects(app: &AppHandle) -> Vec<RecentProject> {
-    read_recent(app)
+fn read_tabs(app: &AppHandle) -> Vec<TabView> {
+    library::read(app)
+        .tabs
         .into_iter()
-        .filter(|path| store::is_project(path))
-        .map(|path| {
-            let meta = store::read_meta(&path).ok();
-            // The launch screen shows each project behind its own cover, so the
-            // webview has to be allowed to load that one folder. Not recursive,
-            // and not the whole project: nothing else is shown until it opens.
-            if meta.as_ref().is_some_and(|meta| meta.cover.is_some()) {
-                let _ = app
-                    .asset_protocol_scope()
-                    .allow_directory(path.join(store::COVER_DIR), false);
-            }
-            RecentProject {
-                name: meta
-                    .as_ref()
-                    .map(|meta| meta.name.clone())
-                    .unwrap_or_else(|| file_name_of(&path)),
-                cover: meta.and_then(|meta| meta.cover),
-                path,
-            }
+        .map(|tab| TabView {
+            name: tab.name,
+            projects: tab
+                .projects
+                .into_iter()
+                // A folder that is no longer a project is skipped rather than
+                // dropped: the file is the user's arrangement, and a disk that
+                // is not mounted this morning is not a reason to rewrite it.
+                .filter(|path| store::is_project(path))
+                .map(|path| listed_project(app, path))
+                .collect(),
         })
         .collect()
 }
 
+fn listed_project(app: &AppHandle, path: PathBuf) -> ListedProject {
+    let meta = store::read_meta(&path).ok();
+    // The launch screen shows each project behind its own cover, so the
+    // webview has to be allowed to load that one folder. Not recursive,
+    // and not the whole project: nothing else is shown until it opens.
+    if meta.as_ref().is_some_and(|meta| meta.cover.is_some()) {
+        let _ = app
+            .asset_protocol_scope()
+            .allow_directory(path.join(store::COVER_DIR), false);
+    }
+    ListedProject {
+        name: meta
+            .as_ref()
+            .map(|meta| meta.name.clone())
+            .unwrap_or_else(|| file_name_of(&path)),
+        cover: meta.and_then(|meta| meta.cover),
+        path,
+    }
+}
+
 #[derive(Debug, Serialize)]
-pub struct RecentProject {
+pub struct TabView {
+    pub name: String,
+    pub projects: Vec<ListedProject>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListedProject {
     pub name: String,
     pub path: PathBuf,
     /// Filename within the project's `cover/`, when one is chosen.
     pub cover: Option<String>,
 }
 
-/// Put a project folder at the top of the recents list without opening it.
+/// File a project folder without opening it.
 ///
 /// What the launch screen's "Add project…" does: the folder joins the list and
 /// the user picks their moment to go into it, rather than being taken there by
 /// having pointed at it once.
 #[tauri::command]
-pub fn add_recent(app: AppHandle, path: PathBuf) -> CmdResult<()> {
+pub fn add_project(app: AppHandle, path: PathBuf, slot: Slot) -> CmdResult<()> {
     if !store::is_project(&path) {
         return Err(anyhow!(
             "{} is not a Lazuli project (no {} inside)",
@@ -938,49 +974,107 @@ pub fn add_recent(app: AppHandle, path: PathBuf) -> CmdResult<()> {
         )
         .into());
     }
-    remember_recent(&app, &path);
+    library::update(&app, |library| {
+        let slot = stored_slot(library, slot);
+        library.insert(path, slot);
+    });
     Ok(())
 }
 
-/// Drop a project from the recents list, returning where it was.
-///
-/// The index comes back so undoing puts it where it was rather than at the
-/// top: the list is ordered by when things were opened, and forgetting one by
-/// mistake should not reorder it.
+/// Put a project at a slot: the far end of a drag, within a tab or across two.
 #[tauri::command]
-pub fn forget_recent(app: AppHandle, path: PathBuf) -> Option<usize> {
-    let paths = read_recent(&app);
-    let was_at = paths.iter().position(|candidate| candidate == &path);
-    if was_at.is_some() {
-        let remaining: Vec<PathBuf> = paths
-            .into_iter()
-            .filter(|candidate| candidate != &path)
-            .collect();
-        write_recent(&app, &remaining);
-    }
-    was_at
+pub fn move_project(app: AppHandle, path: PathBuf, slot: Slot) {
+    library::update(&app, |library| {
+        let slot = stored_slot(library, slot);
+        library.insert(path, slot);
+    });
 }
 
-/// Put a forgotten project back at the position it held.
+/// A slot among the rows on screen, as a slot in the stored list.
+///
+/// The two differ whenever a tab holds a folder that is not a project just
+/// now — an unplugged drive, a folder moved away behind the app's back. Those
+/// are skipped when the list is drawn but kept in the file, so an index
+/// counted off the screen would land somewhere else in it, and the row nobody
+/// can see would drift a place every time its neighbours were rearranged.
+///
+/// Only the two commands that follow a pointer go through this. A slot that
+/// came *from* the list — the one an undo puts a row back at — is already one
+/// of these and must not be translated twice.
+fn stored_slot(library: &library::Library, slot: Slot) -> Slot {
+    let tab = slot.tab.min(library.tabs.len().saturating_sub(1));
+    let projects = &library.tabs[tab].projects;
+    let mut visible = 0;
+    for (index, path) in projects.iter().enumerate() {
+        if visible == slot.index {
+            return Slot { tab, index };
+        }
+        if store::is_project(path) {
+            visible += 1;
+        }
+    }
+    Slot {
+        tab,
+        index: projects.len(),
+    }
+}
+
+/// Drop a project from the list, returning where it was.
+///
+/// The slot comes back so undoing puts it back where it was rather than at
+/// the top: the order is the user's, and forgetting one by mistake should not
+/// rearrange anything.
 #[tauri::command]
-pub fn restore_recent(app: AppHandle, path: PathBuf, index: usize) {
-    let mut paths = read_recent(&app);
-    paths.retain(|candidate| candidate != &path);
-    paths.insert(index.min(paths.len()), path);
-    paths.truncate(MAX_RECENT);
-    write_recent(&app, &paths);
+pub fn forget_project(app: AppHandle, path: PathBuf) -> Option<Slot> {
+    library::update(&app, |library| library.remove(&path))
+}
+
+/// Put a forgotten project back at the slot it held.
+#[tauri::command]
+pub fn restore_listing(app: AppHandle, path: PathBuf, slot: Slot) {
+    library::update(&app, |library| library.insert(path, slot));
+}
+
+/// Add a tab, returning where in the strip it landed.
+#[tauri::command]
+pub fn add_tab(app: AppHandle, name: String) -> usize {
+    library::update(&app, |library| library.add_tab(name))
+}
+
+#[tauri::command]
+pub fn rename_tab(app: AppHandle, index: usize, name: String) {
+    library::update(&app, |library| library.rename_tab(index, name));
+}
+
+/// Remove a tab, handing whatever was in it to the first tab.
+///
+/// Returns the tab as it was, so the undo can put it back with its projects.
+/// Nothing on disk moves: a tab is filing and only filing.
+#[tauri::command]
+pub fn delete_tab(app: AppHandle, index: usize) -> Option<library::Tab> {
+    library::update(&app, |library| library.remove_tab(index))
+}
+
+#[tauri::command]
+pub fn restore_tab(app: AppHandle, index: usize, tab: library::Tab) {
+    library::update(&app, |library| library.insert_tab(index, tab));
+}
+
+#[tauri::command]
+pub fn move_tab(app: AppHandle, from: usize, to: usize) {
+    library::update(&app, |library| library.move_tab(from, to));
 }
 
 /// Move a whole project folder to the Recycle Bin.
 ///
-/// Returns its place in the recents list, so the undo can put both the folder
-/// and the list entry back.
+/// Returns its slot in the list, so the undo can put both the folder and the
+/// listing back.
 #[tauri::command]
 pub async fn trash_project(
     app: AppHandle,
     state: State<'_, AppState>,
     path: PathBuf,
-) -> CmdResult<Option<usize>> {
+) -> CmdResult<Option<Slot>> {
     if !store::is_project(&path) {
         return Err(anyhow!("{} is not a Lazuli project", path.display()).into());
     }
@@ -999,30 +1093,28 @@ pub async fn trash_project(
 
     let trashing = path.clone();
     off_thread(move || trash_with_retry(&trashing)).await?;
-    Ok(forget_recent(app, path))
+    Ok(forget_project(app, path))
 }
 
-/// Take a deleted project back out of the Recycle Bin and back into recents.
+/// Take a deleted project back out of the Recycle Bin and back into the list.
 #[tauri::command]
 pub async fn restore_project(
     app: AppHandle,
     path: PathBuf,
-    index: usize,
+    slot: Slot,
 ) -> CmdResult<PathBuf> {
     let restoring = path.clone();
     let restored_as = off_thread(move || restore(&restoring)).await?;
     // The old name may have been taken in the meantime, in which case the
     // folder comes back under a different one and the list must follow it.
     let actual = path.with_file_name(restored_as);
-    restore_recent(app, actual.clone(), index);
+    restore_listing(app, actual.clone(), slot);
     Ok(actual)
 }
 
-const RECENT_FILE: &str = "recent.json";
 const SETTINGS_FILE: &str = "settings.json";
-const MAX_RECENT: usize = 12;
 
-/// App-level settings, kept next to the recents list rather than in any
+/// App-level settings, kept next to the project list rather than in any
 /// project folder.
 #[derive(Debug, Default, Serialize, serde::Deserialize)]
 struct Settings {
@@ -1137,40 +1229,6 @@ fn remember_projects_dir(app: &AppHandle, root: &Path) {
     let mut settings = read_settings(app);
     settings.projects_dir = Some(parent.to_path_buf());
     write_settings(app, &settings);
-}
-
-fn recent_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join(RECENT_FILE))
-}
-
-fn read_recent(app: &AppHandle) -> Vec<PathBuf> {
-    let Some(path) = recent_path(app) else {
-        return Vec::new();
-    };
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
-}
-
-fn write_recent(app: &AppHandle, paths: &[PathBuf]) {
-    let Some(path) = recent_path(app) else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(text) = serde_json::to_string_pretty(paths) {
-        let _ = fs::write(path, text);
-    }
-}
-
-fn remember_recent(app: &AppHandle, root: &Path) {
-    let mut paths = read_recent(app);
-    paths.retain(|candidate| candidate != root);
-    paths.insert(0, root.to_path_buf());
-    paths.truncate(MAX_RECENT);
-    write_recent(app, &paths);
 }
 
 /// A project's metadata without opening it, for the launch screen.

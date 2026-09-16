@@ -1,6 +1,6 @@
 // The spinner in the bottom-right corner, shown while something is loading.
 //
-// A counter rather than a flag: a project open and a recents read can be in
+// A counter rather than a flag: a project open and a project-list read can be in
 // flight at once, and the spinner should stay until the last of them is done.
 // The element lives outside `#app`, which is cleared on every render.
 

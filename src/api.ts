@@ -51,11 +51,35 @@ export interface Project {
   cover_images: string[];
 }
 
-export interface RecentProject {
+/** A project as the launch screen lists it, without opening it. */
+export interface ListedProject {
   name: string;
   path: string;
   /** Filename within the project's `cover/`, when one is chosen. */
   cover: string | null;
+}
+
+/** One tab of the launch screen, and what is filed under it. */
+export interface ProjectTab {
+  name: string;
+  projects: ListedProject[];
+}
+
+/**
+ * A tab as it is stored, holding paths rather than projects.
+ *
+ * What deleting a tab hands back, and the only thing needed to put it back:
+ * the rows are read from the folders again, as they are for every other paint.
+ */
+export interface StoredTab {
+  name: string;
+  projects: string[];
+}
+
+/** Where a project sits: which tab, and where in it. */
+export interface Slot {
+  tab: number;
+  index: number;
 }
 
 export interface UndoOutcome {
@@ -98,38 +122,66 @@ export const createProject = (
   parent: string,
   name: string,
   startDate: string,
+  tab: number,
 ) =>
   invoke<Project>("create_project", {
     parent,
     folder: folderName(name),
     name,
     startDate,
+    tab,
   });
 
 export const closeProject = () => invoke<void>("close_project");
 
-export const recentProjects = () =>
-  invoke<RecentProject[]>("recent_projects");
+/** Every project the app knows about, in the tabs they are filed under. */
+export const projectTabs = () => invoke<ProjectTab[]>("project_tabs");
 
-/** Put a project folder at the top of the recents list, without opening it. */
-export const addRecent = (path: string) =>
-  invoke<void>("add_recent", { path });
+/** File a project folder at a slot in the list, without opening it. */
+export const addProject = (path: string, slot: Slot) =>
+  invoke<void>("add_project", { path, slot });
 
-/** Drop a project from the recents list, returning where in it the project was. */
-export const forgetRecent = (path: string) =>
-  invoke<number | null>("forget_recent", { path });
+/** Put a project at a slot: the far end of a drag, within a tab or across two. */
+export const moveProject = (path: string, slot: Slot) =>
+  invoke<void>("move_project", { path, slot });
 
-/** Put a forgotten project back at the position it held. */
-export const restoreRecent = (path: string, index: number) =>
-  invoke<void>("restore_recent", { path, index });
+/** Drop a project from the list, returning the slot it held. */
+export const forgetProject = (path: string) =>
+  invoke<Slot | null>("forget_project", { path });
 
-/** Move a project folder to the Recycle Bin, returning its place in recents. */
+/** Put a forgotten project back at the slot it held. */
+export const restoreListing = (path: string, slot: Slot) =>
+  invoke<void>("restore_listing", { path, slot });
+
+/** Move a project folder to the Recycle Bin, returning the slot it held. */
 export const trashProject = (path: string) =>
-  invoke<number | null>("trash_project", { path });
+  invoke<Slot | null>("trash_project", { path });
 
 /** Take a deleted project back, returning the path it came back at. */
-export const restoreProject = (path: string, index: number) =>
-  invoke<string>("restore_project", { path, index });
+export const restoreProject = (path: string, slot: Slot) =>
+  invoke<string>("restore_project", { path, slot });
+
+/** Add a tab at the end of the strip, returning where it landed. */
+export const addTab = (name: string) => invoke<number>("add_tab", { name });
+
+export const renameTab = (index: number, name: string) =>
+  invoke<void>("rename_tab", { index, name });
+
+/**
+ * Remove a tab, handing whatever was in it to the first tab.
+ *
+ * Returns the tab as it was, which is what puts it back. Nothing on disk moves
+ * either way: a tab is filing and only filing.
+ */
+export const deleteTab = (index: number) =>
+  invoke<StoredTab | null>("delete_tab", { index });
+
+/** Put a deleted tab back where it was, projects and all. */
+export const restoreTab = (index: number, tab: StoredTab) =>
+  invoke<void>("restore_tab", { index, tab });
+
+export const moveTab = (from: number, to: number) =>
+  invoke<void>("move_tab", { from, to });
 
 /**
  * Rename the project, and the folder it lives in if the folder was named after

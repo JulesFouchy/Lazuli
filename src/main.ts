@@ -6,17 +6,29 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import type { Entry, Project, RecentProject } from "./api";
+import type {
+  Entry,
+  ListedProject,
+  Slot,
+  Project,
+  ProjectTab,
+} from "./api";
 import {
-  addRecent,
+  addProject as fileProject,
+  addTab,
   assetUrl,
   createEntry,
   defaultProjectsDir,
-  forgetRecent,
+  deleteTab,
+  forgetProject,
+  moveProject,
+  moveTab,
   openProject,
-  recentProjects,
+  projectTabs,
+  renameTab,
+  restoreListing,
   restoreProject,
-  restoreRecent,
+  restoreTab,
   setProjectName,
   setSortOrder,
   startupProject,
@@ -31,6 +43,7 @@ import {
   openContextMenu,
 } from "./context-menu";
 import { adoptDateFormat, formatRealWorld, onDateFormatChange } from "./dates";
+import { beginDrag, type DropZone } from "./drag";
 import {
   announceDeletion,
   deleteEntry,
@@ -94,29 +107,69 @@ function adopt(project: Project): void {
   adoptDateFormat(project.meta.date_format);
 }
 
-/** The recents list as last read, so redrawing the launch screen is instant. */
-let knownRecents: RecentProject[] | null = null;
+/** The tabs as last read, so redrawing the launch screen is instant. */
+let knownTabs: ProjectTab[] | null = null;
 
 /** How many reads have been asked for, so a stale answer can be spotted. */
-let recentsAsked = 0;
+let tabsAsked = 0;
 
 /**
- * Read the recents list into the cache. The newest read asked for wins.
+ * Read the project list into the cache. The newest read asked for wins.
  *
  * Several of these are in flight at once — a paint, a delete finishing, an undo
  * finishing — and they do not come back in the order they were asked for. An
  * older answer landing last puts a row back in the cache that the newer one
  * knows is gone, and the next paint shows it.
  */
-async function readRecents(): Promise<void> {
-  const asked = ++recentsAsked;
-  const recents = await whileBusy(recentProjects());
-  if (asked === recentsAsked) knownRecents = recents;
+async function readTabs(): Promise<void> {
+  const asked = ++tabsAsked;
+  const tabs = await whileBusy(projectTabs());
+  if (asked === tabsAsked) knownTabs = tabs;
 }
+
+/** Which tab the launch screen is showing, remembered between launches. */
+const ACTIVE_TAB_KEY = "lazuli.tab";
+
+let activeTab = Number(localStorage.getItem(ACTIVE_TAB_KEY) ?? 0) || 0;
+
+function showTab(index: number): void {
+  activeTab = index;
+  try {
+    localStorage.setItem(ACTIVE_TAB_KEY, String(index));
+  } catch {
+    // A webview with storage turned off still gets to change tabs; it just
+    // starts on the first one next time.
+  }
+  render();
+}
+
+/**
+ * The tab being shown, clamped to one that exists.
+ *
+ * The stored index can outlive the tab it named — one deleted in this session,
+ * or a `projects.json` edited by hand — and a launch screen showing nothing
+ * because it is looking at tab 4 of 2 is the worst way to find that out.
+ */
+function currentTab(tabs: ProjectTab[]): number {
+  return Math.min(Math.max(activeTab, 0), Math.max(tabs.length - 1, 0));
+}
+
+/**
+ * Whether a drag is in progress, during which the launch screen is left alone.
+ *
+ * The rows are being moved in the DOM by hand, and a repaint underneath that —
+ * a list read landing, a delete elsewhere finishing — would replace the very
+ * node the pointer is holding.
+ */
+let dragging = false;
 
 // --- rendering -----------------------------------------------------------
 
 function render(): void {
+  // A drag moves the rows in the DOM by hand, and a tab being named is a field
+  // that only exists there. Both are undone by a repaint from underneath, and
+  // both end by rendering themselves.
+  if (dragging || namingTab) return;
   const editing = captureNameEdit();
   clear(root);
   root.append(state.project ? projectView(state.project) : launchView());
@@ -182,43 +235,272 @@ function launchView(): HTMLElement {
         onclick: () => openHere({ kind: "appearance" }),
       }),
     ),
-    el("div", { class: "launch__heading", text: "Recent" }),
   );
 
+  // The strip above the list: one heading while there is a single tab, a row
+  // of tabs once there is more than one. The + is outside the tabs themselves
+  // so that a tab dragged to the end lands before it and not after it.
+  const tabsBox = el("div", { class: "tabs" });
+  const strip = el(
+    "div",
+    { class: "launch__strip" },
+    tabsBox,
+    el("button", {
+      class: "launch__add",
+      text: "+",
+      title: "New tab",
+      onclick: () => startNewTab(tabsBox),
+    }),
+  );
   const list = el("div", { class: "recent" });
-  view.append(list);
+  view.append(strip, list);
 
-  const paint = (recents: RecentProject[]) => {
-    const rows = recents.filter(
-      (recent) => !isDeleting(projectKey(recent.path)),
+  /** The tabs as drop targets, read from the DOM so a repaint cannot stale them. */
+  const zones = (path: string, showing: number): DropZone[] =>
+    [...tabsBox.querySelectorAll<HTMLElement>(".tab")].map((node, index) => ({
+      node,
+      // Dropping a project on the tab it is already in is not a move, and a
+      // tab that lights up for it would be promising one.
+      live: index !== showing,
+      // Filed at the top, which is where a project added or created while
+      // looking at a tab goes too.
+      onDrop: () => relocate(path, { tab: index, index: 0 }),
+    }));
+
+  const paint = (tabs: ProjectTab[]) => {
+    const showing = currentTab(tabs);
+    strip.classList.toggle("launch__strip--bare", tabs.length < 2);
+    tabsBox.replaceChildren(
+      ...tabs.map((tab, index) => tabButton(tab, index, showing, tabsBox)),
     );
-    for (const { at, recent } of reappearing.values()) {
+
+    const rows = (tabs[showing]?.projects ?? []).filter(
+      (project) => !isDeleting(projectKey(project.path)),
+    );
+    for (const { at, project } of reappearing.values()) {
       // The list it is waiting for can arrive before the undo that asked for
       // it has finished, and one row is wanted, not two.
-      if (rows.some((row) => row.path === recent.path)) continue;
-      rows.splice(Math.min(at, rows.length), 0, recent);
+      if (at.tab !== showing) continue;
+      if (rows.some((row) => row.path === project.path)) continue;
+      rows.splice(Math.min(at.index, rows.length), 0, project);
     }
     list.className = rows.length === 0 ? "empty" : "recent";
     list.replaceChildren(
       ...(rows.length === 0
-        ? [el("p", { text: "Nothing opened yet." })]
-        : rows.map(recentRow)),
+        ? [el("p", { text: emptyMessage(tabs) })]
+        : rows.map((project) =>
+            projectRow(project, list, showing, () =>
+              zones(project.path, showing),
+            ),
+          )),
     );
   };
 
   // Painted from the last list before the fresh one is asked for. Reading the
-  // recents is a round trip, and without this every redraw of this screen —
+  // list is a round trip, and without this every redraw of this screen —
   // including the one that hides a project being deleted — showed an empty
   // list for a frame first.
-  if (knownRecents) paint(knownRecents);
-  void readRecents()
-    .then(() => paint(knownRecents ?? []))
+  if (knownTabs) paint(knownTabs);
+  void readTabs()
+    .then(() => paint(knownTabs ?? []))
     // Without this a failure leaves the screen looking like a first run. It
     // happens: the window can be up and asking before the backend is ready.
-    .catch((err) => toastError("Could not read the recent projects", err));
+    .catch((err) => toastError("Could not read the project list", err));
 
   return view;
 }
+
+/** What an empty tab says, which is not the same thing on a first run. */
+function emptyMessage(tabs: ProjectTab[]): string {
+  return tabs.length < 2
+    ? "Nothing opened yet."
+    : "Nothing filed here yet. Drag a project onto this tab.";
+}
+
+// --- the tabs --------------------------------------------------------------
+//
+// A tab is filing and only filing: it holds paths and nothing on disk knows
+// about it, so deleting one moves no folders and renaming one touches no
+// project. The first tab cannot be deleted, because it is where a project with
+// nowhere else to go lands — which tab that is follows the strip, so dragging
+// another to the front makes it the one that stays.
+
+function tabButton(
+  tab: ProjectTab,
+  index: number,
+  showing: number,
+  tabsBox: HTMLElement,
+): HTMLElement {
+  const button = el("button", {
+    class: `tab${index === showing ? " tab--active" : ""}`,
+    text: tab.name,
+    onclick: () => showTab(index),
+    onpointerdown: (event: Event) =>
+      beginDrag(event as PointerEvent, {
+        node: button,
+        items: () => [...tabsBox.querySelectorAll<HTMLElement>(".tab")],
+        axis: "x",
+        onDrop: (to) => {
+          if (to === index) return;
+          // The tab being looked at is the one that should still be looked at
+          // afterwards, whichever of them moved past it.
+          const moved = knownTabs?.splice(index, 1)[0];
+          if (moved) knownTabs?.splice(to, 0, moved);
+          activeTab =
+            showing === index
+              ? to
+              : showing > index && showing <= to
+                ? showing - 1
+                : showing < index && showing >= to
+                  ? showing + 1
+                  : showing;
+          void moveTab(index, to)
+            .catch((err) => toastError("Could not move that tab", err))
+            .then(readTabs)
+            .catch(() => {})
+            .finally(render);
+        },
+        onStart: () => {
+          dragging = true;
+        },
+        onEnd: () => {
+          dragging = false;
+          render();
+        },
+      }),
+    oncontextmenu: (event: Event) =>
+      openContextMenu(event as MouseEvent, [
+        { label: "Rename", run: () => renameTabInPlace(button, tab, index) },
+        ...(index === 0
+          ? []
+          : [
+              {
+                label: "Delete tab",
+                danger: true,
+                run: () => removeTab(tab, index),
+              },
+            ]),
+      ]),
+  });
+  return button;
+}
+
+/** Turn a tab into the field that renames it, in slot. */
+function renameTabInPlace(
+  button: HTMLElement,
+  tab: ProjectTab,
+  index: number,
+): void {
+  const field = el("input", {
+    class: "tab tab--field",
+    type: "text",
+    value: tab.name,
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  namingTab = true;
+  button.replaceWith(field);
+  field.focus();
+  field.select();
+
+  let done = false;
+  const finish = (save: boolean): void => {
+    if (done) return;
+    done = true;
+    namingTab = false;
+    const name = field.value.trim();
+    if (!save || !name || name === tab.name) {
+      render();
+      return;
+    }
+    void renameTab(index, name)
+      .catch((err) => toastError("Could not rename that tab", err))
+      .then(readTabs)
+      .catch(() => {})
+      .finally(render);
+  };
+
+  field.addEventListener("keydown", (event) => {
+    // The page's own shortcuts have no business in a field, and Escape here
+    // means this field rather than the screen.
+    event.stopPropagation();
+    if (event.key === "Enter") finish(true);
+    if (event.key === "Escape") finish(false);
+  });
+  field.addEventListener("blur", () => finish(true));
+}
+
+/** Add a tab, named before it exists so that giving up leaves nothing behind. */
+function startNewTab(tabsBox: HTMLElement): void {
+  if (namingTab) return;
+  const field = el("input", {
+    class: "tab tab--field",
+    type: "text",
+    placeholder: "Tab name",
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  namingTab = true;
+  tabsBox.append(field);
+  field.focus();
+
+  let done = false;
+  const finish = (save: boolean): void => {
+    if (done) return;
+    done = true;
+    namingTab = false;
+    const name = field.value.trim();
+    if (!save || !name) {
+      render();
+      return;
+    }
+    void addTab(name)
+      .then((index) => {
+        activeTab = index;
+      })
+      .catch((err) => toastError("Could not add that tab", err))
+      .then(readTabs)
+      .catch(() => {})
+      .finally(() => showTab(activeTab));
+  };
+
+  field.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") finish(true);
+    if (event.key === "Escape") finish(false);
+  });
+  field.addEventListener("blur", () => finish(true));
+}
+
+/**
+ * Delete a tab, its projects falling back to the first one.
+ *
+ * Undone from the toast like every other removal on this screen. Nothing on
+ * disk is at stake, but a grouping of a dozen projects made by hand is worth
+ * as much as the folders are, and this is the only way back to it.
+ */
+function removeTab(tab: ProjectTab, index: number): void {
+  if (currentTab(knownTabs ?? []) === index) activeTab = Math.max(index - 1, 0);
+  const removed = deleteTab(index).catch((err) => {
+    toastError(`Could not delete ${tab.name}`, err);
+    return null;
+  });
+  void removed.then(readTabs).catch(() => {}).finally(render);
+  offerUndo(`Deleted the ${tab.name} tab`, () => {
+    void removed
+      .then((stored) => (stored ? restoreTab(index, stored) : null))
+      .catch((err) => toastError("Could not undo", err))
+      .then(() => {
+        activeTab = index;
+      })
+      .then(readTabs)
+      .catch(() => {})
+      .finally(() => showTab(activeTab));
+  });
+}
+
+/** Whether a tab name is being typed, during which the screen is left alone. */
+let namingTab = false;
+
+// --- the project rows ------------------------------------------------------
 
 /**
  * One project on the launch screen, behind its own cover.
@@ -227,15 +509,38 @@ function launchView(): HTMLElement {
  * rather than beside the name: both are rare, and a destructive control sitting
  * permanently next to the thing you actually came to click is one you
  * eventually hit by accident.
+ *
+ * It is also what is dragged: up and down to arrange the list, or onto a tab to
+ * file it there. Which of the two a drag was is decided by where it ends, so
+ * there is one gesture to learn rather than two.
  */
-function recentRow(recent: RecentProject): HTMLElement {
-  return el(
+function projectRow(
+  project: ListedProject,
+  list: HTMLElement,
+  showing: number,
+  zones: () => DropZone[],
+): HTMLElement {
+  const row = el(
     "button",
     {
       // The white, outlined label only makes sense over a photograph, so a row
       // without a cover is left as a plain surface in whichever theme.
-      class: `recent__row${recent.cover ? " recent__row--cover" : ""}`,
-      onclick: () => void openRecent(recent.path),
+      class: `recent__row${project.cover ? " recent__row--cover" : ""}`,
+      onclick: () => void openListed(project.path),
+      onpointerdown: (event: Event) =>
+        beginDrag(event as PointerEvent, {
+          node: row,
+          items: () => [...list.querySelectorAll<HTMLElement>(".recent__row")],
+          zones,
+          onDrop: (index) => relocate(project.path, { tab: showing, index }),
+          onStart: () => {
+            dragging = true;
+          },
+          onEnd: () => {
+            dragging = false;
+            render();
+          },
+        }),
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
           {
@@ -243,22 +548,22 @@ function recentRow(recent: RecentProject): HTMLElement {
             // The folder itself, not the folder selected in its parent: what
             // you want from here is to be inside it.
             run: () =>
-              void openPath(recent.path).catch((err) =>
+              void openPath(project.path).catch((err) =>
                 toastError("Could not open that folder", err),
               ),
           },
           {
             label: "Delete",
             danger: true,
-            run: () => deleteProject(recent),
+            run: () => deleteProject(project),
           },
-          { label: "Forget", run: () => forgetProject(recent) },
+          { label: "Forget", run: () => forgetListing(project) },
         ]),
     },
-    recent.cover
+    project.cover
       ? el("img", {
           class: "recent__image",
-          src: assetUrl(recent.path, "cover", recent.cover),
+          src: assetUrl(project.path, "cover", project.cover),
           alt: "",
           decoding: "async",
         })
@@ -266,10 +571,38 @@ function recentRow(recent: RecentProject): HTMLElement {
     el(
       "div",
       { class: "recent__label" },
-      el("div", { class: "recent__name" }, renderInline(recent.name)),
-      el("div", { class: "recent__path", text: recent.path }),
+      el("div", { class: "recent__name" }, renderInline(project.name)),
+      el("div", { class: "recent__path", text: project.path }),
     ),
   );
+  return row;
+}
+
+/**
+ * Put a project where a drag left it.
+ *
+ * The cache is moved first and the disk told afterwards: the row is already
+ * sitting where the pointer dropped it, and a repaint from a list that has not
+ * caught up would take it back for the length of a round trip.
+ */
+function relocate(path: string, slot: Slot): void {
+  if (!path || !knownTabs) return;
+  let moving: ListedProject | undefined;
+  for (const tab of knownTabs) {
+    const at = tab.projects.findIndex((project) => project.path === path);
+    if (at < 0) continue;
+    moving = tab.projects.splice(at, 1)[0];
+    break;
+  }
+  if (!moving) return;
+  const target = knownTabs[Math.min(slot.tab, knownTabs.length - 1)];
+  target.projects.splice(Math.min(slot.index, target.projects.length), 0, moving);
+
+  void moveProject(path, slot)
+    .catch((err) => toastError("Could not move that project", err))
+    .then(readTabs)
+    .catch(() => {})
+    .finally(render);
 }
 
 function projectView(project: Project): HTMLElement {
@@ -488,8 +821,8 @@ const liveOffers: UndoOffer[] = [];
  * Add a project folder to the list, and stay on the launch screen.
  *
  * Pointing at a folder says where a project is, not that you want to be in it:
- * the row appears at the top of Recent and is opened by the same click as every
- * other project.
+ * the row appears at the top of the tab on screen and is opened by the same
+ * click as every other project.
  */
 async function addProject(): Promise<void> {
   const chosen = await openDialog({
@@ -499,7 +832,7 @@ async function addProject(): Promise<void> {
   });
   if (typeof chosen !== "string") return;
   try {
-    await whileBusy(addRecent(chosen));
+    await whileBusy(fileProject(chosen, { tab: activeTab, index: 0 }));
   } catch (err) {
     toastError("Could not add that folder", err);
     return;
@@ -540,7 +873,7 @@ async function loadProject(path: string, quiet = false): Promise<boolean> {
   }
 }
 
-function openRecent(path: string): Promise<void> {
+function openListed(path: string): Promise<void> {
   return goTo({ project: path, modal: null });
 }
 
@@ -580,31 +913,31 @@ function offerUndo(message: string, undo: () => void): void {
  * undoes has even reached the Recycle Bin, and the row should be back the
  * moment it is pressed rather than after two round trips.
  */
-const reappearing = new Map<string, { at: number; recent: RecentProject }>();
+const reappearing = new Map<string, { at: Slot; project: ListedProject }>();
 
 /** Put a row back on screen at once, and do the real restore behind it. */
 function undoRemoval(
-  recent: RecentProject,
-  at: number,
+  project: ListedProject,
+  at: Slot,
   key: string,
-  removal: Promise<number | null>,
-  restore: (index: number) => Promise<unknown>,
+  removal: Promise<Slot | null>,
+  restore: (slot: Slot) => Promise<unknown>,
 ): void {
-  reappearing.set(recent.path, { at, recent });
+  reappearing.set(project.path, { at, project });
   unmarkDeleting(key);
   render();
   void removal
-    .then((index) => (index === null ? null : restore(index)))
+    .then((slot) => (slot === null ? null : restore(slot)))
     .catch((err) => toastError("Could not undo", err))
     // The row stays on screen throughout: it is held here until a list read
     // asked for *after* the restore finished has replaced the cache, so the
     // paint that stops holding it already has the row of its own. A restore
     // that failed drops it too — the toast has said so, and a row for a
     // project that is not there is worse than no row.
-    .then(readRecents)
+    .then(readTabs)
     .catch(() => {})
     .finally(() => {
-      reappearing.delete(recent.path);
+      reappearing.delete(project.path);
       render();
     });
 }
@@ -616,62 +949,71 @@ function undoRemoval(
  * one than a dialog in front of every delete. The row goes immediately and
  * comes back if the shell refuses the folder.
  */
-function deleteProject(recent: RecentProject): void {
-  const key = projectKey(recent.path);
-  const at = Math.max(
-    knownRecents?.findIndex((row) => row.path === recent.path) ?? 0,
-    0,
-  );
+function deleteProject(project: ListedProject): void {
+  const key = projectKey(project.path);
+  const at = slotOf(project.path);
   markDeleting(key);
   render();
 
   // Started, not awaited: the toast and the empty row both want to be there
   // before the Recycle Bin has finished thinking about it.
-  const deleted = trashProject(recent.path).then(
-    (index) => index ?? at,
+  const deleted = trashProject(project.path).then(
+    (slot) => slot ?? at,
     (err) => {
-      toastError(`Could not delete ${plainText(recent.name)}`, err);
+      toastError(`Could not delete ${plainText(project.name)}`, err);
       return null;
     },
   );
-  offerUndo(`Deleted ${plainText(recent.name)}`, () =>
-    undoRemoval(recent, at, key, deleted, (index) =>
-      restoreProject(recent.path, index),
+  offerUndo(`Deleted ${plainText(project.name)}`, () =>
+    undoRemoval(project, at, key, deleted, (slot) =>
+      restoreProject(project.path, slot),
     ),
   );
   void deleted.then(() => stopHiding(key));
 }
 
 /** Drop a project from the list, leaving the folder where it is. */
-function forgetProject(recent: RecentProject): void {
-  const key = projectKey(recent.path);
-  const at = Math.max(
-    knownRecents?.findIndex((row) => row.path === recent.path) ?? 0,
-    0,
-  );
+function forgetListing(project: ListedProject): void {
+  const key = projectKey(project.path);
+  const at = slotOf(project.path);
   markDeleting(key);
   render();
 
-  const forgotten = forgetRecent(recent.path).then(
-    (index) => index ?? at,
+  const forgotten = forgetProject(project.path).then(
+    (slot) => slot ?? at,
     (err) => {
-      toastError(`Could not forget ${plainText(recent.name)}`, err);
+      toastError(`Could not forget ${plainText(project.name)}`, err);
       return null;
     },
   );
-  offerUndo(`Forgot ${plainText(recent.name)}`, () =>
-    undoRemoval(recent, at, key, forgotten, (index) =>
-      restoreRecent(recent.path, index),
+  offerUndo(`Forgot ${plainText(project.name)}`, () =>
+    undoRemoval(project, at, key, forgotten, (slot) =>
+      restoreListing(project.path, slot),
     ),
   );
   void forgotten.then(() => stopHiding(key));
 }
 
 /**
+ * Where a project is in the list as last read.
+ *
+ * The fallback for the slot a removal reports back: a removal that failed
+ * outright has no slot to give, and the row still has to go somewhere when
+ * the undo puts it back.
+ */
+function slotOf(path: string): Slot {
+  for (const [tab, entry] of (knownTabs ?? []).entries()) {
+    const index = entry.projects.findIndex((row) => row.path === path);
+    if (index >= 0) return { tab, index };
+  }
+  return { tab: currentTab(knownTabs ?? []), index: 0 };
+}
+
+/**
  * Stop hiding a row, once the list itself agrees about it.
  *
  * Dropping the key the moment the call returns is one paint too early:
- * `launchView` draws `knownRecents` before the fresh list has arrived, so a row
+ * `launchView` draws `knownTabs` before the fresh list has arrived, so a row
  * that is gone from the backend but still in that cache flashes back for the
  * length of one round trip. Reading the list first means the paint that follows
  * has nothing to flash. A row whose delete failed is still in the list and
@@ -680,7 +1022,7 @@ function forgetProject(recent: RecentProject): void {
 function stopHiding(key: string): void {
   // Not worth a toast: the paint below asks for the list again anyway, and the
   // only cost of a failure here is the flicker this avoids.
-  void readRecents()
+  void readTabs()
     .catch(() => {})
     .finally(() => {
       unmarkDeleting(key);
@@ -691,7 +1033,7 @@ function stopHiding(key: string): void {
 function projectCreated(project: Project): void {
   // Already open in Rust, so this records the move and closes the dialog
   // rather than opening the folder a second time. It replaces the dialog's own
-  // place instead of following it, so Back goes to the launch screen rather
+  // slot instead of following it, so Back goes to the launch screen rather
   // than back into a form whose project already exists.
   adopt(project);
   render();
@@ -1053,7 +1395,7 @@ function showModal(modal: Modal): void {
       if (project) openStartDateEditor(project);
       break;
     case "new-project":
-      openNewProjectDialog(projectCreated);
+      openNewProjectDialog(currentTab(knownTabs ?? []), projectCreated);
       break;
     case "appearance":
       openAppearanceDialog();
@@ -1385,7 +1727,7 @@ if (import.meta.env.DEV) {
 // place is shown again, dialog included.
 void startupProject().then(async (path) => {
   if (path) {
-    await openRecent(path);
+    await openListed(path);
     return;
   }
   if (!(await apply(here()))) {
