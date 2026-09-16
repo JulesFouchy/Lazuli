@@ -83,6 +83,10 @@ export const closeProject = () => invoke<void>("close_project");
 export const recentProjects = () =>
   invoke<RecentProject[]>("recent_projects");
 
+/** Put a project folder at the top of the recents list, without opening it. */
+export const addRecent = (path: string) =>
+  invoke<void>("add_recent", { path });
+
 /** Drop a project from the recents list, returning where in it the project was. */
 export const forgetRecent = (path: string) =>
   invoke<number | null>("forget_recent", { path });

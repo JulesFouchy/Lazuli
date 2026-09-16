@@ -7,8 +7,20 @@
     "core:default",
     {
       "identifier": "core:window:allow-set-theme",
-      "comment": "The title bar is drawn by Windows, not by the page, so the only way it follows the app's own light/dark choice is to tell the window about it."
+      "comment": "The window's own border and shadow are drawn by the OS, not by the page, so the only way they follow the app's light/dark choice is to tell the window about it."
     },
+    {
+      "identifier": "core:window:allow-start-dragging",
+      "comment": "The title bar is drawn by the page (`src/titlebar.ts`), so dragging the window is a press on one of our elements rather than on a caption Windows owns. Paired with `internal-toggle-maximize`, which is the double-click on that same bar."
+    },
+    "core:window:allow-internal-toggle-maximize",
+    {
+      "identifier": "core:window:allow-minimize",
+      "comment": "The three buttons on that bar. `is-maximized` is what tells the middle one which of the two shapes to draw, and it is asked again on every resize because the window can be maximised without it — Win+Up, or a drag to the top of the screen."
+    },
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
     {
       "identifier": "core:window:allow-set-fullscreen",
       "comment": "F11. Paired with `is-fullscreen` because the toggle reads the window's own state rather than keeping its own."

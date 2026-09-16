@@ -2,10 +2,10 @@
 //!
 //! The page themes itself from `localStorage`, which only the webview can read
 //! and only once it is running. Two things are already on screen by then: the
-//! title bar, drawn by the OS, and the rectangle behind the page. Both take
-//! their colour from how the window was *built*, and changing either after the
-//! fact repaints the frame in front of the user — so the only clean moment to
-//! get them right is creation, which is why the window is built in `lib.rs`
+//! window's border, drawn by the OS, and the rectangle behind the page. Both
+//! take their colour from how the window was *built*, and changing either after
+//! the fact repaints the frame in front of the user — so the only clean moment
+//! to get them right is creation, which is why the window is built in `lib.rs`
 //! rather than declared in `tauri.conf.json`.
 //!
 //! The frontend mirrors its choice into `settings.json`, and this is what reads

@@ -33,8 +33,6 @@ export function openAppearanceDialog(): void {
   const body = el("div", { class: "modal__body-inner" });
 
   const themeRow = el("div", { class: "segmented" });
-  const swatchRow = el("div", { class: "swatches" });
-  const groundRow = el("div", { class: "swatches" });
 
   const customGround = el("input", {
     class: "swatch swatch--custom",
@@ -56,6 +54,11 @@ export function openAppearanceDialog(): void {
       setAccent((event.target as HTMLInputElement).value),
   });
 
+  // The wells are built into their rows once and never taken out again; see
+  // `paintSwatches`.
+  const swatchRow = el("div", { class: "swatches" }, custom);
+  const groundRow = el("div", { class: "swatches" }, customGround);
+
   const paint = () => {
     const choice = themeChoice();
     themeRow.replaceChildren(
@@ -69,41 +72,16 @@ export function openAppearanceDialog(): void {
       ),
     );
 
-    const accent = accentColour();
-    swatchRow.replaceChildren(
-      ...ACCENT_PRESETS.map(({ name, hex }) =>
-        el("button", {
-          class: "swatch",
-          style: `background: ${hex}`,
-          title: name,
-          "aria-label": name,
-          "aria-pressed": String(accent === normaliseHex(hex)),
-          onclick: () => setAccent(hex),
-        }),
-      ),
-      custom,
-    );
-    // Assigned rather than rebuilt: replacing the input mid-drag would close
-    // the picker the drag is happening in.
-    custom.value = accent;
-
+    paintSwatches(swatchRow, custom, ACCENT_PRESETS, accentColour(), setAccent);
     // The grounds on offer are the ones that belong to the theme on screen —
     // a dark one is no use while the page is paper.
-    const ground = backgroundColour();
-    groundRow.replaceChildren(
-      ...BG_PRESETS[activeTheme()].map(({ name, hex }) =>
-        el("button", {
-          class: "swatch",
-          style: `background: ${hex}`,
-          title: name,
-          "aria-label": name,
-          "aria-pressed": String(ground === normaliseHex(hex)),
-          onclick: () => setBackground(hex),
-        }),
-      ),
+    paintSwatches(
+      groundRow,
       customGround,
+      BG_PRESETS[activeTheme()],
+      backgroundColour(),
+      setBackground,
     );
-    customGround.value = ground;
   };
 
   paint();
@@ -138,4 +116,37 @@ export function openAppearanceDialog(): void {
   );
 
   openModal({ title: "Appearance", body, onClose: stop });
+}
+
+/**
+ * Redraw a row of preset swatches, leaving the colour well beside them alone.
+ *
+ * The well must never be detached, not even for the instant `replaceChildren`
+ * takes to hand the same node straight back: a detached `<input type="color">`
+ * loses the OS picker open on it. Every touch of that picker repaints the app
+ * and so ran this, which is why the picker shut the moment it was dragged.
+ */
+function paintSwatches(
+  row: HTMLElement,
+  well: HTMLInputElement,
+  presets: { name: string; hex: string }[],
+  current: string,
+  pick: (hex: string) => void,
+): void {
+  for (const child of [...row.children]) {
+    if (child !== well) child.remove();
+  }
+  row.prepend(
+    ...presets.map(({ name, hex }) =>
+      el("button", {
+        class: "swatch",
+        style: `background: ${hex}`,
+        title: name,
+        "aria-label": name,
+        "aria-pressed": String(current === normaliseHex(hex)),
+        onclick: () => pick(hex),
+      }),
+    ),
+  );
+  well.value = current;
 }

@@ -8,6 +8,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import type { Entry, Project, RecentProject } from "./api";
 import {
+  addRecent,
   assetUrl,
   createEntry,
   defaultProjectsDir,
@@ -50,6 +51,7 @@ import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending"
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
 import { displayedEntries, renderTimeline } from "./timeline";
+import { startTitlebar } from "./titlebar";
 import { clear, el, isEditing, toast, toastError } from "./ui";
 
 function appRoot(): HTMLElement {
@@ -123,8 +125,8 @@ function launchView(): HTMLElement {
       }),
       el("button", {
         class: "button",
-        text: "Open folder…",
-        onclick: () => void openFolder(),
+        text: "Add project…",
+        onclick: () => void addProject(),
       }),
       el("span", { class: "launch__spacer" }),
       el("button", {
@@ -395,13 +397,29 @@ const liveOffers: UndoOffer[] = [];
 
 // --- actions ---------------------------------------------------------------
 
-async function openFolder(): Promise<void> {
+/**
+ * Add a project folder to the list, and stay on the launch screen.
+ *
+ * Pointing at a folder says where a project is, not that you want to be in it:
+ * the row appears at the top of Recent and is opened by the same click as every
+ * other project.
+ */
+async function addProject(): Promise<void> {
   const chosen = await openDialog({
     directory: true,
-    title: "Open a Lapis project",
+    title: "Add a Lapis project",
     defaultPath: await defaultProjectsDir(),
   });
-  if (typeof chosen === "string") await openRecent(chosen);
+  if (typeof chosen !== "string") return;
+  try {
+    await whileBusy(addRecent(chosen));
+  } catch (err) {
+    toastError("Could not add that folder", err);
+    return;
+  }
+  // Repaints from the cached list and then reads a fresh one; the new row
+  // arrives with that read, the same way every other change to the list does.
+  render();
 }
 
 function newProject(): void {
@@ -1222,6 +1240,10 @@ onDateFormatChange(render);
 // the root element; this adds the accent's derived shades and starts following
 // the OS while the choice is `system`.
 startTheme();
+
+// The window is built without decorations, so the bar that minimises, maximises
+// and closes it is one of ours.
+startTitlebar();
 
 // Pick up where the last session left off. The first paint is only drawn here
 // when it is the launch screen; a project is drawn once it has loaded, rather

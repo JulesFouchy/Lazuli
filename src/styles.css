@@ -47,6 +47,10 @@
   --radius: 10px;
   --radius-lg: 16px;
 
+  /* The page's own title bar, which is only on screen while the pointer is in
+     the strip of that height along the top. */
+  --titlebar-height: 32px;
+
   --sans: "LapisSans", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: "LapisMono", ui-monospace, Consolas, monospace;
 
@@ -169,6 +173,152 @@ body {
   font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+}
+
+/* --- title bar ------------------------------------------------------------
+ *
+ * Drawn by the page, because the window is built without decorations. It is
+ * out of sight until the pointer reaches the top edge, and then comes down over
+ * the page rather than pushing it, so the layout below never moves.
+ *
+ * The zone is the strip the pointer has to be in for the bar to stay down. It
+ * takes no clicks of its own except in its top few pixels — the part that is
+ * still hit-testable while the bar is up, and so the part that triggers it.
+ */
+
+.titlebar-zone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar-height);
+  z-index: 100;
+  pointer-events: none;
+}
+
+.titlebar-zone::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  pointer-events: auto;
+}
+
+.titlebar {
+  /* Above the trigger strip, so that the top few pixels of the Close button
+     take the click rather than the strip that brought it down. Going straight
+     to the corner is the whole point of the bar being there at all. */
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  height: var(--titlebar-height);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  pointer-events: auto;
+  transform: translateY(-100%);
+  transition: transform 120ms ease-out;
+}
+
+/* Hovering the zone means hovering either the trigger strip or the bar itself,
+   which is what keeps it down once it has arrived under the pointer. */
+.titlebar-zone:hover .titlebar,
+.titlebar-zone:focus-within .titlebar {
+  transform: none;
+}
+
+.titlebar__title {
+  flex: 1;
+  padding-left: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  /* The whole bar is a drag handle, so nothing in it should look selectable. */
+  user-select: none;
+}
+
+.titlebar__controls {
+  display: flex;
+  align-self: stretch;
+}
+
+.titlebar__control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  color: var(--text-dim);
+  transition: background 100ms, color 100ms;
+}
+
+.titlebar__control:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text);
+}
+
+.titlebar__control--danger:hover {
+  background: var(--danger);
+  color: var(--on-photo);
+}
+
+/* The glyphs are drawn rather than set in a font: Segoe MDL2 is the only font
+   that has them, and it is on Windows alone. */
+.titlebar__glyph {
+  position: relative;
+  width: 10px;
+  height: 10px;
+}
+
+.titlebar__control--minimise .titlebar__glyph::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px solid currentColor;
+}
+
+.titlebar__control--maximise .titlebar__glyph::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid currentColor;
+}
+
+/* Two sheets, the front one bottom-left. The back one is drawn as a corner
+   rather than a square, so the front one does not have to cover it. */
+.titlebar__control--restore .titlebar__glyph::before {
+  inset: 0 0 2px 2px;
+  border: 1px solid currentColor;
+  border-left: none;
+  border-bottom: none;
+}
+
+.titlebar__control--restore .titlebar__glyph::after {
+  content: "";
+  position: absolute;
+  inset: 2px 2px 0 0;
+  border: 1px solid currentColor;
+}
+
+.titlebar__control--close .titlebar__glyph::before,
+.titlebar__control--close .titlebar__glyph::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: 50%;
+  border-top: 1px solid currentColor;
+}
+
+.titlebar__control--close .titlebar__glyph::before {
+  transform: rotate(45deg);
+}
+
+.titlebar__control--close .titlebar__glyph::after {
+  transform: rotate(-45deg);
 }
 
 ::selection {
@@ -1141,6 +1291,10 @@ textarea {
 .toast--error {
   border-color: var(--danger);
   background: var(--danger-soft);
+}
+
+.toast--stays {
+  cursor: pointer;
 }
 
 .toast__action {

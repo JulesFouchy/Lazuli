@@ -66,26 +66,32 @@ pub fn run() {
                 .inner_size(1100.0, 820.0)
                 .min_inner_size(640.0, 480.0)
                 .maximized(true)
+                // The bar that minimises, maximises and closes the window is
+                // drawn by the page — see `src/titlebar.ts`. Only the caption
+                // goes: the resize frame is a separate window style, so edges,
+                // corners and Aero snap all still work.
+                .decorations(false)
                 .theme(dress.theme)
                 .background_color(dress.background)
                 .build()?;
-            Ok(())
-        })
-        .manage(commands::AppState::default())
-        .invoke_handler(tauri::generate_handler![
-            commands::open_project,
 
             // Looks for a newer version a few seconds from now, downloads it
             // in the background if there is one, and says nothing.
             updates::start(app.handle().clone());
-            commands::create_project,
-            commands::new_project_target,
+            Ok(())
+        })
         // Only on macOS and Linux does this do anything: a downloaded update
         // is applied as the window closes. On Windows it was applied at launch.
         .on_window_event(updates::on_window_event)
+        .manage(commands::AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::open_project,
+            commands::create_project,
+            commands::new_project_target,
             commands::close_project,
             commands::peek_project,
             commands::recent_projects,
+            commands::add_recent,
             commands::forget_recent,
             commands::restore_recent,
             commands::trash_project,
@@ -115,7 +121,7 @@ pub fn run() {
         .expect("error while running Lapis");
 }
 
-/// The window's icon — its title bar, its taskbar button, and Alt-Tab.
+/// The window's icon — its taskbar button, and Alt-Tab.
 ///
 /// Given explicitly rather than left to the executable's own icon resource.
 /// That resource is embedded by the build script, which only re-runs when

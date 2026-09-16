@@ -43,8 +43,8 @@ export interface ToastOptions {
   /** A single inline action, typically "Undo". */
   action?: { label: string; run: () => void };
   error?: boolean;
-  /** Milliseconds on screen. */
-  duration?: number;
+  /** Milliseconds on screen, or null to stay until it is clicked. */
+  duration?: number | null;
   /** Called when it leaves the screen, however it came to go. */
   onGone?: () => void;
 }
@@ -62,9 +62,16 @@ export function toast(message: string, options: ToastOptions = {}): () => void {
   const host = document.getElementById("toasts");
   if (!host) return () => {};
 
+  const stays = options.duration === null;
+
   const node = el(
     "div",
-    { class: `toast${options.error ? " toast--error" : ""}`, role: "status" },
+    {
+      class: `toast${options.error ? " toast--error" : ""}${stays ? " toast--stays" : ""}`,
+      role: "status",
+      title: stays ? "Click to dismiss" : null,
+      onclick: stays ? () => dismiss() : null,
+    },
     el("span", { class: "toast__message", text: message }),
     options.action &&
       el("button", {
@@ -88,19 +95,28 @@ export function toast(message: string, options: ToastOptions = {}): () => void {
   };
 
   host.append(node);
-  timer = setTimeout(dismiss, options.duration ?? TOAST_MS);
-  // Keep it up while the pointer is on it, so a slow reader can still undo.
-  node.addEventListener("mouseenter", () => clearTimeout(timer));
-  node.addEventListener("mouseleave", () => {
-    timer = setTimeout(dismiss, 1200);
-  });
+  if (!stays) {
+    timer = setTimeout(dismiss, options.duration ?? TOAST_MS);
+    // Keep it up while the pointer is on it, so a slow reader can still undo.
+    node.addEventListener("mouseenter", () => clearTimeout(timer));
+    node.addEventListener("mouseleave", () => {
+      timer = setTimeout(dismiss, 1200);
+    });
+  }
   return dismiss;
 }
 
-/** Report a failed command without swallowing the cause. */
+/**
+ * Report a failed command without swallowing the cause.
+ *
+ * Errors stay until they are clicked. They are the longest thing the app puts
+ * on screen — a sentence plus whatever Rust said — and a timer that is generous
+ * for "Added 3 images" is not long enough to read one of these, still less to
+ * read it after the pointer has brushed past and cut the timer short.
+ */
 export function toastError(context: string, err: unknown): void {
   const detail = typeof err === "string" ? err : String(err);
-  toast(`${context}: ${detail}`, { error: true, duration: 10000 });
+  toast(`${context}: ${detail}`, { error: true, duration: null });
 }
 
 /** Whether the focus is somewhere that owns its own keystrokes. */

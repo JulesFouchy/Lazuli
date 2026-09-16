@@ -498,6 +498,11 @@ pub fn import_image_bytes(
     bytes: Vec<u8>,
 ) -> CmdResult<String> {
     Ok(with_project(&app, &state, |open| {
+        // A pasted file keeps the name it had in Explorer, so this one comes
+        // from outside the app. The rules for a name a filesystem will accept
+        // are the same whether it ends up on a folder or on a file, separators
+        // included — a `..\` here would otherwise write outside the project.
+        let filename = folder_name_for(&filename);
         if !is_image(&filename) {
             bail!("{filename} is not a recognised image type");
         }
@@ -947,6 +952,25 @@ pub struct RecentProject {
     pub path: PathBuf,
     /// Filename within the project's `cover/`, when one is chosen.
     pub cover: Option<String>,
+}
+
+/// Put a project folder at the top of the recents list without opening it.
+///
+/// What the launch screen's "Add project…" does: the folder joins the list and
+/// the user picks their moment to go into it, rather than being taken there by
+/// having pointed at it once.
+#[tauri::command]
+pub fn add_recent(app: AppHandle, path: PathBuf) -> CmdResult<()> {
+    if !store::is_project(&path) {
+        return Err(anyhow!(
+            "{} is not a Lapis project (no {} inside)",
+            path.display(),
+            store::META_FILE
+        )
+        .into());
+    }
+    remember_recent(&app, &path);
+    Ok(())
 }
 
 /// Drop a project from the recents list, returning where it was.

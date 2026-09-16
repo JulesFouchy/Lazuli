@@ -170,10 +170,10 @@ function apply(): void {
 /**
  * Put the theme on the window frame as well as on the page.
  *
- * The title bar is drawn by the OS, so a light page under a dark title bar is
- * what you get unless the window is told. `null` hands the decision back to the
- * OS, which is exactly what `system` means — and is why this passes the choice
- * rather than the resolved theme.
+ * The window has no title bar of its own, but the OS still draws its border and
+ * its shadow, and those follow the window's theme rather than the page's. `null`
+ * hands the decision back to the OS, which is exactly what `system` means — and
+ * is why this passes the choice rather than the resolved theme.
  *
  * Failures are swallowed: the page is themed either way, and a window that will
  * not take a theme is not worth a toast.

@@ -46,7 +46,8 @@ export function renderImagePicker(options: PickerOptions): HTMLElement {
     }),
   );
 
-  wireDropAndPaste(zone, options);
+  wireDrop(zone);
+  openPicker = { zone, options };
   return zone;
 }
 
@@ -105,8 +106,8 @@ async function deleteImage(
   options.onChanged();
 }
 
-/** Accept files dropped onto the zone, and images pasted while it is open. */
-function wireDropAndPaste(zone: HTMLElement, options: PickerOptions): void {
+/** Accept files dropped onto the zone. */
+function wireDrop(zone: HTMLElement): void {
   zone.addEventListener("dragover", (event) => {
     event.preventDefault();
     zone.classList.add("dropzone--over");
@@ -120,17 +121,39 @@ function wireDropAndPaste(zone: HTMLElement, options: PickerOptions): void {
     // Paths from an Explorer drag arrive through Tauri's own drag-drop event,
     // which the project view forwards; this branch only sees in-page drags.
   });
-
-  zone.addEventListener("paste", (event) => {
-    const items = (event as ClipboardEvent).clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (!item.type.startsWith("image/")) continue;
-      const file = item.getAsFile();
-      if (file) void addPastedFile(file, options);
-    }
-  });
 }
+
+/**
+ * The picker on screen, if there is one.
+ *
+ * Paste is listened for on the document rather than on the zone, because a
+ * paste goes to whatever has focus and the zone is a plain `div` that never
+ * does. Focus is normally in the note being written beside it, so a zone
+ * listener only ever fired when a thumbnail happened to have been clicked
+ * first — which is to say, almost never.
+ */
+let openPicker: { zone: HTMLElement; options: PickerOptions } | null = null;
+
+document.addEventListener("paste", (event) => {
+  // Whatever was open last is still the one on screen, unless it has since
+  // been taken off it.
+  if (!openPicker?.zone.isConnected) return;
+  const files = [...(event.clipboardData?.files ?? [])].filter((file) =>
+    file.type.startsWith("image/"),
+  );
+  if (files.length === 0) return;
+  // The note beside the picker must keep its own paste; this only claims the
+  // event once there is an image in it to claim.
+  event.preventDefault();
+  for (const file of files) void addPastedFile(file, openPicker.options);
+});
+
+/**
+ * Chromium's name for a bitmap pasted from the clipboard — a screenshot, or a
+ * copy out of another app. A file copied in Explorer arrives under its own
+ * name, which is worth keeping.
+ */
+const UNNAMED = /^image\.[a-z0-9]+$/i;
 
 async function addPastedFile(file: File, options: PickerOptions): Promise<void> {
   const extension = file.type.split("/")[1] ?? "png";
@@ -138,13 +161,13 @@ async function addPastedFile(file: File, options: PickerOptions): Promise<void> 
     .toISOString()
     .replace(/[:.]/g, "-")
     .slice(0, 19);
+  const filename =
+    file.name && !UNNAMED.test(file.name)
+      ? file.name
+      : `pasted-${stamp}.${extension}`;
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const saved = await importImageBytes(
-      options.entryId,
-      `pasted-${stamp}.${extension}`,
-      bytes,
-    );
+    const saved = await importImageBytes(options.entryId, filename, bytes);
     toast(`Added ${saved}`);
     options.onChanged();
   } catch (err) {
