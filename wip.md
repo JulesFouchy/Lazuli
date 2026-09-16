@@ -10,11 +10,8 @@ add "folders", as tabs to the right of "recent", which becomes default, and on h
 
 keep projects in fixed order, and drag to reorder them
 
-CTRL+; shortcut to show corrections of spell checker
-
 make the UI juicy
 
-the sort order (latest/newest first) should be per-project
 
 tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"
 

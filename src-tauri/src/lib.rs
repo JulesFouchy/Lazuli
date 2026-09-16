@@ -6,6 +6,7 @@
 
 pub mod commands;
 pub mod dates;
+pub mod keys;
 pub mod model;
 pub mod paths;
 pub mod store;
@@ -117,6 +118,8 @@ pub fn run() {
             commands::set_start_date,
             commands::set_cover,
             commands::set_date_format,
+            commands::set_sort_order,
+            commands::show_spelling_suggestions,
             commands::create_entry,
             commands::update_entry,
             commands::import_images,

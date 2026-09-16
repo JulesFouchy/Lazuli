@@ -35,6 +35,9 @@ semver = "1"
 # Already in the tree through tauri; pinned to the same version so it is not
 # built twice. Reads the OS light/dark preference before any window exists.
 winreg = "0.55"
+# Same: already in the tree through tauri, same version so it is not built
+# twice. `SendInput`, to press the Menu key — see `keys.rs`.
+windows = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 # Desktop-only by construction: there is no updater for iOS or Android, so the

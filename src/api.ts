@@ -15,10 +15,15 @@ export interface ProjectMeta {
   cover: string | null;
   /** How this project's dates are read. A property of the project, not of the machine. */
   date_format: DateFormat;
+  /** Which end of the timeline comes first. A property of the project, not of the machine. */
+  sort_order: SortOrder;
 }
 
 /** `Sep 05, 2026`, or `Day 39`. */
 export type DateFormat = "real" | "day";
+
+/** The most recent entry at the top, or day one at the top. */
+export type SortOrder = "newest" | "oldest";
 
 export interface Entry {
   /** The entry folder's name. Stable across date edits. */
@@ -149,6 +154,16 @@ export const setCover = (filename: string | null) =>
 
 export const setDateFormat = (format: DateFormat) =>
   invoke<void>("set_date_format", { format });
+
+export const setSortOrder = (order: SortOrder) =>
+  invoke<void>("set_sort_order", { order });
+
+/**
+ * Open the webview's context menu on the word the caret is in, which is where
+ * the spelling suggestions are. Rust presses the Menu key; see `keys.rs`.
+ */
+export const showSpellingSuggestions = () =>
+  invoke<void>("show_spelling_suggestions");
 
 /** Add an entry. `date` is `YYYY-MM-DD`, defaulting to the journal day in progress. */
 export const createEntry = (date?: string) =>

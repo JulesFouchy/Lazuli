@@ -12,7 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::model::{is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta};
+use crate::model::{
+    is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta, SortOrder,
+};
 
 pub const META_FILE: &str = "lazuli.yaml";
 
@@ -268,6 +270,7 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
         start_date,
         cover: None,
         date_format: DateFormat::default(),
+        sort_order: SortOrder::default(),
     };
     write_meta(root, &meta)?;
     Ok(meta)
@@ -708,6 +711,7 @@ mod tests {
             start_date: date(2026, 6, 1),
             cover: Some("sunset-take2.jpg".into()),
             date_format: DateFormat::Day,
+            sort_order: SortOrder::Oldest,
         };
         let yaml = serde_yaml::to_string(&meta).expect("should serialise");
         assert!(yaml.contains("start_date: 2026-06-01"));

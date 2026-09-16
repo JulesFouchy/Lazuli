@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dates;
-use crate::model::{is_image, DateFormat, Project, ProjectMeta};
+use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
 use crate::theme;
@@ -372,6 +372,33 @@ pub fn set_date_format(
         let root = root_of(open);
         let mut meta = store::read_meta(&root)?;
         meta.date_format = format;
+        store::write_meta(&root, &meta)
+    })?;
+    Ok(())
+}
+
+/// Show the spelling suggestions for the word the caret is in.
+///
+/// All this does is press the Menu key; the webview opens its own context
+/// menu, which is the only place the suggestions exist. See [`crate::keys`].
+#[tauri::command]
+pub fn show_spelling_suggestions() -> CmdResult<()> {
+    crate::keys::press_context_menu_key()?;
+    Ok(())
+}
+
+/// Which end of the timeline this project is read from. A property of the
+/// project: see [`SortOrder`].
+#[tauri::command]
+pub fn set_sort_order(
+    app: AppHandle,
+    state: State<AppState>,
+    order: SortOrder,
+) -> CmdResult<()> {
+    with_project(&app, &state, |open| {
+        let root = root_of(open);
+        let mut meta = store::read_meta(&root)?;
+        meta.sort_order = order;
         store::write_meta(&root, &meta)
     })?;
     Ok(())

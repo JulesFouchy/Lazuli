@@ -25,6 +25,15 @@ pub struct ProjectMeta {
     /// written before the field existed reads as the calendar dates it showed.
     #[serde(default)]
     pub date_format: DateFormat,
+    /// Which end of the timeline this project is read from.
+    ///
+    /// Per project, like [`Self::date_format`]: a challenge is followed from
+    /// day one and a work journal from what happened last, and which of the
+    /// two a folder is stays the same whoever opens it. Defaulted, so a
+    /// `lazuli.yaml` written before the field existed reads newest-first,
+    /// which is what every project showed until now.
+    #[serde(default)]
+    pub sort_order: SortOrder,
 }
 
 /// Which of an entry's two dates is shown: `Sep 05, 2026` or `Day 39`.
@@ -36,6 +45,17 @@ pub enum DateFormat {
     Real,
     /// Days since the project's start date.
     Day,
+}
+
+/// Which end of the timeline comes first on screen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrder {
+    /// The most recent entry at the top.
+    #[default]
+    Newest,
+    /// Day one at the top.
+    Oldest,
 }
 
 /// The frontmatter block of an `entries/<uuid>/entry.md`.

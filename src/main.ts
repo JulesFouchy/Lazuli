@@ -18,6 +18,7 @@ import {
   restoreProject,
   restoreRecent,
   setProjectName,
+  setSortOrder,
   startupProject,
   trashProject,
   undoDelete,
@@ -71,22 +72,25 @@ const root = appRoot();
 /** Everything the view needs. Rebuilt wholesale on every change. */
 interface AppState {
   project: Project | null;
+  /** A copy of the open project's `sort_order`, kept by [`adopt`]. */
   newestFirst: boolean;
 }
 
 const state: AppState = {
   project: null,
-  newestFirst: localStorage.getItem("lazuli.newestFirst") !== "false",
+  newestFirst: true,
 };
 
 /**
  * Put a project fresh from Rust on screen. The caller renders.
  *
  * Everything that reads as a preference but belongs to the project travels in
- * `lazuli.yaml` and so arrives with it, the date format included.
+ * `lazuli.yaml` and so arrives with it, the date format and the sort order
+ * included.
  */
 function adopt(project: Project): void {
   state.project = project;
+  state.newestFirst = project.meta.sort_order === "newest";
   adoptDateFormat(project.meta.date_format);
 }
 
@@ -374,6 +378,29 @@ function banner(project: Project): HTMLElement {
   );
 }
 
+/**
+ * Flip which end of the timeline comes first.
+ *
+ * Which end a project is read from is a property of the project, not of this
+ * machine — a challenge is followed from day one and a work journal from what
+ * happened last — so it is stored in `lazuli.yaml` beside the date format.
+ *
+ * Shown first and written afterwards: a click should not wait for a file write.
+ * The rescan the write triggers says the same thing, so nothing moves when it
+ * lands — unless the write failed, and then the page goes back to what is
+ * actually on disk.
+ */
+function toggleSortOrder(): void {
+  const previous = state.newestFirst;
+  state.newestFirst = !previous;
+  render();
+  void setSortOrder(state.newestFirst ? "newest" : "oldest").catch((err) => {
+    state.newestFirst = previous;
+    render();
+    toastError("Could not save the sort order", err);
+  });
+}
+
 function timelineSection(project: Project): HTMLElement {
   return el(
     "main",
@@ -396,14 +423,7 @@ function timelineSection(project: Project): HTMLElement {
         class: "button button--ghost",
         text: state.newestFirst ? "Newest first ↓" : "Oldest first ↑",
         title: "Reverse the timeline",
-        onclick: () => {
-          state.newestFirst = !state.newestFirst;
-          localStorage.setItem(
-            "lazuli.newestFirst",
-            String(state.newestFirst),
-          );
-          render();
-        },
+        onclick: () => toggleSortOrder(),
       }),
     ),
     renderTimeline(

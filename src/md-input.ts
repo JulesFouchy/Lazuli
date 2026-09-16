@@ -18,8 +18,9 @@
 // keystroke the content is re-highlighted and the caret put back where it was,
 // by character offset; see `caretOffset`.
 
+import { showSpellingSuggestions } from "./api";
 import { highlight, wordAround } from "./markdown";
-import { el } from "./ui";
+import { el, toastError } from "./ui";
 
 /**
  * What a field says it accepts, written once so the fields cannot come to
@@ -217,6 +218,18 @@ export function markdownInput(
       event.preventDefault();
       const previous = undoStack.pop();
       if (previous) restore(previous, redoStack);
+      return;
+    }
+    // The spelling suggestions for the word under the caret. They live in the
+    // webview's own context menu and nowhere else, so this asks Rust to press
+    // the Menu key — see `src-tauri/src/keys.rs` for why it cannot be done
+    // here. The keystroke it sends arrives at this field, which is why the
+    // field's handler is where the shortcut lives.
+    if (ctrl && event.key === ";") {
+      event.preventDefault();
+      void showSpellingSuggestions().catch((err) =>
+        toastError("Could not open the spelling suggestions", err),
+      );
       return;
     }
 
