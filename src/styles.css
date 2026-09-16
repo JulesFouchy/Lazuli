@@ -224,7 +224,10 @@ body {
   display: flex;
   align-items: center;
   height: var(--titlebar-height);
-  background: var(--bg-raised);
+  /* The ground, not a raised surface: the bar is the top of the window rather
+     than something laid on the page, and `--bg-raised` reads as a white strip
+     in the light theme. It follows the ground the user chose with it. */
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
   box-shadow: var(--shadow-2);
   pointer-events: auto;
