@@ -25,6 +25,11 @@ titlebar bug when scrollbar, make it theme color, add icon, nicer font, (nicer i
 
 make pasting a path work for pasting an image
 
+button to take a picture via webcam
+
+rename to Lazuli
+
+click on the card in the text area opens edit button, (image keeps opening the viewer)
 
 ## Import initial projects
 
