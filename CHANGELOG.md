@@ -7,6 +7,11 @@ Each version's section becomes the release notes verbatim, so write it before cu
 ## 0.1.2 — 2026-09-16
 
 - Updates no longer close Lapis. Before, a new version was installed as you closed the app, and if you opened Lapis again in the few seconds that took, the installer shut it straight back down. Now the download waits on disk and is applied at the start of your next launch, before the window appears — that one launch takes a moment longer, and nothing else changes.
+- Lapis draws its own title bar. It stays hidden until the pointer reaches the top edge, then slides down over the page — so at rest it costs no height, and going straight to the top-right corner still lands on Close.
+- Pasting an image file copied from Explorer imports it. It kept failing because the paste listener sat on an element that never had focus.
+- The colour wells in Appearance no longer close the OS picker the moment you start dragging in it.
+- Error messages stay on screen until you click them, instead of vanishing while you read.
+- "Open folder…" is now "Add project…": it puts the folder at the top of Recent and leaves you on the launch screen, rather than opening it.
 
 ## 0.1.1 — 2026-09-16
 
