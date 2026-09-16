@@ -28,6 +28,17 @@
   font-display: block;
 }
 
+/* The drawn italic, rather than the upright one the browser would shear. Inter
+   italic is not a slanted roman — the a, the f and the g are different letters
+   — and `*emphasis*` in a note is common enough to be worth the file. */
+@font-face {
+  font-family: "LazuliSans";
+  src: url("./fonts/inter-variable-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: block;
+}
+
 /* --- tokens ---------------------------------------------------------------
  *
  * Every colour in this file comes from here. Two rules keep the themes honest:
@@ -502,6 +513,9 @@ input {
   /* The placeholder below is absolutely positioned, and this is what it is
      positioned against. */
   position: relative;
+  /* An empty one is zero pixels tall, and a field you cannot see is a field
+     you cannot click into. */
+  min-height: 1.4em;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   /* Nothing in a note is worth a horizontal scrollbar; a long unbroken path

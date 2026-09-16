@@ -115,8 +115,9 @@ function entryCard(
       // The card edits, the picture views. Everything on a card other than the
       // picture is something you would change rather than look at, so the whole
       // of the rest of it — the date's row, the note, the padding between them
-      // — is one target, and only the picture opts out.
-      title: "Click to edit this entry",
+      // — is one target, and only the picture opts out. No tooltip on either:
+      // one that follows the pointer across every card on the page is in the
+      // way of reading them.
       onclick: () => handlers.editEntry(entry),
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
@@ -156,7 +157,6 @@ function entryCard(
           decoding: "async",
           // The one part of a card that is to be looked at rather than
           // changed, so it takes the click back off the card.
-          title: "Click to see the picture full size",
           onclick: (event: Event) => {
             event.stopPropagation();
             handlers.viewEntry(entry);

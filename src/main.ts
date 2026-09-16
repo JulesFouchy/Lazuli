@@ -1126,7 +1126,12 @@ async function runUndo(): Promise<void> {
 // A rescan found the folder genuinely different. Redraw, and put any open
 // editor back the way it was.
 void listen<Project>("project-changed", (event) => {
-  const was = state.project?.root;
+  // Rust keeps a project open after the app has navigated out of it, so a
+  // rescan of that folder still arrives while the launch screen is showing.
+  // Nothing on this screen is about that project, and adopting it would put
+  // the project view back over the screen the user just left.
+  if (!state.project) return;
+  const was = state.project.root;
   adopt(event.payload);
   // The same project at a different path is a rename, and nothing else: a
   // different project arrives through an open, not through a rescan.

@@ -18,6 +18,7 @@ import {
   themeChoice,
   type Theme,
   type ThemeChoice,
+  type Well,
 } from "./theme";
 import { el } from "./ui";
 
@@ -48,6 +49,18 @@ export function openAppearanceDialog(): void {
     light: customColour("light") ?? backgroundColourFor("light"),
   };
 
+  // Which of a row's swatches wears the ring, when the well happens to hold a
+  // colour that is also on the palette. Two rings for one colour says the
+  // setting is in two places; the one that was clicked is the true answer.
+  //
+  // On opening there is nothing to have clicked, so it is derived: a colour
+  // that is not on the palette can only have come from the well.
+  const fromWell: Record<Well, boolean> = {
+    accent: !onPalette(ACCENT_PRESETS, accentColour()),
+    dark: !onPalette(BG_PRESETS.dark, backgroundColourFor("dark")),
+    light: !onPalette(BG_PRESETS.light, backgroundColourFor("light")),
+  };
+
   const customGround = el("input", {
     class: "swatch swatch--custom",
     type: "color",
@@ -55,10 +68,14 @@ export function openAppearanceDialog(): void {
     "aria-label": "Custom background colour",
     // Not `preventDefault`: the OS picker opens on this same click, which is
     // the other half of what it is for.
-    onclick: () => setBackground(wellGround[activeTheme()]),
+    onclick: () => {
+      fromWell[activeTheme()] = true;
+      setBackground(wellGround[activeTheme()]);
+    },
     oninput: (event: Event) => {
       const hex = (event.target as HTMLInputElement).value;
       wellGround[activeTheme()] = hex;
+      fromWell[activeTheme()] = true;
       rememberCustomColour(activeTheme(), hex);
       setBackground(hex);
     },
@@ -71,10 +88,14 @@ export function openAppearanceDialog(): void {
     type: "color",
     title: "The colour you mixed. Click to use it, and to change it",
     "aria-label": "Custom accent colour",
-    onclick: () => setAccent(wellAccent),
+    onclick: () => {
+      fromWell.accent = true;
+      setAccent(wellAccent);
+    },
     oninput: (event: Event) => {
       const hex = (event.target as HTMLInputElement).value;
       wellAccent = hex;
+      fromWell.accent = true;
       rememberCustomColour("accent", hex);
       setAccent(hex);
     },
@@ -98,24 +119,32 @@ export function openAppearanceDialog(): void {
       ),
     );
 
-    paintSwatches(
-      swatchRow,
-      custom,
-      wellAccent,
-      ACCENT_PRESETS,
-      accentColour(),
-      setAccent,
-    );
+    paintSwatches({
+      row: swatchRow,
+      well: custom,
+      wellHex: wellAccent,
+      wellChosen: fromWell.accent,
+      presets: ACCENT_PRESETS,
+      current: accentColour(),
+      pick: (hex) => {
+        fromWell.accent = false;
+        setAccent(hex);
+      },
+    });
     // The grounds on offer are the ones that belong to the theme on screen —
     // a dark one is no use while the page is paper.
-    paintSwatches(
-      groundRow,
-      customGround,
-      wellGround[activeTheme()],
-      BG_PRESETS[activeTheme()],
-      backgroundColour(),
-      setBackground,
-    );
+    paintSwatches({
+      row: groundRow,
+      well: customGround,
+      wellHex: wellGround[activeTheme()],
+      wellChosen: fromWell[activeTheme()],
+      presets: BG_PRESETS[activeTheme()],
+      current: backgroundColour(),
+      pick: (hex) => {
+        fromWell[activeTheme()] = false;
+        setBackground(hex);
+      },
+    });
   };
 
   paint();
@@ -164,15 +193,24 @@ export function openAppearanceDialog(): void {
  * preset to compare it against what you mixed must not be what destroys what
  * you mixed — the well holds it until it is next used, so the comparison runs
  * both ways.
+ *
+ * `wellChosen` breaks the tie when the well holds a colour that is on the
+ * palette too, so that the row has exactly one ring on it rather than two.
  */
-function paintSwatches(
-  row: HTMLElement,
-  well: HTMLInputElement,
-  wellHex: string,
-  presets: { name: string; hex: string }[],
-  current: string,
-  pick: (hex: string) => void,
-): void {
+function paintSwatches(options: {
+  row: HTMLElement;
+  well: HTMLInputElement;
+  wellHex: string;
+  wellChosen: boolean;
+  presets: { name: string; hex: string }[];
+  current: string;
+  pick: (hex: string) => void;
+}): void {
+  const { row, well, wellHex, wellChosen, presets, current, pick } = options;
+
+  const ringed = (hex: string): boolean => current === normaliseHex(hex);
+  const wellRinged = wellChosen && ringed(wellHex);
+
   for (const child of [...row.children]) {
     if (child !== well) child.remove();
   }
@@ -183,13 +221,17 @@ function paintSwatches(
         style: `background: ${hex}`,
         title: name,
         "aria-label": name,
-        "aria-pressed": String(current === normaliseHex(hex)),
+        "aria-pressed": String(ringed(hex) && !wellRinged),
         onclick: () => pick(hex),
       }),
     ),
   );
   well.value = wellHex;
-  // And it reads as chosen when what it holds is what is in force, so the row
-  // has exactly one ring on it however the colour was arrived at.
-  well.dataset.chosen = String(current === normaliseHex(wellHex));
+  well.dataset.chosen = String(wellRinged);
 }
+
+/** Whether `hex` is one of the offered colours. */
+const onPalette = (
+  presets: { name: string; hex: string }[],
+  hex: string,
+): boolean => presets.some((preset) => normaliseHex(preset.hex) === hex);

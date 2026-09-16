@@ -18,8 +18,19 @@
 // keystroke the content is re-highlighted and the caret put back where it was,
 // by character offset; see `caretOffset`.
 
-import { highlight } from "./markdown";
+import { highlight, wordAround } from "./markdown";
 import { el } from "./ui";
+
+/**
+ * What a field says it accepts, written once so the fields cannot come to
+ * promise different things. The shorter one is for a field that is one line,
+ * where a heading or a list has nowhere to go.
+ */
+export const MARKDOWN_HINT =
+  "Markdown: **bold**, *italic*, `code`, ~~struck~~, # headings and - lists.";
+
+export const MARKDOWN_HINT_INLINE =
+  "Markdown: **bold**, *italic*, `code` and ~~struck~~.";
 
 export interface MarkdownInputOptions {
   /**
@@ -82,6 +93,9 @@ export function markdownInput(
   const node = el(options.tag ?? "div", {
     class: options.class ? `md-input ${options.class}` : "md-input",
     contenteditable: "plaintext-only",
+    // Said rather than inherited, because this replaced a `textarea` and an
+    // `input` and both had it.
+    spellcheck: "true",
     "aria-multiline": String(!options.singleLine),
     "data-placeholder": options.placeholder ?? "",
   }) as HTMLElement;
@@ -91,10 +105,30 @@ export function markdownInput(
 
   const isFocused = (): boolean => document.activeElement === node;
 
-  /** Re-highlight, and put the caret back where it was — or where asked. */
+  /**
+   * Re-highlight, and put the caret back where it was — or where asked.
+   *
+   * Unless the field already holds what this would build, which is the case
+   * for every keystroke that does not change the markup, and so for nearly all
+   * of them: typing a letter into a word leaves the browser's own edit exactly
+   * right, and `highlight` agrees with it.
+   *
+   * That check is not an optimisation. Replacing the field's contents throws
+   * away the spelling markers Chromium has computed for it, and doing that on
+   * every keystroke meant the check never finished and the squiggles never
+   * appeared at all.
+   */
   const paint = (caret?: number): void => {
+    const built = document.createElement("div");
+    built.append(highlight(source));
+    if (built.innerHTML === node.innerHTML) {
+      // Still where the caller asked, even with nothing to redraw: an undo
+      // that lands on the same text still moves the caret.
+      if (caret !== undefined) placeCaret(node, caret);
+      return;
+    }
     const at = caret ?? (isFocused() ? caretOffset(node) : null);
-    node.replaceChildren(highlight(source));
+    node.replaceChildren(...built.childNodes);
     if (at !== null && at !== undefined) placeCaret(node, at);
   };
 
@@ -189,6 +223,22 @@ export function markdownInput(
     options.onKeydown?.(event);
   });
 
+  // A double-click selects a word, and the browser decides what a word is from
+  // the text alone — it cannot know that the `_` in front of one is a marker
+  // rather than a letter. `wordAround` does know, so the field overrides the
+  // selection with its own answer. After the event, not instead of it: the
+  // browser has already made its selection by the time this runs, and replacing
+  // it is simpler than predicting it.
+  node.addEventListener("dblclick", (event) => {
+    const clicked = offsetFromPoint(node, event.clientX, event.clientY);
+    if (clicked === null) return;
+    const word = wordAround(source, clicked);
+    // Null where the browser's own answer is the right one: on a marker, or on
+    // something that is not a word at all.
+    if (!word) return;
+    selectRange(node, word.start, word.end);
+  });
+
   node.addEventListener("focus", () => options.onFocus?.());
   node.addEventListener("blur", () => options.onBlur?.(source));
 
@@ -232,24 +282,69 @@ export function caretOffset(field: HTMLElement): number {
 
 /** Put the caret `at` characters into `field`, counting through its markup. */
 export function placeCaret(field: HTMLElement, at: number): void {
+  const position = positionAt(field, at);
+  if (position) collapse(position.text, position.offset);
+  else collapseToEnd(field);
+}
+
+/** Select the characters from `start` to `end`, counting through the markup. */
+function selectRange(field: HTMLElement, start: number, end: number): void {
+  const from = positionAt(field, start);
+  const to = positionAt(field, end);
+  if (!from || !to) return;
+  const range = document.createRange();
+  range.setStart(from.text, from.offset);
+  range.setEnd(to.text, to.offset);
+  select(range);
+}
+
+/**
+ * Which text node holds character `at`, and where in it.
+ *
+ * Past the end lands on the end of the last text there is, which is where a
+ * caret after the final character belongs.
+ */
+function positionAt(
+  field: HTMLElement,
+  at: number,
+): { text: Text; offset: number } | null {
   const walker = document.createTreeWalker(field, NodeFilter.SHOW_TEXT);
   let remaining = at;
   let last: Text | null = null;
 
   while (walker.nextNode()) {
     const text = walker.currentNode as Text;
-    if (remaining <= text.length) {
-      collapse(text, remaining);
-      return;
-    }
+    // Strictly inside this node. A position exactly at its end belongs to the
+    // start of the next one instead, for two reasons: a caret just after a
+    // marker is in the text that marker applies to rather than at the marker's
+    // tail, so typing there lands inside the emphasis; and Chromium will not
+    // hold a selection that starts at the end of one inline element and ends
+    // inside another — it collapses it to nothing.
+    if (remaining < text.length) return { text, offset: remaining };
     remaining -= text.length;
     last = text;
   }
+  // Past every node, which is where a caret after the last character sits.
+  return last ? { text: last, offset: last.length } : null;
+}
 
-  // Past the end, which happens when the caret was after the last character:
-  // land on the end of the last text there is, or on the field if it is empty.
-  if (last) collapse(last, last.length);
-  else collapseToEnd(field);
+/** Where in `field` a point on screen is, as a character offset. */
+function offsetFromPoint(
+  field: HTMLElement,
+  x: number,
+  y: number,
+): number | null {
+  // Not standard, but it is what Chromium has, and this is a WebView2 app.
+  const at = (
+    document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    }
+  ).caretRangeFromPoint?.(x, y);
+  if (!at || !field.contains(at.startContainer)) return null;
+  const range = document.createRange();
+  range.selectNodeContents(field);
+  range.setEnd(at.startContainer, at.startOffset);
+  return range.toString().length;
 }
 
 function collapse(text: Text, offset: number): void {

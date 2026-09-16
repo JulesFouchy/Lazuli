@@ -332,6 +332,40 @@ const plainInline = (source: string): string =>
     .join("");
 
 /**
+ * The word around `at`, never reaching into a marker, or null when `at` is not
+ * in a word at all.
+ *
+ * `*` needs none of this: it is punctuation, so a double-click on `always` in
+ * `**always**` stops at the asterisks on its own. An underscore is a *word*
+ * character to the segmenter every browser uses — which is what makes
+ * `snake_case` select in one go, and what makes `_at last_` hand back `_at`.
+ * Since only this module knows where the markers are, only this module can say
+ * where the word really ends.
+ */
+export function wordAround(
+  source: string,
+  at: number,
+): { start: number; end: number } | null {
+  let from = 0;
+  for (const token of scan(source, PLAIN)) {
+    const to = from + token.text.length;
+    if (at >= from && at < to) {
+      // A click on the marker itself is a click on punctuation, and the
+      // browser's own answer for that is the right one.
+      if (token.marker) return null;
+      if (!isSelectableWordChar(source[at])) return null;
+      let start = at;
+      let end = at;
+      while (start > from && isSelectableWordChar(source[start - 1])) start -= 1;
+      while (end < to && isSelectableWordChar(source[end])) end += 1;
+      return { start, end };
+    }
+    from = to;
+  }
+  return null;
+}
+
+/**
  * Whether the source and what it renders to are different text.
  *
  * Which is the question "is there any markup here at all", and is asked only of
@@ -515,6 +549,15 @@ const PUNCTUATION = new Set([..."\\`*_~[]()#+-.!<>{}|\"'$%&,/:;=?@^"]);
 const isPunctuation = (char: string): boolean => PUNCTUATION.has(char);
 
 const isWordChar = (char: string): boolean => /[\p{L}\p{N}]/u.test(char);
+
+/**
+ * What counts as part of a word when selecting one, which includes the
+ * underscore — `snake_case` is one word to select and `MAX_LINES` is one word
+ * to select. Kept apart from `isWordChar`, which the emphasis rules use and
+ * where an underscore is the delimiter rather than a letter.
+ */
+const isSelectableWordChar = (char: string): boolean =>
+  /[\p{L}\p{N}_]/u.test(char);
 
 /** Fold neighbours that came out identical, and drop the empty ones. */
 function merge(runs: Run[]): Run[] {

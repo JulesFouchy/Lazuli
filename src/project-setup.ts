@@ -16,6 +16,7 @@ import {
 import { whileBusy } from "./busy";
 import { daysBetween, formatRealWorld } from "./dates";
 import { openModal } from "./modal";
+import { markdownInput, MARKDOWN_HINT_INLINE } from "./md-input";
 import { el, focusWhenActive, toastError } from "./ui";
 
 // --- creating a project ----------------------------------------------------
@@ -28,13 +29,21 @@ import { el, focusWhenActive, toastError } from "./ui";
  * someone else's files in it as the normal case rather than the mistake.
  */
 export function openNewProjectDialog(onCreated: (project: Project) => void): void {
-  const nameInput = el("input", {
+  // Markdown, and shown working as it is typed, because this is the same text
+  // as the name in the banner and typing it here should look like typing it
+  // there. One line, so no headings and no lists.
+  const nameInput = markdownInput({
     class: "input",
-    type: "text",
+    singleLine: true,
     // A label, not an example: the example read as a suggestion of what kind
     // of thing a project is supposed to be.
     placeholder: "Project name",
-  }) as HTMLInputElement;
+    // Wrapped rather than passed: both are declared below this.
+    onInput: () => refreshDestination(),
+    onKeydown: (event) => {
+      if (event.key === "Enter" && !createButton.disabled) create();
+    },
+  });
 
   // Typed as well as browsed: pasting a path is often quicker than walking a
   // folder tree, and a path that does not exist yet is fine — the folder is
@@ -63,7 +72,7 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
   let latestRequest = 0;
 
   const refreshDestination = () => {
-    const name = nameInput.value.trim();
+    const name = nameInput.value().trim();
     const parent = locationInput.value;
     if (!name || !parent) {
       target = null;
@@ -93,13 +102,12 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
       });
   };
 
-  nameInput.addEventListener("input", refreshDestination);
+  // The name field's own listeners are its options above; only the location
+  // is a plain input.
   locationInput.addEventListener("input", refreshDestination);
-  for (const field of [nameInput, locationInput]) {
-    field.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !createButton.disabled) create();
-    });
-  }
+  locationInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !createButton.disabled) create();
+  });
 
   const browse = async () => {
     const chosen = await openDialog({
@@ -114,7 +122,7 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
 
   const create = () => {
     const parent = locationInput.value;
-    const name = nameInput.value.trim();
+    const name = nameInput.value().trim();
     if (!target || !parent || !name || !dateInput.value) return;
     createButton.disabled = true;
     void (async () => {
@@ -139,7 +147,13 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
     body: el(
       "div",
       { class: "modal__body-inner" },
-      el("div", { class: "field" }, el("label", { text: "Name" }), nameInput),
+      el(
+        "div",
+        { class: "field" },
+        el("label", { text: "Name" }),
+        nameInput.node,
+        el("p", { class: "hint", text: MARKDOWN_HINT_INLINE }),
+      ),
       el(
         "div",
         { class: "field" },
@@ -178,7 +192,7 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
   });
 
   createButton.disabled = true;
-  focusWhenActive(nameInput);
+  focusWhenActive(nameInput.node);
 
   // Both defaults need a round trip; fill them in as they arrive rather than
   // holding the dialog closed until they do.

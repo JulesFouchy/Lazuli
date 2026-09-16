@@ -9,7 +9,11 @@
 import type { Entry, Project } from "./api";
 import { setCover, trashEntry, updateEntry } from "./api";
 import { renderImagePicker } from "./image-picker";
-import { markdownInput, type MarkdownInput } from "./md-input";
+import {
+  markdownInput,
+  MARKDOWN_HINT,
+  type MarkdownInput,
+} from "./md-input";
 import { closeModal, openModal, replaceModalBody } from "./modal";
 import { entryKey, markDeleting, unmarkDeleting } from "./pending";
 import { el, focusWhenActive, toast, toastError } from "./ui";
@@ -187,10 +191,7 @@ function editorBody(
         // Said here because the field is Markdown source rather than a
         // formatting toolbar, so nothing else would say it. The field styles
         // what it recognises as you type, which says the rest.
-        el("p", {
-          class: "hint",
-          text: "Markdown: **bold**, *italic*, `code`, ~~struck~~, # headings and - lists.",
-        }),
+        el("p", { class: "hint", text: MARKDOWN_HINT }),
       ),
       el("div", { class: "field" }, imagesLabel, pickerHost),
       el("div", { class: "field" }, el("label", { text: "Date" }), dateInput),
