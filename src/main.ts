@@ -9,9 +9,9 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import type {
   Entry,
   ListedProject,
-  Slot,
   Project,
   ProjectTab,
+  Slot,
 } from "./api";
 import {
   addProject as fileProject,
@@ -271,7 +271,7 @@ function launchView(): HTMLElement {
     const showing = currentTab(tabs);
     strip.classList.toggle("launch__strip--bare", tabs.length < 2);
     tabsBox.replaceChildren(
-      ...tabs.map((tab, index) => tabButton(tab, index, showing, tabsBox)),
+      ...tabs.map((_, index) => tabButton(tabs, index, showing, tabsBox)),
     );
 
     const rows = (tabs[showing]?.projects ?? []).filter(
@@ -326,11 +326,12 @@ function emptyMessage(tabs: ProjectTab[]): string {
 // another to the front makes it the one that stays.
 
 function tabButton(
-  tab: ProjectTab,
+  tabs: ProjectTab[],
   index: number,
   showing: number,
   tabsBox: HTMLElement,
 ): HTMLElement {
+  const tab = tabs[index];
   const button = el("button", {
     class: `tab${index === showing ? " tab--active" : ""}`,
     text: tab.name,
@@ -375,7 +376,14 @@ function tabButton(
           ? []
           : [
               {
-                label: "Delete tab",
+                label: "Delete",
+                // The label cannot say where the projects go, and "Delete" on
+                // a tab holding a dozen of them reads like it takes them with
+                // it. It does not: a tab is filing and nothing else.
+                hint:
+                  tab.projects.length === 0
+                    ? `Removes the tab. ${tabs[0].name} is where projects with no tab go.`
+                    : `Removes the tab. Its ${tab.projects.length === 1 ? "project goes" : `${tab.projects.length} projects go`} back to ${tabs[0].name}, and no folder is touched.`,
                 danger: true,
                 run: () => removeTab(tab, index),
               },
@@ -554,10 +562,17 @@ function projectRow(
           },
           {
             label: "Delete",
+            // Which of the two removals is which is the thing to be sure of
+            // before clicking, and neither label can carry it on its own.
+            hint: "Moves the whole project folder to the Recycle Bin.",
             danger: true,
             run: () => deleteProject(project),
           },
-          { label: "Forget", run: () => forgetListing(project) },
+          {
+            label: "Forget",
+            hint: "Removes it from this list. The folder stays where it is.",
+            run: () => forgetListing(project),
+          },
         ]),
     },
     project.cover

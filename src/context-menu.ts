@@ -11,6 +11,13 @@ export interface MenuItem {
   run: () => void;
   /** Styled as a destructive action. */
   danger?: boolean;
+  /**
+   * What the item does, shown on hover.
+   *
+   * For an item whose label cannot say the whole of it — a delete that moves
+   * things elsewhere rather than losing them, say.
+   */
+  hint?: string;
 }
 
 let current: HTMLElement | null = null;
@@ -30,6 +37,7 @@ export function openContextMenu(event: MouseEvent, items: MenuItem[]): void {
       el("button", {
         class: item.danger ? "menu__item menu__item--danger" : "menu__item",
         role: "menuitem",
+        title: item.hint ?? null,
         text: item.label,
         onclick: () => {
           // Close first: the action may open a dialog, and a menu left hanging
