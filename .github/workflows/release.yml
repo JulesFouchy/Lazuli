@@ -7,12 +7,30 @@
 # cross over; the source does not.
 #
 # To cut a release, run `node scripts/release.mjs 0.2.0`, which does the whole
-# thing. Everything after the tag is pushed happens here, unattended.
+# thing. Everything after it dispatches this workflow happens here, unattended.
 #
-# The tag must match the version in all three manifests, and `CHANGELOG.md`
-# must have a section for it — the first job refuses the build otherwise. A
-# version mismatch produces an update that every client downloads and then
-# declines to apply.
+# **This runs on `main`, and is dispatched with the version — it is not
+# triggered by the tag.** That is deliberate, and it is the only reason the
+# build caches survive from one release to the next. An Actions cache is
+# readable from the ref the run wrote it on, plus the default branch, and
+# nothing else. A run triggered by `v0.3.0` writes its caches into a scope named
+# after that tag, which no later tag can read — so every release built all four
+# platforms cold, and the cache step was pure cost. Dispatched on `main`, the
+# same step writes into main's scope, where every later release reads it.
+#
+# It still builds the *tag*: the checkout steps take `refs/tags/v<version>`
+# explicitly, so what ships is the tagged commit and not whatever has landed on
+# main since. Only the cache scope comes from `main`.
+#
+# The caveat is GitHub's eviction: a cache unread for seven days is deleted, and
+# only a release reads these. Releases closer together than a week stay warm;
+# after a longer gap the next one is cold again and re-warms on its way through.
+# Nothing keeps them alive without running CI between releases, which is not
+# worth ~70 billable minutes a week to avoid ~90 once.
+#
+# The version must match all three manifests, and `CHANGELOG.md` must have a
+# section for it — the first job refuses the build otherwise. A version mismatch
+# produces an update that every client downloads and then declines to apply.
 #
 # Nothing here re-runs clippy or the tests. `scripts/release.mjs` runs them
 # before it cuts the tag, which is the only point at which failing is cheap —
@@ -27,15 +45,20 @@
 
 name: Release
 
+# No tag trigger: pushing a tag by hand releases nothing. `scripts/release.mjs`
+# dispatches this, and dispatching it by hand from `main` works too — the tag
+# has to exist already, because the build checks it out.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.3.0 — its tag must already be pushed"
+        required: true
+        type: string
 
 # Two releases building into the same tag would race over the same assets.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -44,22 +67,28 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       notes: ${{ steps.notes.outputs.notes }}
+    env:
+      TAG: v${{ inputs.version }}
     steps:
+      # The tag, not `main`: the run's ref is what scopes the cache, but what
+      # gets built and checked has to be the commit that was tagged. This also
+      # fails the release outright if the tag was never pushed.
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v${{ inputs.version }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Tag must match every version in the tree
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Version must match every version in the tree
         run: |
-          tag="${GITHUB_REF#refs/tags/v}"
+          tag="${TAG#v}"
           node scripts/set-version.mjs
           bad=0
           for v in $(node scripts/set-version.mjs | awk '{print $1}'); do
             [ "$v" = "$tag" ] || bad=1
           done
           if [ "$bad" = 1 ]; then
-            echo "::error::tag v$tag does not match the versions above — run: node scripts/set-version.mjs $tag"
+            echo "::error::$TAG does not match the versions above — run: node scripts/set-version.mjs $tag"
             exit 1
           fi
           echo "releasing $tag"
@@ -68,9 +97,8 @@ jobs:
       # file in the repo and the text on the release cannot drift apart.
       - name: Release notes from CHANGELOG.md
         id: notes
-        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          tag="${GITHUB_REF#refs/tags/v}"
+          tag="${TAG#v}"
           body=$(awk -v v="$tag" '
             $0 ~ "^## " v { want = 1; next }
             want && /^## / { exit }
@@ -120,6 +148,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v${{ inputs.version }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -142,11 +172,9 @@ jobs:
       # Windows and Linux do not collide; the target is spelled out because the
       # two macOS builds share a runner label.
       #
-      # Nothing this job saves survives to the next release: Actions caches are
-      # readable from the ref that wrote them plus the default branch, and this
-      # workflow only ever runs on tags. What it *restores* comes from `main`,
-      # put there by `warm-cache.yml` — whose matrix and `shared-key` have to
-      # stay identical to this one, or the warming silently stops working.
+      # This both restores and saves in `main`'s cache scope, because the run
+      # was dispatched on `main` — see the note at the top of the file. That is
+      # what makes the step worth having: every release warms the next one.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
@@ -180,8 +208,8 @@ jobs:
           # The tag is cut against a commit in *this* repo, which does not exist
           # over there, so the release has to be anchored to a ref that does.
           releaseCommitish: main
-          tagName: ${{ github.ref_name }}
-          releaseName: "Lazuli ${{ github.ref_name }}"
+          tagName: v${{ inputs.version }}
+          releaseName: "Lazuli v${{ inputs.version }}"
           releaseBody: ${{ needs.check-version.outputs.notes }}
           # Draft until every platform has uploaded, then published by the job
           # below. A release that is public the moment the first job finishes
@@ -201,14 +229,12 @@ jobs:
   # uploaded, so `latest.json` never advertises an installer that is missing.
   publish:
     needs: build
-    # A `workflow_dispatch` on a branch has no tag and no release to publish.
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     steps:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: v${{ inputs.version }}
         run: |
           repo=repos/JulesFouchy/lazuli-releases
           id=$(gh api "$repo/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id")

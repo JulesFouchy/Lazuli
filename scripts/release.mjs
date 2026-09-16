@@ -12,10 +12,16 @@
 // Nothing after the tag re-checks them, so this is the only chance to fail
 // without having to delete a tag.
 //
-// Everything after `git push --tags` is unattended: four platforms build, the
+// Everything after the last step is unattended: four platforms build, the
 // installers are signed and uploaded to the public lazuli-releases repo, and the
 // release publishes itself once all four have landed. Publishing is the moment
 // existing installs start picking the new version up, silently, on next close.
+//
+// That last step is a `gh workflow run` on `main`, not the tag push — the tag
+// triggers nothing. `.github/workflows/release.yml` explains why; the short of
+// it is that an Actions cache belongs to the ref its run was on, so a release
+// dispatched on `main` is the only kind that can warm the next one. Needs `gh`
+// on PATH and logged in.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -141,12 +147,34 @@ step("  tag", "git", ["tag", `v${version}`]);
 step("  push", "git", ["push", "origin", "main"]);
 step("  push tag", "git", ["push", "origin", `v${version}`]);
 
+// Dispatched on `main`, never triggered by the tag. An Actions cache belongs to
+// the ref its run was on, so a tag-triggered release writes caches only that tag
+// can read and every release starts cold; dispatched on `main`, each release
+// warms the next. The workflow checks the tag out, so it still builds the tag.
+// The tag is already pushed by this point, so a failure here has to say how to
+// finish by hand rather than leave a tag that never builds.
+try {
+  step("  dispatch", "gh", [
+    "workflow", "run", "release.yml",
+    "--repo", "JulesFouchy/Lazuli",
+    "--ref", "main",
+    "-f", `version=${version}`,
+  ]);
+} catch (e) {
+  process.stderr.write(e.stderr?.toString() ?? "");
+  fail(`v${version} is tagged and pushed, but the build was not started.
+Start it with:
+
+  gh workflow run release.yml --repo JulesFouchy/Lazuli --ref main -f version=${version}`);
+}
+
 if (dryRun) process.exit(0);
 
 console.log(`
-Pushed. The rest happens on its own — four platforms build, the installers are
-signed and uploaded, and the release publishes itself when all four have landed.
-Roughly fifteen minutes.
+Pushed and building. The rest happens on its own — four platforms build, the
+installers are signed and uploaded, and the release publishes itself when all
+four have landed. Roughly fifteen minutes, less if the caches are still warm
+from the last release.
 
   watch it:   gh run watch --repo JulesFouchy/Lazuli
   the result: https://github.com/JulesFouchy/lazuli-releases/releases
