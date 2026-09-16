@@ -1,4 +1,4 @@
-// Draws the Lapis app icon: the artwork in `lapis-art.mjs`, cut to a rounded
+// Draws the Lazuli app icon: the artwork in `lazuli-art.mjs`, cut to a rounded
 // tile. The vein is the whole of what survives at 16px, which is why it is as
 // wide as it is.
 //
@@ -9,7 +9,7 @@
 // Only the sizes a Windows build uses are kept; re-run it if another platform
 // is added.
 
-import { clamp01, paintAt, writePng } from "./lapis-art.mjs";
+import { clamp01, paintAt, writePng } from "./lazuli-art.mjs";
 
 const OUT = process.argv[2] ?? "icon.png";
 const SIZE = Number(process.argv[3] ?? 1024);

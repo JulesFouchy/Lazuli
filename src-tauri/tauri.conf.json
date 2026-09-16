@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lapis",
+  "productName": "Lazuli",
   "version": "0.1.2",
-  "identifier": "io.github.julesfouchy.lapis",
+  "identifier": "io.github.julesfouchy.lazuli",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -34,7 +34,7 @@
     "copyright": "Copyright © 2026 Jules Fouchy",
     "category": "Productivity",
     "shortDescription": "A local-first project journal.",
-    "longDescription": "Lapis keeps a project journal as a folder on disk: each entry is a dated sentence and a picture, read back as a timeline of the days you worked on it.",
+    "longDescription": "Lazuli keeps a project journal as a folder on disk: each entry is a dated sentence and a picture, read back as a timeline of the days you worked on it.",
     "windows": {
       "nsis": {
         "installMode": "currentUser",
@@ -54,7 +54,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk1RDQzRTcyMjAxNTNDRTAKUldUZ1BCVWdjajdVbFIreDM5MExDalFpMDV3cmMxUWVheE41THJjRkdESFlxeG0zazFtYk0wZ3EK",
       "endpoints": [
-        "https://github.com/JulesFouchy/lapis-releases/releases/latest/download/latest.json"
+        "https://github.com/JulesFouchy/lazuli-releases/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "quiet"

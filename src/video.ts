@@ -31,8 +31,8 @@ export const DEFAULT_SETTINGS: Omit<ExportSettings, "output"> = {
 };
 
 /** The face bundled with the app, so exports look the same on any machine. */
-const MONO = "LapisMono";
-const SANS = "LapisSans";
+const MONO = "LazuliMono";
+const SANS = "LazuliSans";
 
 export interface ExportProgress {
   done: number;

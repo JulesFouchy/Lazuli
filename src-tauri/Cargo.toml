@@ -1,11 +1,11 @@
 [package]
-name = "lapis"
+name = "lazuli"
 version = "0.1.2"
 edition = "2021"
 rust-version = "1.82"
 
 [lib]
-name = "lapis_lib"
+name = "lazuli_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

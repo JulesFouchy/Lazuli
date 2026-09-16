@@ -1,4 +1,4 @@
-//! Lapis: a local-first project journal.
+//! Lazuli: a local-first project journal.
 //!
 //! A project is a folder on disk and nothing else. Everything the app knows is
 //! re-read from that folder; see [`store`] for the read path and [`watch`] for
@@ -35,7 +35,7 @@ pub fn run() {
                     tauri::webview::PageLoadEvent::Finished => "finished",
                 };
                 eprintln!(
-                    "lapis: page load {what} at {} ms",
+                    "lazuli: page load {what} at {} ms",
                     launched.elapsed().as_millis()
                 );
             }
@@ -61,7 +61,7 @@ pub fn run() {
                 theme::dress_for(&commands::appearance_preference(app.handle()));
             // "main" is the label the capabilities file grants permissions to.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("Lapis")
+                .title("Lazuli")
                 .icon(icon()?)?
                 .inner_size(1100.0, 820.0)
                 .min_inner_size(640.0, 480.0)
@@ -118,7 +118,7 @@ pub fn run() {
             commands::export_cancel,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Lapis");
+        .expect("error while running Lazuli");
 }
 
 /// The window's icon — its taskbar button, and Alt-Tab.

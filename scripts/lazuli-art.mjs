@@ -1,4 +1,4 @@
-// The Lapis artwork — a lapis ground with a vein of gold running through it —
+// The Lazuli artwork — a lazuli ground with a vein of gold running through it —
 // and a PNG writer to put it on disk.
 //
 // Everything is authored in normalised coordinates, `u` and `v` both running 0

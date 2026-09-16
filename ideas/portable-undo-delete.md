@@ -11,12 +11,12 @@ That is a real hole in a promise the README makes plainly: *"Deleting is always 
 
 ## How
 
-Stop using the system trash for anything inside a project. Move deleted entries and images to a `.lapis-trash/` folder inside the project instead, keeping the path they came from, and let undo move them back. One implementation, identical on all three platforms, and no crate feature that might not exist on the next one.
+Stop using the system trash for anything inside a project. Move deleted entries and images to a `.lazuli-trash/` folder inside the project instead, keeping the path they came from, and let undo move them back. One implementation, identical on all three platforms, and no crate feature that might not exist on the next one.
 
 It also fixes two smaller things that only look separate:
 
 - `trash::delete` fails while anything holds the file open, which is why `trash_with_retry` exists at all. A rename inside the same folder does not.
-- A deleted entry currently leaves the project folder entirely, so a project that is a git repo records a deletion whose contents are gone. Under `.lapis-trash/` they are still in the tree until it is emptied.
+- A deleted entry currently leaves the project folder entirely, so a project that is a git repo records a deletion whose contents are gone. Under `.lazuli-trash/` they are still in the tree until it is emptied.
 
 What it costs: the trash stops being the OS's, so the app owns emptying it — some rule about age or size, and a way to empty it by hand. That is the part worth designing rather than guessing.
 

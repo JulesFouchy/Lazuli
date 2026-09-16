@@ -1,5 +1,5 @@
-# Builds Lapis for Windows, macOS and Linux and publishes the installers to the
-# public JulesFouchy/lapis-releases repository, which is where the in-app
+# Builds Lazuli for Windows, macOS and Linux and publishes the installers to the
+# public JulesFouchy/lazuli-releases repository, which is where the in-app
 # updater looks.
 #
 # Two repositories because this one is private: a private repo's release assets
@@ -78,9 +78,9 @@ jobs:
             exit 1
           fi
           {
-            echo "notes<<LAPIS_EOF"
+            echo "notes<<LAZULI_EOF"
             echo "$body"
-            echo "LAPIS_EOF"
+            echo "LAZULI_EOF"
           } >> "$GITHUB_OUTPUT"
 
   # Clippy and the tests, on the cheapest runner, before anything expensive
@@ -117,7 +117,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-          shared-key: lapis
+          shared-key: lazuli
           cache-on-failure: true
 
       - uses: actions/setup-node@v4
@@ -158,7 +158,7 @@ jobs:
             rust-targets: x86_64-apple-darwin
           # Not `ubuntu-latest`: the AppImage and the .deb link against the
           # glibc of whatever built them, so building on the oldest supported
-          # runner is what decides the oldest distro Lapis will start on.
+          # runner is what decides the oldest distro Lazuli will start on.
           - platform: ubuntu-22.04
             args: ""
             rust-targets: ""
@@ -201,9 +201,9 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-          shared-key: lapis${{ matrix.args }}
+          shared-key: lazuli${{ matrix.args }}
           # Save the dependency cache even when the build fails. Without this a
-          # release that dies in Lapis's own code — which is the usual way for
+          # release that dies in Lazuli's own code — which is the usual way for
           # one to die — throws away the twenty minutes of dependencies it had
           # already compiled, and the re-run after the fix starts cold.
           cache-on-failure: true
@@ -219,7 +219,7 @@ jobs:
         env:
           # Writes to a different repository than this workflow runs in, so the
           # built-in GITHUB_TOKEN is no use. A fine-grained PAT scoped to
-          # lapis-releases with Contents: read and write.
+          # lazuli-releases with Contents: read and write.
           GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           # The half of the updater keypair that proves an installer came from
           # here. Losing it means never being able to update an install again.
@@ -227,12 +227,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           owner: JulesFouchy
-          repo: lapis-releases
+          repo: lazuli-releases
           # The tag is cut against a commit in *this* repo, which does not exist
           # over there, so the release has to be anchored to a ref that does.
           releaseCommitish: main
           tagName: ${{ github.ref_name }}
-          releaseName: "Lapis ${{ github.ref_name }}"
+          releaseName: "Lazuli ${{ github.ref_name }}"
           releaseBody: ${{ needs.check-version.outputs.notes }}
           # Draft until every platform has uploaded, then published by the job
           # below. A release that is public the moment the first job finishes
@@ -261,7 +261,7 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          repo=repos/JulesFouchy/lapis-releases
+          repo=repos/JulesFouchy/lazuli-releases
           id=$(gh api "$repo/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
           if [ -z "$id" ]; then
             echo "::error::no release found for $TAG"

@@ -2111,7 +2111,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lapis"
+name = "lazuli"
 version = "0.1.2"
 dependencies = [
  "anyhow",

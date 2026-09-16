@@ -13,7 +13,7 @@ use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeDelta};
 ///
 /// Deliberately global rather than per-project: it describes when the user
 /// sleeps, not anything about a project, so it must never end up in
-/// `lapis.yaml` — the same entry would otherwise land on different days in
+/// `lazuli.yaml` — the same entry would otherwise land on different days in
 /// different projects. [`journal_date_at`] takes the hour as a parameter so
 /// making this configurable stays a change at one call site.
 pub const DAY_START_HOUR: u32 = 5;

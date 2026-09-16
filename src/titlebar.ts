@@ -29,7 +29,7 @@ export function startTitlebar(): void {
     { class: "titlebar", "data-tauri-drag-region": "" },
     el("div", {
       class: "titlebar__title",
-      text: "Lapis",
+      text: "Lazuli",
       "data-tauri-drag-region": "",
     }),
     el(

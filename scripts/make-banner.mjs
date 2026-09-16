@@ -11,7 +11,7 @@
 //
 //   node scripts/make-banner.mjs assets/banner.png 1280 640
 
-import { paintAt, veinAt, writePng } from "./lapis-art.mjs";
+import { paintAt, veinAt, writePng } from "./lazuli-art.mjs";
 
 const OUT = process.argv[2] ?? "banner.png";
 const WIDTH = Number(process.argv[3] ?? 1280);

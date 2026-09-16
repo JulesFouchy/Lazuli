@@ -4,6 +4,16 @@ What changed in each release, for the person using Lapis rather than the person 
 
 Each version's section becomes the release notes verbatim, so write it before cutting the release — `scripts/release.mjs` refuses a version that has no section here, or one whose heading still says "unreleased". Headings are `## <version> — <date>`.
 
+## 0.2.0 — 2026-09-16
+
+**Lapis is now Lazuli.** The same app and the same stone — *lapis* just sounds like something unfortunate in French.
+
+Three things to know, all one-time:
+
+- **Uninstall the old Lapis yourself.** Windows treats Lazuli as a separate app, so it installs alongside rather than over, and you will see both in Add/Remove Programs. Removing Lapis there takes nothing with it — your projects are folders on your own disk and were never inside the app.
+- **Your theme, accent and background go back to their defaults**, because the window's stored settings move with the app's name. Set them again in Appearance.
+- **Each project's `lapis.yaml` becomes `lazuli.yaml`** the first time you open it. Folders from even older versions still work too; nothing is lost, and nothing needs doing.
+
 ## 0.1.2 — 2026-09-16
 
 - Updates no longer close Lapis. Before, a new version was installed as you closed the app, and if you opened Lapis again in the few seconds that took, the installer shut it straight back down. Now the download waits on disk and is applied at the start of your next launch, before the window appears — that one launch takes a moment longer, and nothing else changes.

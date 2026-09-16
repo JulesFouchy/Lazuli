@@ -23,7 +23,7 @@ const FILES = [
   // Cargo would rewrite this on its next run anyway, but "its next run" was
   // after the release commit, so the committed lockfile lagged the version by
   // one release. Anchored on the package name so no dependency can match.
-  { path: "src-tauri/Cargo.lock", pattern: /^(name = "lapis"\s+version = ")([^"]+)(")/m },
+  { path: "src-tauri/Cargo.lock", pattern: /^(name = "lazuli"\s+version = ")([^"]+)(")/m },
 ];
 
 const next = process.argv[2];

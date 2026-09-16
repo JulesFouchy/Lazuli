@@ -93,7 +93,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-          shared-key: lapis${{ matrix.args }}
+          shared-key: lazuli${{ matrix.args }}
           cache-on-failure: true
 
       - uses: actions/setup-node@v4

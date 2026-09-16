@@ -1,4 +1,4 @@
-// Generates a throwaway Lapis project to develop and test against.
+// Generates a throwaway Lazuli project to develop and test against.
 //
 //   node scripts/make-fixture.mjs [folder] [entryCount]
 //
@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-const OUT = process.argv[2] ?? join(tmpdir(), "lapis-fixture");
+const OUT = process.argv[2] ?? join(tmpdir(), "lazuli-fixture");
 const COUNT = Number(process.argv[3] ?? 24);
 
 // --- a tiny PNG encoder, so the fixture needs no image dependencies --------
@@ -202,7 +202,7 @@ dates.forEach((date, index) => {
 });
 
 writeFileSync(
-  join(OUT, "lapis.yaml"),
+  join(OUT, "lazuli.yaml"),
   `name: Woodworking bench\nstart_date: ${startDate}\ncover: bench-wide-take2.png\n`,
 );
 

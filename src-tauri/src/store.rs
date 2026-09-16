@@ -14,15 +14,19 @@ use std::time::SystemTime;
 
 use crate::model::{is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta};
 
-pub const META_FILE: &str = "lapis.yaml";
+pub const META_FILE: &str = "lazuli.yaml";
 
-/// What the marker file was called before the app was renamed.
+/// What the marker file has been called before, newest first.
 ///
 /// A folder written by an older build is still a project: it is detected and
 /// read, and [`migrate_meta`] gives it the current name the first time it is
-/// opened. Delete this and its three uses once no one is running a build from
-/// before the rename.
-pub const LEGACY_META_FILE: &str = "journaley.yaml";
+/// opened. Newest first so that a folder somehow holding two old names is read
+/// as the more recent one.
+///
+/// This is a list rather than a single name because the app has now been
+/// renamed twice, and the second rename would otherwise have stranded every
+/// folder written by the first.
+pub const LEGACY_META_FILES: [&str; 2] = ["lapis.yaml", "journaley.yaml"];
 
 pub const ENTRIES_DIR: &str = "entries";
 pub const COVER_DIR: &str = "cover";
@@ -84,7 +88,7 @@ impl ProjectStore {
                 // One malformed or half-written entry must not take the whole
                 // project down; skip it and keep going.
                 Err(err) => {
-                    eprintln!("lapis: skipping {}: {err:#}", entry_file.display());
+                    eprintln!("lazuli: skipping {}: {err:#}", entry_file.display());
                     continue;
                 }
             };
@@ -152,9 +156,12 @@ impl ProjectStore {
     }
 }
 
-/// Whether a folder looks like a lapis project.
+/// Whether a folder looks like a lazuli project.
 pub fn is_project(root: &Path) -> bool {
-    root.join(META_FILE).is_file() || root.join(LEGACY_META_FILE).is_file()
+    root.join(META_FILE).is_file()
+        || LEGACY_META_FILES
+            .iter()
+            .any(|name| root.join(name).is_file())
 }
 
 /// The marker file this folder actually has, the current name winning if both
@@ -165,9 +172,11 @@ fn meta_path(root: &Path) -> PathBuf {
     if current.is_file() {
         return current;
     }
-    let legacy = root.join(LEGACY_META_FILE);
-    if legacy.is_file() {
-        return legacy;
+    for name in LEGACY_META_FILES {
+        let legacy = root.join(name);
+        if legacy.is_file() {
+            return legacy;
+        }
     }
     current
 }
@@ -183,11 +192,17 @@ fn meta_path(root: &Path) -> PathBuf {
 /// A folder that already has both files is left alone rather than having one
 /// written over the other.
 pub fn migrate_meta(root: &Path) -> Result<()> {
-    let legacy = root.join(LEGACY_META_FILE);
     let current = root.join(META_FILE);
-    if !legacy.is_file() || current.exists() {
+    if current.exists() {
         return Ok(());
     }
+    let Some(legacy) = LEGACY_META_FILES
+        .iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file())
+    else {
+        return Ok(());
+    };
     fs::rename(&legacy, &current).with_context(|| {
         format!("renaming {} to {}", legacy.display(), current.display())
     })
@@ -405,7 +420,7 @@ mod tests {
     impl TempDir {
         fn new(label: &str) -> Self {
             let path =
-                std::env::temp_dir().join(format!("lapis-{label}-{}", uuid::Uuid::new_v4()));
+                std::env::temp_dir().join(format!("lazuli-{label}-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("should be able to create a temp dir");
             Self(path)
         }
@@ -617,45 +632,52 @@ mod tests {
         );
     }
 
-    /// Turn a project's marker file back into the name an older build wrote.
-    fn make_legacy(root: &Path) {
-        fs::rename(root.join(META_FILE), root.join(LEGACY_META_FILE))
+    /// Turn a project's marker file back into a name an older build wrote.
+    fn make_legacy(root: &Path, legacy: &str) {
+        fs::rename(root.join(META_FILE), root.join(legacy))
             .expect("should be able to rename the marker file");
     }
 
     #[test]
-    fn a_folder_from_before_the_rename_is_still_a_project() {
-        let dir = TempDir::new("legacy-detect");
-        create_project(&dir.0, "Old", date(2026, 6, 1)).expect("should create");
-        make_legacy(&dir.0);
+    fn a_folder_from_before_either_rename_is_still_a_project() {
+        // Every old name, not just the most recent. The app has been renamed
+        // twice, and a folder last written before the first rename is exactly
+        // what a single-name check would strand.
+        for legacy in LEGACY_META_FILES {
+            let dir = TempDir::new("legacy-detect");
+            create_project(&dir.0, "Old", date(2026, 6, 1)).expect("should create");
+            make_legacy(&dir.0, legacy);
 
-        assert!(is_project(&dir.0));
-        assert_eq!(read_meta(&dir.0).expect("should read").name, "Old");
+            assert!(is_project(&dir.0), "{legacy} should be detected");
+            assert_eq!(read_meta(&dir.0).expect("should read").name, "Old");
+        }
     }
 
     #[test]
-    fn opening_a_folder_from_before_the_rename_renames_its_marker_file() {
-        let dir = TempDir::new("legacy-migrate");
-        create_project(&dir.0, "Old", date(2026, 6, 1)).expect("should create");
-        make_legacy(&dir.0);
+    fn opening_a_folder_from_before_either_rename_renames_its_marker_file() {
+        for legacy in LEGACY_META_FILES {
+            let dir = TempDir::new("legacy-migrate");
+            create_project(&dir.0, "Old", date(2026, 6, 1)).expect("should create");
+            make_legacy(&dir.0, legacy);
 
-        migrate_meta(&dir.0).expect("should migrate");
+            migrate_meta(&dir.0).expect("should migrate");
 
-        assert!(dir.0.join(META_FILE).is_file());
-        assert!(!dir.0.join(LEGACY_META_FILE).exists());
-        assert_eq!(read_meta(&dir.0).expect("should read").name, "Old");
+            assert!(dir.0.join(META_FILE).is_file(), "{legacy} should migrate");
+            assert!(!dir.0.join(legacy).exists());
+            assert_eq!(read_meta(&dir.0).expect("should read").name, "Old");
+        }
     }
 
     #[test]
     fn migrating_a_folder_holding_both_files_writes_over_neither() {
         let dir = TempDir::new("legacy-both");
         create_project(&dir.0, "Current", date(2026, 6, 1)).expect("should create");
-        fs::write(dir.0.join(LEGACY_META_FILE), "name: Stale\nstart_date: 2020-01-01\n")
+        fs::write(dir.0.join(LEGACY_META_FILES[0]), "name: Stale\nstart_date: 2020-01-01\n")
             .expect("should write the stale file");
 
         migrate_meta(&dir.0).expect("should be a no-op");
 
-        assert!(dir.0.join(LEGACY_META_FILE).is_file());
+        assert!(dir.0.join(LEGACY_META_FILES[0]).is_file());
         assert_eq!(read_meta(&dir.0).expect("should read").name, "Current");
     }
 
@@ -667,7 +689,9 @@ mod tests {
         migrate_meta(&dir.0).expect("should be a no-op");
 
         assert!(dir.0.join(META_FILE).is_file());
-        assert!(!dir.0.join(LEGACY_META_FILE).exists());
+        assert!(LEGACY_META_FILES
+            .iter()
+            .all(|name| !dir.0.join(name).exists()));
     }
 
     #[test]

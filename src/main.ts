@@ -70,14 +70,14 @@ interface AppState {
 
 const state: AppState = {
   project: null,
-  newestFirst: localStorage.getItem("lapis.newestFirst") !== "false",
+  newestFirst: localStorage.getItem("lazuli.newestFirst") !== "false",
 };
 
 /**
  * Put a project fresh from Rust on screen. The caller renders.
  *
  * Everything that reads as a preference but belongs to the project travels in
- * `lapis.yaml` and so arrives with it, the date format included.
+ * `lazuli.yaml` and so arrives with it, the date format included.
  */
 function adopt(project: Project): void {
   state.project = project;
@@ -332,7 +332,7 @@ function timelineSection(project: Project): HTMLElement {
         onclick: () => {
           state.newestFirst = !state.newestFirst;
           localStorage.setItem(
-            "lapis.newestFirst",
+            "lazuli.newestFirst",
             String(state.newestFirst),
           );
           render();
@@ -407,7 +407,7 @@ const liveOffers: UndoOffer[] = [];
 async function addProject(): Promise<void> {
   const chosen = await openDialog({
     directory: true,
-    title: "Add a Lapis project",
+    title: "Add a Lazuli project",
     defaultPath: await defaultProjectsDir(),
   });
   if (typeof chosen !== "string") return;
@@ -649,7 +649,7 @@ let cursor = 0;
 // The whole stack outlives the page: closing the app, or the dev server
 // reloading it after a code change, comes back to the same place with the same
 // Back and Forward still available.
-const HISTORY_KEY = "lapis.history";
+const HISTORY_KEY = "lazuli.history";
 
 function saveHistory(): void {
   localStorage.setItem(
@@ -1265,11 +1265,11 @@ if (import.meta.env.DEV) {
       ? Math.round(navigation.responseStart)
       : "?";
   console.info(
-    `lapis: html arrived at ${responseStart} ms, script ran at ${Math.round(performance.now())} ms`,
+    `lazuli: html arrived at ${responseStart} ms, script ran at ${Math.round(performance.now())} ms`,
   );
 }
 
-// `lapis <folder>` opens straight into that project; otherwise the saved
+// `lazuli <folder>` opens straight into that project; otherwise the saved
 // place is shown again, dialog included.
 void startupProject().then(async (path) => {
   if (path) {

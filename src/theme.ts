@@ -10,13 +10,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { setThemePreference } from "./api";
 
-const THEME_KEY = "lapis.theme";
-const ACCENT_KEY = "lapis.accent";
+const THEME_KEY = "lazuli.theme";
+const ACCENT_KEY = "lazuli.accent";
 
 /** One per theme: a background chosen against paper is not a dark ground. */
 const BG_KEY: Record<Theme, string> = {
-  dark: "lapis.bg.dark",
-  light: "lapis.bg.light",
+  dark: "lazuli.bg.dark",
+  light: "lazuli.bg.light",
 };
 
 /**
@@ -59,7 +59,7 @@ export const DEFAULT_BG: Record<Theme, string> = {
 /** The offered grounds, per theme. The first of each is that theme's default. */
 export const BG_PRESETS: Record<Theme, { name: string; hex: string }[]> = {
   dark: [
-    { name: "Lapis", hex: DEFAULT_BG.dark },
+    { name: "Lazuli", hex: DEFAULT_BG.dark },
     { name: "Ink", hex: "#0d0d10" },
     { name: "Bistre", hex: "#17120d" },
     { name: "Verdigris", hex: "#071613" },

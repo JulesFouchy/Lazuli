@@ -1,6 +1,6 @@
 ![](assets/banner.png)
 
-# Lapis
+# Lazuli
 
 **One picture a day, until the project is done.**
 
@@ -14,7 +14,7 @@ A project is a folder of plain files. No database, no app-owned store, nothing t
 
 ```
 <project>/
-  lapis.yaml            name, start date, chosen cover
+  lazuli.yaml            name, start date, chosen cover
   cover/                    every cover image ever added
   entries/
     <uuid>/
@@ -42,7 +42,7 @@ npm install
 npm run tauri dev
 ```
 
-`lapis <folder>` opens straight into a project. New projects default into [`projects/`](projects/).
+`lazuli <folder>` opens straight into a project. New projects default into [`projects/`](projects/).
 
 ## Development
 
@@ -76,7 +76,7 @@ node scripts/release.mjs 0.2.0
 
 That is the whole thing. It refuses to start if you are not on `main`, if any of the files that hold the version has uncommitted changes, if the tag exists, or if the CHANGELOG has nothing to say; otherwise it sets the version in all three manifests, commits exactly those files, tags and pushes. Everything else uncommitted in the tree is left alone and stays out of the release. `--dry-run` prints what it would do.
 
-Everything after that is unattended. [`.github/workflows/release.yml`](.github/workflows/release.yml) builds for Windows, macOS (Apple Silicon and Intel) and Linux, signs each installer with the updater key, uploads them to the public [`lapis-releases`](https://github.com/JulesFouchy/lapis-releases) repo as a draft, and publishes that draft once all four have landed. About fifteen minutes.
+Everything after that is unattended. [`.github/workflows/release.yml`](.github/workflows/release.yml) builds for Windows, macOS (Apple Silicon and Intel) and Linux, signs each installer with the updater key, uploads them to the public [`lazuli-releases`](https://github.com/JulesFouchy/lazuli-releases) repo as a draft, and publishes that draft once all four have landed. About fifteen minutes.
 
 The draft matters: the updater reads `latest.json` from the *latest published* release, so publishing early would offer everyone an update while three of the four installers were still building.
 
@@ -88,22 +88,21 @@ Three secrets on this repo, under Settings → Secrets and variables → Actions
 
 | Secret | What |
 | --- | --- |
-| `RELEASES_TOKEN` | A fine-grained PAT scoped to `lapis-releases` with **Contents: read and write**. The workflow's own token cannot write to another repository. |
-| `TAURI_SIGNING_PRIVATE_KEY` | The contents of `~/.tauri/lapis.key`. |
+| `RELEASES_TOKEN` | A fine-grained PAT scoped to `lazuli-releases` with **Contents: read and write**. The workflow's own token cannot write to another repository. |
+| `TAURI_SIGNING_PRIVATE_KEY` | The contents of `~/.tauri/lazuli.key`. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Empty, as the key was generated without one. The secret still has to exist. |
 
-**Back up `~/.tauri/lapis.key` somewhere that is not this machine.** It is the only thing that can sign an update Lapis will accept. Lose it and every existing install is stranded on its current version for good — there is no recovery, only asking each user to download and reinstall by hand. The matching public key is in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json), baked into every build, and changing it is exactly the break just described.
+**Back up `~/.tauri/lazuli.key` somewhere that is not this machine.** It is the only thing that can sign an update Lazuli will accept. Lose it and every existing install is stranded on its current version for good — there is no recovery, only asking each user to download and reinstall by hand. The matching public key is in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json), baked into every build, and changing it is exactly the break just described.
 
-## Why "Lapis"
+## Why "Lazuli"
 
 - it's pretty (both the sonorities of the name, and the gem)
 - short and memorable
 - gives a good idea for the logo and overall theme / artistic direction
 - reference to Obsidian, which is a software I really like, and we share some philosophy : local-first, "note taking" app
-- minecraft origin: the idea for Lapis emerged when i was coding a minecraft mod, and I added the exact same timeline inside minecraft, and enjoyed it so much i wanted to make samilar timelines for all my projects not only my minecraft world, and so I made Lapis
-- I love cakes, so I don't mind the Indonesian lapis cake
+- minecraft origin: the idea for Lazuli emerged when i was coding a minecraft mod, and I added the exact same timeline inside minecraft, and enjoyed it so much i wanted to make samilar timelines for all my projects not only my minecraft world, and so I made Lazuli
 
-**It means layer**: in Indonesian, *lapis* is a layer; *kue lapis* is the layer cake. A journal is exactly that: days laid down one on top of the last, and readable afterwards precisely because none of them was flattened into the others. That was the idea the name was chosen for, and it was a small surprise to find it already inside the word.
+**It was Lapis first.** The same stone, one syllable shorter — until enough French speakers pointed out that *lapis* lands on *la pisse*. Lazuli is the half of the name that survives being said aloud, and it costs nothing: lapis lazuli was always the stone this is named for.
 
 **It started in Minecraft.** The first version of this timeline was a mod: a dated picture for each session in one world. It worked well enough that it became obvious every long project deserved the same thing, not just that world. Lapis lazuli is a Minecraft ore, so the name carries where it came from.
 

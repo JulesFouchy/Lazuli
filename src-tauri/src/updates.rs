@@ -1,4 +1,4 @@
-//! Keeping Lapis up to date without the user ever seeing it happen.
+//! Keeping Lazuli up to date without the user ever seeing it happen.
 //!
 //! The shape: check a few seconds after launch, download in the background if
 //! there is something, and apply it at a moment the user cannot notice. Which
@@ -12,13 +12,13 @@
 //! - On **Windows** a running executable cannot be replaced, so applying an
 //!   update means handing over to the NSIS installer and exiting. Doing that at
 //!   close is a race: the installer takes a few seconds, and it force-closes any
-//!   Lapis it finds — including one the user has just reopened, which is what
-//!   "the app closed by itself" was. Worse, a Lapis started *after* that check
+//!   Lazuli it finds — including one the user has just reopened, which is what
+//!   "the app closed by itself" was. Worse, a Lazuli started *after* that check
 //!   holds the executable while the installer tries to overwrite it, and the
 //!   install aborts half done. So on Windows the download is kept on disk and
 //!   applied at the *start* of the next launch, before any window exists: the
 //!   user's own double-click is what triggers the install, the installer
-//!   relaunches Lapis when it is done, and the only visible trace is that one
+//!   relaunches Lazuli when it is done, and the only visible trace is that one
 //!   launch takes a couple of seconds longer to show a window.
 //!
 //! Either way the version in front of the user changes only between sessions,
@@ -143,7 +143,7 @@ mod on_disk {
 
     /// The downloaded NSIS installer, named without its version so there is
     /// only ever one and a newer download replaces an older one.
-    const INSTALLER: &str = "Lapis-setup.exe";
+    const INSTALLER: &str = "Lazuli-setup.exe";
     /// Written last, once the installer is completely on disk. Its presence is
     /// what says "there is something to apply".
     const PENDING: &str = "pending.json";
@@ -185,7 +185,7 @@ mod on_disk {
         // Written under another name and renamed into place, so a crash or a
         // full disk mid-write cannot leave a truncated installer under the
         // name the next launch trusts.
-        let part = dir.join("Lapis-setup.part");
+        let part = dir.join("Lazuli-setup.part");
         fs::write(&part, &bytes)?;
         fs::rename(&part, dir.join(INSTALLER))?;
         // Only now; until this exists, nothing is pending.
@@ -268,7 +268,7 @@ mod on_disk {
         let mut command = Command::new(dir.join(INSTALLER));
         command.args(["/S", "/UPDATE", "/R"]);
 
-        // `lapis <folder>` should come back as `lapis <folder>`. The template
+        // `lazuli <folder>` should come back as `lazuli <folder>`. The template
         // hands whatever follows `/ARGS` to the relaunched executable, so the
         // arguments are escaped the way the plugin does and passed raw —
         // `Command` would otherwise quote them a second time.
@@ -387,7 +387,7 @@ mod on_disk {
 
         #[test]
         fn plain_arguments_pass_through() {
-            assert_eq!(esc(r"C:\Projects\Lapis"), r"C:\Projects\Lapis");
+            assert_eq!(esc(r"C:\Projects\Lazuli"), r"C:\Projects\Lazuli");
         }
 
         #[test]

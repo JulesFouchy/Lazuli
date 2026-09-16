@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lapis</title>
+    <title>Lazuli</title>
     <link rel="stylesheet" href="/src/styles.css" />
     <script>
       // Blocking on purpose, and duplicated from `src/theme.ts` on purpose: the
@@ -13,17 +13,17 @@
       // which is why the keys and the `system` fallback must match `theme.ts`.
       (function bootTheme() {
         try {
-          var choice = localStorage.getItem("lapis.theme") || "dark";
+          var choice = localStorage.getItem("lazuli.theme") || "dark";
           var dark =
             choice === "dark" ||
             (choice !== "light" &&
               window.matchMedia("(prefers-color-scheme: dark)").matches);
           document.documentElement.dataset.theme = dark ? "dark" : "light";
-          var accent = localStorage.getItem("lapis.accent");
+          var accent = localStorage.getItem("lazuli.accent");
           if (accent && /^#[0-9a-f]{6}$/i.test(accent)) {
             document.documentElement.style.setProperty("--accent", accent);
           }
-          var bg = localStorage.getItem(dark ? "lapis.bg.dark" : "lapis.bg.light");
+          var bg = localStorage.getItem(dark ? "lazuli.bg.dark" : "lazuli.bg.light");
           if (bg && /^#[0-9a-f]{6}$/i.test(bg)) {
             document.documentElement.style.setProperty("--bg", bg);
           }

@@ -165,7 +165,7 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
 
     if !store::is_project(&path) {
         bail!(
-            "{} is not a Lapis project (no {} inside)",
+            "{} is not a Lazuli project (no {} inside)",
             path.display(),
             store::META_FILE
         );
@@ -235,7 +235,7 @@ pub fn rescan_and_emit(app: &AppHandle) {
                 let _ = app.emit(PROJECT_CHANGED, fresh);
             }
         }
-        Err(err) => eprintln!("lapis: rescan failed: {err:#}"),
+        Err(err) => eprintln!("lazuli: rescan failed: {err:#}"),
     }
 }
 
@@ -766,7 +766,7 @@ fn restore(original_path: &Path) -> Result<String> {
         return Ok(name.to_owned());
     }
 
-    let stash = unique_path(parent, &format!("{name}.lapis-restoring"));
+    let stash = unique_path(parent, &format!("{name}.lazuli-restoring"));
     fs::rename(original_path, &stash).with_context(|| {
         format!(
             "moving {} aside to make room for the restore",
@@ -809,7 +809,7 @@ fn restore(original_path: &Path) -> Result<String> {
         .and_then(|name| name.to_str())
         .unwrap_or("it");
     bail!(
-        "Lapis cannot take {name} back out of the Trash on macOS.          It is still there — open the Trash and use Put Back."
+        "Lazuli cannot take {name} back out of the Trash on macOS.          It is still there — open the Trash and use Put Back."
     )
 }
 
@@ -890,7 +890,7 @@ pub fn export_cancel(state: State<AppState>) {
 
 // --- misc ----------------------------------------------------------------
 
-/// A project folder named on the command line, so `lapis <folder>` opens
+/// A project folder named on the command line, so `lazuli <folder>` opens
 /// straight into it. Also what makes dragging a folder onto the exe work.
 #[tauri::command]
 pub fn startup_project() -> Option<PathBuf> {
@@ -963,7 +963,7 @@ pub struct RecentProject {
 pub fn add_recent(app: AppHandle, path: PathBuf) -> CmdResult<()> {
     if !store::is_project(&path) {
         return Err(anyhow!(
-            "{} is not a Lapis project (no {} inside)",
+            "{} is not a Lazuli project (no {} inside)",
             path.display(),
             store::META_FILE
         )
@@ -1013,7 +1013,7 @@ pub async fn trash_project(
     path: PathBuf,
 ) -> CmdResult<Option<usize>> {
     if !store::is_project(&path) {
-        return Err(anyhow!("{} is not a Lapis project", path.display()).into());
+        return Err(anyhow!("{} is not a Lazuli project", path.display()).into());
     }
 
     // Closing first so no rescan runs against a folder that is on its way to
@@ -1117,7 +1117,7 @@ fn built_in_projects_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .document_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
-        .join("Lapis")
+        .join("Lazuli")
 }
 
 /// The folder the "new project" dialog should open in.

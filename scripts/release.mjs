@@ -8,7 +8,7 @@
 // release without one, because that section becomes the release notes.
 //
 // Everything after `git push --tags` is unattended: four platforms build, the
-// installers are signed and uploaded to the public lapis-releases repo, and the
+// installers are signed and uploaded to the public lazuli-releases repo, and the
 // release publishes itself once all four have landed. Publishing is the moment
 // existing installs start picking the new version up, silently, on next close.
 
@@ -94,7 +94,7 @@ step(`  version → ${version}`, "node", ["scripts/set-version.mjs", version]);
 // a re-run after the bump was committed by hand, it changed nothing and there
 // is no commit to make — which is fine, as long as the tag still gets cut.
 if (dryRun || run("git", ["status", "--porcelain", "--", ...VERSION_FILES])) {
-  step("  commit", "git", ["commit", "-m", `Lapis ${version}`, "--", ...VERSION_FILES]);
+  step("  commit", "git", ["commit", "-m", `Lazuli ${version}`, "--", ...VERSION_FILES]);
 } else {
   console.log(`  commit — nothing to commit, HEAD is already ${version}`);
 }
@@ -109,8 +109,8 @@ Pushed. The rest happens on its own — four platforms build, the installers are
 signed and uploaded, and the release publishes itself when all four have landed.
 Roughly fifteen minutes.
 
-  watch it:   gh run watch --repo JulesFouchy/Lapis
-  the result: https://github.com/JulesFouchy/lapis-releases/releases
+  watch it:   gh run watch --repo JulesFouchy/Lazuli
+  the result: https://github.com/JulesFouchy/lazuli-releases/releases
 
 Once it is published, every existing install picks it up silently: downloaded
 during a session, applied between sessions.`);
