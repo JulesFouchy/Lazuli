@@ -830,7 +830,7 @@ async function apply(place: Place): Promise<boolean> {
     } else {
       // Same page, so it stays where it is — a dialog opening or closing does
       // not move the timeline behind it — and the place records that.
-      place.scroll = window.scrollY;
+      place.scroll = root.scrollTop;
     }
 
     const wanted = modalKey(place);
@@ -855,8 +855,9 @@ async function apply(place: Place): Promise<boolean> {
 
 // --- scroll position -------------------------------------------------------
 //
-// The page scrolls as a whole (`#app` has no scroll container of its own), so
-// `scrollY` is the position. It is recorded into the current place as the user
+// `#app` is the scroll container — the document itself never scrolls, so that
+// the title bar can come down over the scrollbar — so `root.scrollTop` is the
+// position. It is recorded into the current place as the user
 // scrolls, and put back whenever a place is shown again.
 
 /** Undoes the listeners of the restore in progress, if there is one. */
@@ -876,7 +877,7 @@ const USER_SCROLL_INPUTS = ["wheel", "keydown", "pointerdown", "touchstart"];
  */
 function restoreScroll(top: number): void {
   stopPinning?.();
-  window.scrollTo(0, top);
+  root.scrollTop = top;
 
   const pending = Array.from(root.querySelectorAll("img")).filter(
     (image) => !image.complete,
@@ -895,7 +896,7 @@ function restoreScroll(top: number): void {
     }
   };
   const settle = (): void => {
-    window.scrollTo(0, top);
+    root.scrollTop = top;
     if (--remaining === 0) stop();
   };
   for (const image of pending) {
@@ -910,11 +911,11 @@ function restoreScroll(top: number): void {
 
 let scrollSave: ReturnType<typeof setTimeout> | null = null;
 
-window.addEventListener("scroll", () => {
+root.addEventListener("scroll", () => {
   // While a place is being applied the page is mid-rebuild, and where the
   // browser clamps it to says nothing about where the user was.
   if (navigating > 0) return;
-  here().scroll = window.scrollY;
+  here().scroll = root.scrollTop;
   // Scrolling fires every frame; one write once it settles is plenty.
   if (scrollSave !== null) clearTimeout(scrollSave);
   scrollSave = setTimeout(() => {

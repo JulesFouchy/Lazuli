@@ -27,11 +27,9 @@ export function startTitlebar(): void {
     // landed on, so it goes on every part of the bar that is not a button:
     // dragging moves the window, and a double-click maximises it.
     { class: "titlebar", "data-tauri-drag-region": "" },
-    el("div", {
-      class: "titlebar__title",
-      text: "Lazuli",
-      "data-tauri-drag-region": "",
-    }),
+    // No name and no icon: the window is the app, and both are already on the
+    // taskbar button. What is left is the part of the bar you drag it by.
+    el("div", { class: "titlebar__drag", "data-tauri-drag-region": "" }),
     el(
       "div",
       { class: "titlebar__controls" },

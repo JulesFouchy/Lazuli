@@ -14,21 +14,30 @@ let current: { overlay: HTMLElement; onClose?: () => void } | null = null;
  *
  * Removing the scrollbar takes its gutter with it and the page jumps sideways,
  * so the same width goes back as padding while the lock is on.
+ *
+ * `#app` rather than the document: that is what scrolls, so that the title bar
+ * comes down over the scrollbar rather than stopping beside it.
  */
 let unlockedOverflow: string | null = null;
 
+function scroller(): HTMLElement | null {
+  return document.getElementById("app");
+}
+
 function lockPageScroll(): void {
-  if (unlockedOverflow !== null) return;
-  const gutter = window.innerWidth - document.documentElement.clientWidth;
-  unlockedOverflow = document.documentElement.style.overflow;
-  document.documentElement.style.overflow = "hidden";
-  if (gutter > 0) document.body.style.paddingRight = `${gutter}px`;
+  const page = scroller();
+  if (unlockedOverflow !== null || !page) return;
+  const gutter = page.offsetWidth - page.clientWidth;
+  unlockedOverflow = page.style.overflowY;
+  page.style.overflowY = "hidden";
+  if (gutter > 0) page.style.paddingRight = `${gutter}px`;
 }
 
 function unlockPageScroll(): void {
-  if (unlockedOverflow === null) return;
-  document.documentElement.style.overflow = unlockedOverflow;
-  document.body.style.paddingRight = "";
+  const page = scroller();
+  if (unlockedOverflow === null || !page) return;
+  page.style.overflowY = unlockedOverflow;
+  page.style.paddingRight = "";
   unlockedOverflow = null;
 }
 

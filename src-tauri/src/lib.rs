@@ -60,7 +60,7 @@ pub fn run() {
             let dress =
                 theme::dress_for(&commands::appearance_preference(app.handle()));
             // "main" is the label the capabilities file grants permissions to.
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Lazuli")
                 .icon(icon()?)?
                 .inner_size(1100.0, 820.0)
@@ -71,9 +71,27 @@ pub fn run() {
                 // goes: the resize frame is a separate window style, so edges,
                 // corners and Aero snap all still work.
                 .decorations(false)
+                // Hidden only for the length of the dance below.
+                .visible(false)
                 .theme(dress.theme)
                 .background_color(dress.background)
                 .build()?;
+
+            // An undecorated window gets its resize edges from an overlay child
+            // window Tauri puts along its border (`TAURI_DRAG_RESIZE_BORDERS`),
+            // and a maximised window should have none — there is nothing to
+            // resize. Created maximised, it keeps one: the top four pixels of
+            // the client area are covered, the page is never told the pointer
+            // is in them, and so the title bar can never be hovered into view,
+            // which is the only gesture that reveals it. Maximising the window
+            // again collapses the overlay, and nothing else measured does.
+            //
+            // Hence the hidden window: this is the restore-and-maximise the
+            // user would otherwise have to do by hand, done before there is
+            // anything on screen to see it happen.
+            window.unmaximize()?;
+            window.maximize()?;
+            window.show()?;
 
             // Looks for a newer version a few seconds from now, downloads it
             // in the background if there is one, and says nothing.

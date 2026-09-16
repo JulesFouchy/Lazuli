@@ -4,6 +4,10 @@ transparent images background, eg the transition isf demo in coollab timeline, i
 
 tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"
 
+markdown
+
+the input text steals the focus from windows + . emoji picker sometimes
+
 we should see the current date at the top
 
 the button shouldn't say "Open folder..." but "Open project...", or "Import project..."? (and on hover we explain that each project is just a plain local folder)
@@ -23,13 +27,13 @@ when going forward to a project that has since been deleted, it gives an error, 
 
 add to global claude to always use american english spelling
 
-titlebar bug when scrollbar, make it theme color, add icon, nicer font, (nicer icons ?)
-
 make pasting a path work for pasting an image
 
 button to take a picture via webcam
 
-rename to Lazuli
+mobile version
+
+mcp, or at least a readme to explain the file/folder format so people can easily automate the creation of entries
 
 click on the card in the text area opens edit button, (image keeps opening the viewer)
 
