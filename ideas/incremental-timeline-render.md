@@ -15,6 +15,8 @@ At 81 entries a full rebuild is a few milliseconds and nobody sees it. At thousa
 
 Key cards by entry id. On a `project-changed` event, diff the new entry list against the one on screen: patch text and date in place on cards whose entry changed, insert or remove cards and the connectors either side of them, and leave the rest alone. The banner and toolbar are cheap and can keep being rebuilt.
 
+Cheap, but not free of consequences: the banner holds the project name field, and rebuilding it under the caret is why `render` carries that field's contents and caret across by hand. Patching the banner in place instead would make `captureNameEdit` unnecessary — rebuilding it and forgetting to keep them would make the name uneditable again.
+
 ## When
 
 When typing a note in a large project visibly stutters, or when the virtualised timeline is built, which needs the same keyed cards.

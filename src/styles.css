@@ -63,12 +63,12 @@
   /* The default accent, and the shades `theme.ts` derives from it. Kept in
      step with `DEFAULT_ACCENT` in `theme.ts`. Gold, because the app is named
      after the stone that gold is flecked through. */
-  --accent: #e3b04a;
-  --accent-hover: #e9c274;
-  --accent-soft: rgba(227, 176, 74, 0.16);
-  --accent-line: rgba(227, 176, 74, 0.55);
+  --accent: #ffc95c;
+  --accent-hover: #ffd276;
+  --accent-soft: rgba(255, 201, 92, 0.16);
+  --accent-line: rgba(255, 201, 92, 0.55);
   --on-accent: #14140f;
-  --accent-text: #e3b04a;
+  --accent-text: #ffc95c;
 }
 
 /* Dark, and the fallback when nothing has set a theme.
@@ -128,11 +128,11 @@
      hue and the things on the page are paper laid on it.
 
      The four surfaces are the derived values, as on the dark theme above. */
-  --bg: #dde7f8;
-  --bg-raised: #fdfeff;
-  --bg-raised-hover: #ecf2fb;
-  --bg-sunken: #d1daea;
-  --bg-inset: #f7f9fd;
+  --bg: #c6dafb;
+  --bg-raised: #fcfdff;
+  --bg-raised-hover: #e0ebfd;
+  --bg-sunken: #bbceed;
+  --bg-inset: #f1f6fe;
 
   --line: #c0cde3;
   --line-strong: #8e9db9;
@@ -832,6 +832,35 @@ textarea {
 .card__text--empty {
   color: var(--text-faint);
   font-style: italic;
+}
+
+/* --- inline Markdown -----------------------------------------------------
+ *
+ * The four places text the user wrote is shown. `markdown.ts` says why the
+ * grammar stops at inline, and `video.ts` draws the same runs on the export
+ * canvas — anything given a *shape* here rather than a face or a colour would
+ * have to be reimplemented there, so keep this to type.
+ *
+ * `<strong>`, `<em>` and `<s>` need nothing: the browser's own weight, slant
+ * and rule are right. Only the code span has a face and a ground of its own. */
+.card__text code,
+.viewer__text code,
+.banner__name code,
+.recent__name code {
+  font-family: var(--mono);
+  /* Monospace runs large beside Inter at the same nominal size. */
+  font-size: 0.88em;
+  background: var(--bg-sunken);
+  border-radius: 5px;
+  padding: 0.1em 0.32em;
+}
+
+/* Over a photograph there is no surface to tint, and the outline that makes a
+   label readable there would trace the box as well. The face alone says it. */
+.banner--cover .banner__name code,
+.recent__row--cover .recent__name code {
+  background: none;
+  padding: 0;
 }
 
 /* The dashed rule between two entries that are not on consecutive days. Always

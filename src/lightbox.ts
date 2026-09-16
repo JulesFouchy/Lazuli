@@ -9,6 +9,7 @@
 import type { Entry, Project } from "./api";
 import { assetUrl } from "./api";
 import { onDateFormatChange } from "./dates";
+import { plainText, renderInline } from "./markdown";
 import { closeModal, openModal } from "./modal";
 import { dateToggle } from "./timeline";
 import { el } from "./ui";
@@ -163,7 +164,7 @@ function draw(options: { reset?: boolean } = {}): void {
             entry.id,
             entry.image,
           ),
-          alt: entry.text || "Entry illustration",
+          alt: plainText(entry.text) || "Entry illustration",
         }) as HTMLImageElement)
       : null;
     stage.replaceChildren(
@@ -197,7 +198,7 @@ function drawCaption(entry: Entry): void {
             ? "viewer__text"
             : "viewer__text viewer__text--empty",
         },
-        entry.text || "No note yet",
+        entry.text ? renderInline(entry.text) : "No note yet",
       ),
     ),
   );

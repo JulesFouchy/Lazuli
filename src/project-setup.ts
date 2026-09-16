@@ -16,7 +16,7 @@ import {
 import { whileBusy } from "./busy";
 import { daysBetween, formatRealWorld } from "./dates";
 import { openModal } from "./modal";
-import { el, toastError } from "./ui";
+import { el, focusWhenActive, toastError } from "./ui";
 
 // --- creating a project ----------------------------------------------------
 
@@ -178,7 +178,7 @@ export function openNewProjectDialog(onCreated: (project: Project) => void): voi
   });
 
   createButton.disabled = true;
-  nameInput.focus();
+  focusWhenActive(nameInput);
 
   // Both defaults need a round trip; fill them in as they arrive rather than
   // holding the dialog closed until they do.
@@ -269,5 +269,5 @@ export function openStartDateEditor(project: Project): void {
     ),
   });
 
-  dateInput.focus();
+  focusWhenActive(dateInput);
 }

@@ -10,6 +10,7 @@ import {
   toggleDateFormat,
 } from "./dates";
 import { openContextMenu } from "./context-menu";
+import { plainText, renderInline } from "./markdown";
 import { entryKey, isDeleting } from "./pending";
 import { el } from "./ui";
 
@@ -111,9 +112,10 @@ function entryCard(
       class: "card",
       // So the viewer can put the page back on whichever card it ended on.
       "data-entry": entry.id,
-      // The card is the picture, so a click opens the picture. Editing is the
-      // rarer of the two and has the pencil; a modified click is its shortcut,
-      // for the same reason a modified click opens a link in a new tab.
+      // The card is the picture, so a click opens the picture — except on the
+      // note, which has its own handler below. Editing has the pencil too; a
+      // modified click is its shortcut, for the same reason a modified click
+      // opens a link in a new tab.
       onclick: (event: Event) => {
         const mouse = event as MouseEvent;
         const modified = mouse.ctrlKey || mouse.metaKey || mouse.shiftKey;
@@ -145,10 +147,20 @@ function entryCard(
         },
       }),
     ),
+    // The note opens the editor rather than the picture: the sentence is the
+    // half of a card you come back to change, and the picture is right beside
+    // it for the other half.
     el(
       "p",
-      { class: entry.text ? "card__text" : "card__text card__text--empty" },
-      entry.text || "No note yet",
+      {
+        class: entry.text ? "card__text" : "card__text card__text--empty",
+        title: "Click to edit this entry",
+        onclick: (event: Event) => {
+          event.stopPropagation();
+          handlers.editEntry(entry);
+        },
+      },
+      entry.text ? renderInline(entry.text) : "No note yet",
     ),
     // No picture, no frame for one: an entry that is only a sentence is a
     // small card, not a card with a hole in it.
@@ -159,7 +171,9 @@ function entryCard(
         el("img", {
           class: "card__image",
           src: assetUrl(project.root, "entries", entry.id, entry.image),
-          alt: entry.text || "Entry illustration",
+          // The note without its markers: an `alt` is read aloud, and nobody
+          // wants to hear the asterisks.
+          alt: plainText(entry.text) || "Entry illustration",
           // Thousands of full-resolution photos would otherwise all decode at
           // once; the browser skips the offscreen ones.
           loading: "lazy",

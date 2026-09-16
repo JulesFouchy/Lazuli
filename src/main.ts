@@ -46,6 +46,7 @@ import {
   refreshLightbox,
   type ViewerContext,
 } from "./lightbox";
+import { hasMarkup, plainText, renderInline } from "./markdown";
 import { closeModal, isModalOpen, onModalDismissed } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
@@ -107,8 +108,69 @@ async function readRecents(): Promise<void> {
 // --- rendering -----------------------------------------------------------
 
 function render(): void {
+  const editing = captureNameEdit();
   clear(root);
   root.append(state.project ? projectView(state.project) : launchView());
+  restoreNameEdit(editing);
+}
+
+// --- the project name mid-edit ---------------------------------------------
+//
+// `render` rebuilds the banner from scratch, which replaces the very field the
+// caret is in: the focus goes, and so does whatever had been typed but not yet
+// saved. That is not a rare case — every write the app makes comes back as a
+// rescan a moment later, so it happens while a name is simply being typed, and
+// it is how an open Windows emoji picker ends up inserting into nothing.
+//
+// So the field's contents and its caret are carried across the render by hand.
+
+interface NameEdit {
+  source: string;
+  caret: number;
+}
+
+/** What the name field holds, if it is the thing with the caret in it. */
+function captureNameEdit(): NameEdit | null {
+  const field = root.querySelector<HTMLElement>(".banner__name");
+  if (!field || document.activeElement !== field) return null;
+  return { source: field.textContent ?? "", caret: caretOffset(field) };
+}
+
+function restoreNameEdit(edit: NameEdit | null): void {
+  const field = root.querySelector<HTMLElement>(".banner__name");
+  if (!edit || !field) return;
+  field.textContent = edit.source;
+  field.focus();
+  placeCaret(field, edit.caret);
+}
+
+/** How many characters of the field are before the caret. */
+function caretOffset(field: HTMLElement): number {
+  const selection = window.getSelection();
+  const length = (field.textContent ?? "").length;
+  if (!selection || selection.rangeCount === 0) return length;
+  const caret = selection.getRangeAt(0);
+  if (!field.contains(caret.endContainer)) return length;
+  // From the start of the field to the caret, as text: the field is a single
+  // text node nearly always, and this does not depend on it being one.
+  const range = document.createRange();
+  range.selectNodeContents(field);
+  range.setEnd(caret.endContainer, caret.endOffset);
+  return range.toString().length;
+}
+
+function placeCaret(field: HTMLElement, at: number): void {
+  const range = document.createRange();
+  const text = field.firstChild;
+  if (text instanceof Text) {
+    range.setStart(text, Math.min(at, text.length));
+  } else {
+    range.selectNodeContents(field);
+  }
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
 }
 
 function launchView(): HTMLElement {
@@ -219,7 +281,7 @@ function recentRow(recent: RecentProject): HTMLElement {
     el(
       "div",
       { class: "recent__label" },
-      el("div", { class: "recent__name", text: recent.name }),
+      el("div", { class: "recent__name" }, renderInline(recent.name)),
       el("div", { class: "recent__path", text: recent.path }),
     ),
   );
@@ -235,18 +297,41 @@ function banner(project: Project): HTMLElement {
   const nameField = el("h1", {
     class: "banner__name",
     contenteditable: "true",
-    text: project.meta.name,
+    title: "The project's name. Markdown works here",
   });
+  nameField.replaceChildren(renderInline(project.meta.name));
+
   nameField.addEventListener("click", (event) => event.stopPropagation());
+  // Formatted while it is read, the Markdown itself while it is written. The
+  // name on disk is `**Trip** to Rome`, and a field that hid that would be a
+  // different thing from the text it saves — but a name with no markup in it is
+  // the same string either way, and swapping that one would only throw away
+  // wherever in it the user just clicked.
+  //
+  // Only when the field is showing the formatted name and nothing else. A
+  // field holding an edit in progress must be left alone, and that is not a
+  // hypothetical ordering: a focus asked for while the window has none is
+  // *deferred* by the browser until the window gets it back, so a render that
+  // put an unsaved name back while the emoji picker had the keyboard arrives
+  // here a good deal later, with that name in the field.
+  nameField.addEventListener("focus", () => {
+    const source = project.meta.name;
+    if (!hasMarkup(source) || nameField.textContent !== plainText(source)) {
+      return;
+    }
+    nameField.textContent = source;
+    placeCaret(nameField, source.length);
+  });
   nameField.addEventListener("blur", () => {
     const name = nameField.textContent?.trim() ?? "";
     if (name && name !== project.meta.name) {
       void setProjectName(name).catch((err) =>
         toastError("Could not rename the project", err),
       );
-    } else {
-      nameField.textContent = project.meta.name;
     }
+    // Back to the formatted name either way. The rescan a save triggers would
+    // redraw this too, but not for another moment.
+    nameField.replaceChildren(renderInline(name || project.meta.name));
   });
   nameField.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -266,7 +351,7 @@ function banner(project: Project): HTMLElement {
       ? el("img", {
           class: "banner__image",
           src: assetUrl(project.root, "cover", cover),
-          alt: `${project.meta.name} cover`,
+          alt: `${plainText(project.meta.name)} cover`,
           decoding: "async",
         })
       : null,
@@ -437,7 +522,7 @@ let opensAsked = 0;
  * Only the newest one asked for gets to become the project on screen — it is
  * also the one Rust ends up holding open, so the two stay in step.
  */
-async function loadProject(path: string): Promise<boolean> {
+async function loadProject(path: string, quiet = false): Promise<boolean> {
   const asked = ++opensAsked;
   try {
     const project = await whileBusy(openProject(path));
@@ -446,7 +531,9 @@ async function loadProject(path: string): Promise<boolean> {
     render();
     return true;
   } catch (err) {
-    if (asked === opensAsked) toastError("Could not open that folder", err);
+    if (asked === opensAsked && !quiet) {
+      toastError("Could not open that folder", err);
+    }
     return false;
   }
 }
@@ -541,11 +628,11 @@ function deleteProject(recent: RecentProject): void {
   const deleted = trashProject(recent.path).then(
     (index) => index ?? at,
     (err) => {
-      toastError(`Could not delete ${recent.name}`, err);
+      toastError(`Could not delete ${plainText(recent.name)}`, err);
       return null;
     },
   );
-  offerUndo(`Deleted ${recent.name}`, () =>
+  offerUndo(`Deleted ${plainText(recent.name)}`, () =>
     undoRemoval(recent, at, key, deleted, (index) =>
       restoreProject(recent.path, index),
     ),
@@ -566,11 +653,11 @@ function forgetProject(recent: RecentProject): void {
   const forgotten = forgetRecent(recent.path).then(
     (index) => index ?? at,
     (err) => {
-      toastError(`Could not forget ${recent.name}`, err);
+      toastError(`Could not forget ${plainText(recent.name)}`, err);
       return null;
     },
   );
-  offerUndo(`Forgot ${recent.name}`, () =>
+  offerUndo(`Forgot ${plainText(recent.name)}`, () =>
     undoRemoval(recent, at, key, forgotten, (index) =>
       restoreRecent(recent.path, index),
     ),
@@ -774,11 +861,25 @@ async function replaceHere(place: Place): Promise<void> {
   await apply(place);
 }
 
-/** Move the cursor without recording anything, so the way ahead is kept. */
+/**
+ * Move the cursor without recording anything, so the way ahead is kept.
+ *
+ * A step whose project has since been deleted is not a step at all: the cursor
+ * goes back where it was and nothing is said. There is nothing to show and
+ * nothing to do about it, and an error for a folder the user themselves threw
+ * away is noise in front of a screen that has not changed.
+ */
 function stepTo(index: number): void {
+  const from = cursor;
   cursor = index;
   saveHistory();
-  void apply(here());
+  void apply(here(), { quiet: true }).then((shown) => {
+    // Unless something else has navigated since, in which case that move is
+    // the one on screen and this one has already been superseded.
+    if (shown || cursor !== index) return;
+    cursor = from;
+    saveHistory();
+  });
 }
 
 /**
@@ -813,15 +914,23 @@ function goForward(): void {
   if (cursor < history.length - 1) stepTo(cursor + 1);
 }
 
-/** Show a place. False when its project could not be opened. */
-async function apply(place: Place): Promise<boolean> {
+/**
+ * Show a place. False when its project could not be opened.
+ *
+ * `quiet` swallows the failure's toast, for a move the user did not ask to make
+ * into that particular folder — see `stepTo`.
+ */
+async function apply(
+  place: Place,
+  options: { quiet?: boolean } = {},
+): Promise<boolean> {
   navigating += 1;
   try {
     if (place.project !== (state.project?.root ?? null)) {
       if (place.project === null) {
         state.project = null;
         render();
-      } else if (!(await loadProject(place.project))) {
+      } else if (!(await loadProject(place.project, options.quiet))) {
         // The folder has been moved or deleted since. Better to stay put than
         // to show a project that is not there.
         return false;

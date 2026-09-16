@@ -1,8 +1,18 @@
 # Changelog
 
-What changed in each release, for the person using Lapis rather than the person building it.
+What changed in each release, for the person using Lazuli rather than the person building it.
 
 Each version's section becomes the release notes verbatim, so write it before cutting the release — `scripts/release.mjs` refuses a version that has no section here, or one whose heading still says "unreleased". Headings are `## <version> — <date>`.
+
+## 0.3.0 — unreleased
+
+- **Notes and project names take Markdown.** `**bold**`, `*italic*`, `` `code` `` and `~~struck~~`, on the timeline, in the viewer and in the exported video. Nothing else: a frame of the video is drawn on a canvas with no layout engine, so headings and lists could be shown on the page but never in the export, and the export is meant to be what you saw. The project name shows its formatting until you click into it, and the Markdown itself while you are editing it.
+- **Clicking a card's sentence opens the editor**, where clicking its picture still opens the viewer. The pencil and Ctrl+click are unchanged.
+- **Pasting a copied path adds the image it points at.** Explorer's "Copy as path" puts text on the clipboard and no file, so it used to paste the path into the note.
+- **The light theme's blue is deeper, and the accent is brighter.** If you have chosen your own background or accent, yours is kept.
+- **The colour well in Appearance keeps what you mixed** when you step over to a preset to compare the two.
+- **Typing a project name survives the app saving.** A rescan landing mid-word used to take the field away, along with whatever was in it and any Windows emoji picker open over it.
+- Going forward to a project you have since deleted does nothing, rather than reporting an error about a folder you threw away yourself.
 
 ## 0.2.0 — 2026-09-16
 

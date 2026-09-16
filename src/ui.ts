@@ -119,6 +119,27 @@ export function toastError(context: string, err: unknown): void {
   toast(`${context}: ${detail}`, { error: true, duration: null });
 }
 
+/**
+ * Put the caret in a field, but never at the cost of taking the keyboard.
+ *
+ * Opening a dialog is a reason to put the caret in its first field; it is not a
+ * reason to pull the focus off whatever the user has switched to meanwhile —
+ * the Windows emoji picker, which is a window of its own, being the one that
+ * bites. So a window without the focus waits for it, and lands the caret when
+ * the user comes back.
+ */
+export function focusWhenActive(node: HTMLElement): void {
+  if (document.hasFocus()) {
+    node.focus();
+    return;
+  }
+  const land = (): void => {
+    window.removeEventListener("focus", land);
+    if (node.isConnected) node.focus();
+  };
+  window.addEventListener("focus", land);
+}
+
 /** Whether the focus is somewhere that owns its own keystrokes. */
 export function isEditing(): boolean {
   const active = document.activeElement;

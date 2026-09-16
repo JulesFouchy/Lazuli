@@ -19,7 +19,7 @@ use tauri::Theme;
 const DARK_BG: Color = Color(0x0b, 0x10, 0x20, 0xff);
 
 /// `--bg` for the light theme, from `src/styles.css`. Change both together.
-const LIGHT_BG: Color = Color(0xdd, 0xe7, 0xf8, 0xff);
+const LIGHT_BG: Color = Color(0xc6, 0xda, 0xfb, 0xff);
 
 /// The appearance as `settings.json` holds it: a choice, and a ground per
 /// theme. Any of them may be missing on a first run.

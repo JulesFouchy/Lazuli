@@ -5,6 +5,7 @@ import { ffmpegStatus } from "./api";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
+import { plainText } from "./markdown";
 import { closeModal, openModal, replaceModalBody } from "./modal";
 import { el, toast, toastError } from "./ui";
 import {
@@ -99,7 +100,9 @@ function body(project: Project): HTMLElement {
 
       const output = await saveDialog({
         title: "Save the summary video",
-        defaultPath: `${project.meta.name.replace(/[\\/:*?"<>|]/g, "-")}.mp4`,
+        // The name as it reads, not as it is written: a file called
+        // `**Trip**.mp4` is nobody's idea of the project's name.
+        defaultPath: `${plainText(project.meta.name).replace(/[\\/:*?"<>|]/g, "-")}.mp4`,
         filters: [{ name: "MP4 video", extensions: ["mp4"] }],
       });
       if (typeof output !== "string") return;

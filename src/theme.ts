@@ -32,7 +32,7 @@ export const DEFAULT_THEME: ThemeChoice = "dark";
 /** What that resolves to once the OS has been asked. */
 export type Theme = "light" | "dark";
 
-export const DEFAULT_ACCENT = "#e3b04a";
+export const DEFAULT_ACCENT = "#ffc95c";
 
 /** The offered accents. The first is the default, and the app's own colour. */
 export const ACCENT_PRESETS: { name: string; hex: string }[] = [
@@ -53,7 +53,7 @@ export const ACCENT_PRESETS: { name: string; hex: string }[] = [
  */
 export const DEFAULT_BG: Record<Theme, string> = {
   dark: "#0b1020",
-  light: "#dde7f8",
+  light: "#c6dafb",
 };
 
 /** The offered grounds, per theme. The first of each is that theme's default. */
@@ -95,7 +95,10 @@ export const themeChoice = (): ThemeChoice => choice;
 export const accentColour = (): string => accent;
 
 /** The ground of the theme currently on screen. */
-export const backgroundColour = (): string => background[activeTheme()];
+export const backgroundColour = (): string => backgroundColourFor(activeTheme());
+
+/** The ground of either theme, whether or not it is the one on screen. */
+export const backgroundColourFor = (theme: Theme): string => background[theme];
 
 /** The theme actually on screen, with `system` resolved. */
 export function activeTheme(): Theme {
@@ -298,7 +301,9 @@ export function readableInk(hex: string): string {
  * is barely more than a highlighter stripe.
  */
 function darkenUntilReadable(hex: string): string {
-  const paper = 0.79; // Roughly the light theme's `--bg`.
+  // The light theme's own ground, rather than a number written down beside it:
+  // the ground has moved once already, and the copy did not.
+  const paper = luminance(DEFAULT_BG.light);
   let current = hex;
   for (let step = 0; step < 24; step += 1) {
     if ((paper + 0.05) / (luminance(current) + 0.05) >= 4.5) return current;

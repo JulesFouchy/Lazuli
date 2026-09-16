@@ -2,11 +2,15 @@
 
 transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
 
+pouvoir recadrer une photo / choisir le mod de fit genre stretch, fit avec en background la photo blurée 
+
+timeline partagéé, version décentralisée sans serveur où juste on s'envoie des messages pour se mettre à jour
+
+add "folders", as tabs to the right of "recent", which becomes default, and on hover you have a + button to add your own tabs if you want to organize. And you can drag and drop a project onto a tab to move it (eg for me i could have my Wip and my Done tabs)
+
+make the UI juicy
+
 tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"
-
-markdown
-
-the input text steals the focus from windows + . emoji picker sometimes
 
 we should see the current date at the top
 
@@ -16,18 +20,13 @@ ctrl + scroll to zoom in/out when in project page to better see the whole timeli
 
 - consider using this as the icon : "C:\Users\fouch\Downloads\ChatGPT Image Sep 15, 2026, 10_13_29 PM.png"
 
-default light color should be 198, 218, 251, and maybe also adapt accent color to 255, 201, 92
 
-the custom color picker should not lose color when we move back to a predefined swatch color
-
-when going forward to a project that has since been deleted, it gives an error, it should just do nothing
 
 - release version 1.0
 - setup store to sell for 1€
 
 add to global claude to always use american english spelling
 
-make pasting a path work for pasting an image
 
 button to take a picture via webcam
 
@@ -35,7 +34,7 @@ mobile version
 
 mcp, or at least a readme to explain the file/folder format so people can easily automate the creation of entries
 
-click on the card in the text area opens edit button, (image keeps opening the viewer)
+
 
 ## Import initial projects
 

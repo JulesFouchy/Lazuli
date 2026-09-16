@@ -11,7 +11,7 @@ import { setCover, trashEntry, updateEntry } from "./api";
 import { renderImagePicker } from "./image-picker";
 import { closeModal, openModal, replaceModalBody } from "./modal";
 import { entryKey, markDeleting, unmarkDeleting } from "./pending";
-import { el, toast, toastError } from "./ui";
+import { el, focusWhenActive, toast, toastError } from "./ui";
 
 /** How long to wait after the last keystroke before writing to disk. */
 const SAVE_DEBOUNCE_MS = 400;
@@ -76,7 +76,7 @@ export function openEntryEditor(id: string, context: EditorContext): void {
   // After `openModal`, which dismisses whatever was there and so clears this.
   editor = built.fields;
   // Straight into the note: writing it is the reason the editor is open.
-  built.fields.textarea.focus();
+  focusWhenActive(built.fields.textarea);
 }
 
 /**
@@ -179,7 +179,18 @@ function editorBody(
       { class: "modal__body-inner" },
       // Note and images first; the date is already right nearly every time, so
       // it sits at the bottom out of the way rather than in the first field.
-      el("div", { class: "field" }, el("label", { text: "Note" }), textarea),
+      el(
+        "div",
+        { class: "field" },
+        el("label", { text: "Note" }),
+        textarea,
+        // Said here because the field is plain Markdown source rather than a
+        // formatting toolbar, so nothing else would say it.
+        el("p", {
+          class: "hint",
+          text: "**bold**, *italic*, `code` and ~~struck~~ work here.",
+        }),
+      ),
       el("div", { class: "field" }, imagesLabel, pickerHost),
       el("div", { class: "field" }, el("label", { text: "Date" }), dateInput),
     ),

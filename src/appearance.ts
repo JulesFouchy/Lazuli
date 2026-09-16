@@ -7,12 +7,14 @@ import {
   activeTheme,
   BG_PRESETS,
   backgroundColour,
+  backgroundColourFor,
   normaliseHex,
   onAppearanceChange,
   setAccent,
   setBackground,
   setThemeChoice,
   themeChoice,
+  type Theme,
   type ThemeChoice,
 } from "./theme";
 import { el } from "./ui";
@@ -34,13 +36,25 @@ export function openAppearanceDialog(): void {
 
   const themeRow = el("div", { class: "segmented" });
 
+  // What each well shows, which is the last colour chosen *through that well*
+  // rather than the colour in force — see `paintSwatches`. The grounds are kept
+  // per theme, because a ground mixed for paper is not a colour to hold on to
+  // once the page has gone dark.
+  let wellAccent = accentColour();
+  const wellGround: Record<Theme, string> = {
+    dark: backgroundColourFor("dark"),
+    light: backgroundColourFor("light"),
+  };
+
   const customGround = el("input", {
     class: "swatch swatch--custom",
     type: "color",
     title: "Any other colour",
     "aria-label": "Custom background colour",
-    oninput: (event: Event) =>
-      setBackground((event.target as HTMLInputElement).value),
+    oninput: (event: Event) => {
+      wellGround[activeTheme()] = (event.target as HTMLInputElement).value;
+      setBackground((event.target as HTMLInputElement).value);
+    },
   });
 
   // The native colour well. `input` rather than `change`, so dragging around
@@ -50,8 +64,10 @@ export function openAppearanceDialog(): void {
     type: "color",
     title: "Any other colour",
     "aria-label": "Custom accent colour",
-    oninput: (event: Event) =>
-      setAccent((event.target as HTMLInputElement).value),
+    oninput: (event: Event) => {
+      wellAccent = (event.target as HTMLInputElement).value;
+      setAccent((event.target as HTMLInputElement).value);
+    },
   });
 
   // The wells are built into their rows once and never taken out again; see
@@ -72,12 +88,20 @@ export function openAppearanceDialog(): void {
       ),
     );
 
-    paintSwatches(swatchRow, custom, ACCENT_PRESETS, accentColour(), setAccent);
+    paintSwatches(
+      swatchRow,
+      custom,
+      wellAccent,
+      ACCENT_PRESETS,
+      accentColour(),
+      setAccent,
+    );
     // The grounds on offer are the ones that belong to the theme on screen —
     // a dark one is no use while the page is paper.
     paintSwatches(
       groundRow,
       customGround,
+      wellGround[activeTheme()],
       BG_PRESETS[activeTheme()],
       backgroundColour(),
       setBackground,
@@ -125,10 +149,16 @@ export function openAppearanceDialog(): void {
  * takes to hand the same node straight back: a detached `<input type="color">`
  * loses the OS picker open on it. Every touch of that picker repaints the app
  * and so ran this, which is why the picker shut the moment it was dragged.
+ *
+ * `wellHex` is the well's own colour and is not `current`. Stepping over to a
+ * preset to compare it against what you mixed must not be what destroys what
+ * you mixed — the well holds it until it is next used, so the comparison runs
+ * both ways.
  */
 function paintSwatches(
   row: HTMLElement,
   well: HTMLInputElement,
+  wellHex: string,
   presets: { name: string; hex: string }[],
   current: string,
   pick: (hex: string) => void,
@@ -148,5 +178,5 @@ function paintSwatches(
       }),
     ),
   );
-  well.value = current;
+  well.value = wellHex;
 }

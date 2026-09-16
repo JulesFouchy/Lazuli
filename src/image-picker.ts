@@ -42,7 +42,7 @@ export function renderImagePicker(options: PickerOptions): HTMLElement {
       : el("p", { class: "hint", text: "No images yet." }),
     el("p", {
       class: "hint",
-      text: "Drop images here, or paste one. Every image you add is kept.",
+      text: "Drop images here, or paste one — a file, a screenshot, or a copied path. Every image you add is kept.",
     }),
   );
 
@@ -141,12 +141,49 @@ document.addEventListener("paste", (event) => {
   const files = [...(event.clipboardData?.files ?? [])].filter((file) =>
     file.type.startsWith("image/"),
   );
-  if (files.length === 0) return;
-  // The note beside the picker must keep its own paste; this only claims the
-  // event once there is an image in it to claim.
+  if (files.length > 0) {
+    // The note beside the picker must keep its own paste; this only claims the
+    // event once there is an image in it to claim.
+    event.preventDefault();
+    for (const file of files) void addPastedFile(file, openPicker.options);
+    return;
+  }
+
+  const paths = imagePaths(event.clipboardData?.getData("text") ?? "");
+  if (paths.length === 0) return;
   event.preventDefault();
-  for (const file of files) void addPastedFile(file, openPicker.options);
+  void addDroppedPaths(openPicker.options.entryId, paths);
 });
+
+/**
+ * Image files named by a clipboard's worth of text, or nothing.
+ *
+ * Explorer's "Copy as path" puts a quoted path on the clipboard as text and no
+ * file at all, and so does copying one out of a terminal — so without this,
+ * the one gesture Windows offers for "the location of this picture" pasted the
+ * location into the note instead.
+ *
+ * The test is deliberately narrow, because the note beside the picker is what
+ * gets a text paste when this declines: it has to be rooted, and it has to name
+ * an image. A sentence someone wrote cannot pass it, which is what makes
+ * claiming the paste safe.
+ */
+function imagePaths(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 4096) return [];
+  return trimmed
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^"(.*)"$/, "$1"))
+    .filter((line) => ROOTED_IMAGE.test(line));
+}
+
+/**
+ * A rooted path ending in an extension Lazuli can show: a drive letter, a UNC
+ * share, or a POSIX absolute path. `IMAGE_EXTENSIONS` in `model.rs` is the
+ * list Rust will actually accept, and this is a copy of it.
+ */
+const ROOTED_IMAGE =
+  /^(?:[a-z]:[\\/]|\\\\|\/)[^\r\n]*\.(?:jpg|jpeg|png|gif|webp|bmp|avif|tif|tiff|heic|heif)$/i;
 
 /**
  * Chromium's name for a bitmap pasted from the clipboard — a screenshot, or a
