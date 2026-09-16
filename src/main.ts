@@ -380,10 +380,7 @@ function tabButton(
                 // The label cannot say where the projects go, and "Delete" on
                 // a tab holding a dozen of them reads like it takes them with
                 // it. It does not: a tab is filing and nothing else.
-                hint:
-                  tab.projects.length === 0
-                    ? `Removes the tab. ${tabs[0].name} is where projects with no tab go.`
-                    : `Removes the tab. Its ${tab.projects.length === 1 ? "project goes" : `${tab.projects.length} projects go`} back to ${tabs[0].name}, and no folder is touched.`,
+                hint: "Removes the tab. Its projects will be moved to the first tab",
                 danger: true,
                 run: () => removeTab(tab, index),
               },
