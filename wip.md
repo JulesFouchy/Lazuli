@@ -6,10 +6,6 @@ pouvoir recadrer une photo / choisir le mod de fit genre stretch, fit avec en ba
 
 timeline partagéé, version décentralisée sans serveur où juste on s'envoie des messages pour se mettre à jour
 
-add "folders", as tabs to the right of "recent", which becomes default, and on hover you have a + button to add your own tabs if you want to organize. And you can drag and drop a project onto a tab to move it (eg for me i could have my Wip and my Done tabs)
-
-keep projects in fixed order, and drag to reorder them
-
 make the UI juicy
 
 

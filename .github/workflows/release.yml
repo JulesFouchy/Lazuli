@@ -14,9 +14,12 @@
 # version mismatch produces an update that every client downloads and then
 # declines to apply.
 #
-# This is the only workflow. Ordinary pushes run nothing: the checks that would
-# catch a bad commit are the same ones run locally, and a private repo's Actions
-# minutes are better spent on releases.
+# Nothing here re-runs clippy or the tests. `scripts/release.mjs` runs them
+# before it cuts the tag, which is the only point at which failing is cheap —
+# once the tag is pushed, a failure has to be undone by deleting it. Ordinary
+# pushes run no checks either, for the same reason: this is developed and tested
+# on one machine, and a private repo's Actions minutes are better spent on
+# releases.
 #
 # The release is built as a draft and published by the last job, once all four
 # platforms have uploaded. Publishing is the moment existing installs begin
@@ -83,64 +86,12 @@ jobs:
             echo "LAZULI_EOF"
           } >> "$GITHUB_OUTPUT"
 
-  # Clippy and the tests, on the cheapest runner, before anything expensive
-  # starts. There is no CI on ordinary pushes — this is developed and tested on
-  # one machine, and paying for a second opinion on every commit is not worth
-  # it. But a release fans out to four runners, two of them macOS at 10x, and
-  # discovering a broken build after those have run costs about 240 billable
-  # minutes. Discovering it here costs three.
-  verify:
-    needs: check-version
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libxdo-dev \
-            build-essential
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      # `shared-key` rather than the default, which folds the job's *name* into
-      # the cache key and so gives `verify` and `build` separate copies of the
-      # same dependency tree. With this, the Linux build below restores what
-      # this job just compiled.
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: "./src-tauri -> target"
-          shared-key: lazuli
-          cache-on-failure: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      # Also `tsc --noEmit`, and the Rust build needs `../dist` to exist.
-      - run: npm run build
-
-      # No `cargo fmt --check`: the tree is hand-wrapped narrower than rustfmt
-      # wants in about thirty places, and that formatting is not wanted.
-      - run: cargo clippy -j 1 --all-targets -- -D warnings
-        working-directory: src-tauri
-      - run: cargo test -j 1
-        working-directory: src-tauri
-
   build:
-    # Both, not just `verify`: a job can read `needs.<job>.outputs` only for
-    # jobs named in its own `needs`. With `verify` alone in the way, the release
-    # notes from `check-version` silently became an empty string, and 0.1.2
-    # went out with no body.
-    needs: [check-version, verify]
+    # A job can read `needs.<job>.outputs` only for jobs named in its own
+    # `needs`. When another job stood between this one and `check-version`, the
+    # release notes silently became an empty string and 0.1.2 went out with no
+    # body.
+    needs: check-version
     permissions:
       contents: read
     strategy:
@@ -187,17 +138,15 @@ jobs:
         with:
           targets: ${{ matrix.rust-targets }}
 
-      # Shared with the `verify` job above, which has already compiled this on
-      # Linux by the time this runs. The runner's OS and architecture are part
-      # of the key regardless, so Windows and Linux do not collide; the target
-      # is spelled out because the two macOS builds share a runner label.
+      # The runner's OS and architecture are part of the key regardless, so
+      # Windows and Linux do not collide; the target is spelled out because the
+      # two macOS builds share a runner label.
       #
-      # Note that none of this survives *between* releases. Actions caches are
-      # scoped to the ref that wrote them plus the default branch, and this
-      # workflow only ever runs on tags — so each release writes caches onto
-      # its own tag, where the next release cannot see them. Warming them would
-      # mean building all four platforms on `main`, which costs more than it
-      # saves at this release rate.
+      # Nothing this job saves survives to the next release: Actions caches are
+      # readable from the ref that wrote them plus the default branch, and this
+      # workflow only ever runs on tags. What it *restores* comes from `main`,
+      # put there by `warm-cache.yml` — whose matrix and `shared-key` have to
+      # stay identical to this one, or the warming silently stops working.
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"

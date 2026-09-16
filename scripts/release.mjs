@@ -3,9 +3,14 @@
 //
 //   node scripts/release.mjs 0.2.0
 //   node scripts/release.mjs 0.2.0 --dry-run     # say what would happen
+//   node scripts/release.mjs 0.2.0 --no-checks   # skip clippy and the tests
 //
 // Write the CHANGELOG.md section for the version first — this refuses to
 // release without one, because that section becomes the release notes.
+//
+// Clippy, the tests and the frontend build all run here, before the tag is cut.
+// Nothing after the tag re-checks them, so this is the only chance to fail
+// without having to delete a tag.
 //
 // Everything after `git push --tags` is unattended: four platforms build, the
 // installers are signed and uploaded to the public lazuli-releases repo, and the
@@ -82,6 +87,40 @@ if (/unreleased/i.test(section.split("\n")[0])) {
 
 if (run("git", ["tag", "-l", `v${version}`])) {
   fail(`v${version} already exists as a tag. Pick the next version.`);
+}
+
+// Clippy and the tests, here rather than in the workflow. The workflow can only
+// run them once the tag is pushed, and a tag that has to be deleted is the one
+// expensive way for a release to fail; this machine is warm and incremental, so
+// the same check costs a fraction of what a cold runner charges for it.
+//
+// `--no-checks` skips this, for re-cutting a release when only the CHANGELOG
+// or the version was wrong and the code has not moved.
+if (!process.argv.includes("--no-checks")) {
+  const check = (what, cmd, args, cwd) => {
+    if (dryRun) {
+      console.log(`would run: ${cmd} ${args.join(" ")}`);
+      return;
+    }
+    process.stdout.write(`  ${what}… `);
+    try {
+      // `npm` is a .cmd on Windows, which execFile cannot start on its own.
+      execFileSync(cmd, args, { cwd, stdio: "pipe", shell: cmd === "npm" });
+    } catch (e) {
+      console.error("failed\n");
+      process.stderr.write(e.stdout?.toString() ?? "");
+      process.stderr.write(e.stderr?.toString() ?? "");
+      fail(`${what} failed. Fix it before releasing.`);
+    }
+    console.log("ok");
+  };
+  console.log("Checking\n");
+  // `tsc --noEmit` and the frontend build, which the Rust build also needs.
+  check("frontend", "npm", ["run", "build"]);
+  // Single-job everywhere: parallel cargo exhausts the page file on this machine.
+  check("clippy", "cargo", ["clippy", "-j", "1", "--all-targets", "--", "-D", "warnings"], "src-tauri");
+  check("tests", "cargo", ["test", "-j", "1"], "src-tauri");
+  console.log();
 }
 
 console.log(`Releasing ${version}\n`);
