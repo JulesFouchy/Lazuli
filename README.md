@@ -101,8 +101,11 @@ Three secrets on this repo, under Settings → Secrets and variables → Actions
 - gives a good idea for the logo and overall theme / artistic direction
 - reference to Obsidian, which is a software I really like, and we share some philosophy : local-first, "note taking" app
 - minecraft origin: the idea for Lazuli emerged when i was coding a minecraft mod, and I added the exact same timeline inside minecraft, and enjoyed it so much i wanted to make samilar timelines for all my projects not only my minecraft world, and so I made Lazuli
+- I love cakes, so I don't mind the Indonesian lapis cake
 
-**It was Lapis first.** The same stone, one syllable shorter — until enough French speakers pointed out that *lapis* lands on *la pisse*. Lazuli is the half of the name that survives being said aloud, and it costs nothing: lapis lazuli was always the stone this is named for.
+**It means layer.** In Indonesian, *lapis* is a layer; *kue lapis* is the layer cake. A journal is exactly that: days laid down one on top of the last, and readable afterwards precisely because none of them was flattened into the others. That was the idea the name was chosen for, and it was a small surprise to find it already inside the word.
+
+**It was Lapis first.** Until enough French speakers pointed out that *lapis* lands on *la pisse*. Lazuli is the half that survives being said aloud — and it is the same stone either way, so the reasons above are the reasons this is called Lazuli. The layer is still in there: lapis lazuli keeps the whole name, and only the app dropped half of it.
 
 **It started in Minecraft.** The first version of this timeline was a mod: a dated picture for each session in one world. It worked well enough that it became obvious every long project deserved the same thing, not just that world. Lapis lazuli is a Minecraft ore, so the name carries where it came from.
 
