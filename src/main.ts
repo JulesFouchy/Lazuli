@@ -510,7 +510,7 @@ let namingTab = false;
 /**
  * One project on the launch screen, behind its own cover.
  *
- * The whole row is the button. Delete and Forget are on the right-click menu
+ * The whole row is the button. Forget and Delete are on the right-click menu
  * rather than beside the name: both are rare, and a destructive control sitting
  * permanently next to the thing you actually came to click is one you
  * eventually hit by accident.
@@ -558,17 +558,17 @@ function projectRow(
               ),
           },
           {
-            label: "Delete",
+            label: "Forget",
             // Which of the two removals is which is the thing to be sure of
             // before clicking, and neither label can carry it on its own.
+            hint: "Removes it from this list. The folder stays where it is.",
+            run: () => forgetListing(project),
+          },
+          {
+            label: "Delete",
             hint: "Moves the whole project folder to the Recycle Bin.",
             danger: true,
             run: () => deleteProject(project),
-          },
-          {
-            label: "Forget",
-            hint: "Removes it from this list. The folder stays where it is.",
-            run: () => forgetListing(project),
           },
         ]),
     },

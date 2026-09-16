@@ -5,4 +5,4 @@ image: null
 ---
 
 Had to rename to Lazuli because Meuche is a troll :(
-But lazuli is beautiful 💎
+But Lazuli is beautiful 💎
