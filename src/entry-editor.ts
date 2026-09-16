@@ -3,12 +3,13 @@
 // There is no save button: edits are written straight to `entry.md`. Every such
 // write comes back as a rescan a moment later, so the editor is refreshed in
 // place rather than rebuilt — see `refreshEntryEditor`. Rebuilding it would
-// replace the textarea under the cursor, which is exactly what the user is
+// replace the note field under the cursor, which is exactly what the user is
 // using at the time.
 
 import type { Entry, Project } from "./api";
 import { setCover, trashEntry, updateEntry } from "./api";
 import { renderImagePicker } from "./image-picker";
+import { markdownInput, type MarkdownInput } from "./md-input";
 import { closeModal, openModal, replaceModalBody } from "./modal";
 import { entryKey, markDeleting, unmarkDeleting } from "./pending";
 import { el, focusWhenActive, toast, toastError } from "./ui";
@@ -25,7 +26,7 @@ const SAVE_DEBOUNCE_MS = 400;
 interface OpenEditor {
   id: string;
   dateInput: HTMLInputElement;
-  textarea: HTMLTextAreaElement;
+  note: MarkdownInput;
   imagesLabel: HTMLElement;
   pickerHost: HTMLElement;
   /** What the picker was last drawn from, so it is rebuilt only when it changed. */
@@ -76,7 +77,7 @@ export function openEntryEditor(id: string, context: EditorContext): void {
   // After `openModal`, which dismisses whatever was there and so clears this.
   editor = built.fields;
   // Straight into the note: writing it is the reason the editor is open.
-  focusWhenActive(built.fields.textarea);
+  focusWhenActive(built.fields.note.node);
 }
 
 /**
@@ -101,11 +102,10 @@ export function refreshEntryEditor(id: string, context: EditorContext): void {
   if (document.activeElement !== editor.dateInput) {
     editor.dateInput.value = entry.journal_date;
   }
-  if (
-    document.activeElement !== editor.textarea &&
-    editor.textarea.value !== entry.text
-  ) {
-    editor.textarea.value = entry.text;
+  // Not while it has the caret: what came back is this field's own last save,
+  // and anything typed since is newer than it.
+  if (document.activeElement !== editor.note.node) {
+    editor.note.setValue(entry.text);
   }
 
   const signature = pickerSignature(entry);
@@ -136,19 +136,12 @@ function editorBody(
     );
   });
 
-  const textarea = el("textarea", {
-    class: "input",
-    rows: 3,
-    placeholder: "What happened today?",
-  }) as HTMLTextAreaElement;
-  textarea.value = entry.text;
-
   let timer: number | undefined;
   const saveNote = async () => {
     window.clearTimeout(timer);
     timer = undefined;
     try {
-      await updateEntry(id, { text: textarea.value });
+      await updateEntry(id, { text: note.value() });
     } catch (err) {
       toastError("Could not save the note", err);
     }
@@ -157,18 +150,25 @@ function editorBody(
   const flushNote = () => {
     if (timer !== undefined) void saveNote();
   };
-  textarea.addEventListener("input", () => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => void saveNote(), SAVE_DEBOUNCE_MS);
+
+  const note = markdownInput({
+    class: "input md-input--note",
+    placeholder: "What happened today?",
+    onInput: () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void saveNote(), SAVE_DEBOUNCE_MS);
+    },
+    onKeydown: (event) => {
+      if (event.key !== "Enter" || event.shiftKey) return;
+      // An entry is a sentence, so Enter means "done" and Shift+Enter is the
+      // escape hatch for the rare multi-line one — including the one that is a
+      // list. Write before closing: the debounce would otherwise still be
+      // holding the last few keystrokes.
+      event.preventDefault();
+      void saveNote().then(() => closeModal());
+    },
   });
-  textarea.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter" || event.shiftKey) return;
-    // An entry is a sentence, so Enter means "done" and Shift+Enter is the
-    // escape hatch for the rare multi-line one. Write before closing: the
-    // debounce would otherwise still be holding the last few keystrokes.
-    event.preventDefault();
-    void saveNote().then(() => closeModal());
-  });
+  note.setValue(entry.text);
 
   const imagesLabel = el("label", { text: `Images (${entry.images.length})` });
   const pickerHost = el("div", {}, imagePicker(entry, context));
@@ -183,12 +183,13 @@ function editorBody(
         "div",
         { class: "field" },
         el("label", { text: "Note" }),
-        textarea,
-        // Said here because the field is plain Markdown source rather than a
-        // formatting toolbar, so nothing else would say it.
+        note.node,
+        // Said here because the field is Markdown source rather than a
+        // formatting toolbar, so nothing else would say it. The field styles
+        // what it recognises as you type, which says the rest.
         el("p", {
           class: "hint",
-          text: "**bold**, *italic*, `code` and ~~struck~~ work here.",
+          text: "Markdown: **bold**, *italic*, `code`, ~~struck~~, # headings and - lists.",
         }),
       ),
       el("div", { class: "field" }, imagesLabel, pickerHost),
@@ -197,7 +198,7 @@ function editorBody(
     fields: {
       id,
       dateInput,
-      textarea,
+      note,
       imagesLabel,
       pickerHost,
       pickerSignature: pickerSignature(entry),

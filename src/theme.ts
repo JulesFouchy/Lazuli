@@ -20,6 +20,20 @@ const BG_KEY: Record<Theme, string> = {
 };
 
 /**
+ * One of the Appearance dialog's colour wells: the accent's, or a theme's
+ * ground. A ground mixed for paper is not a colour to hold on to once the page
+ * has gone dark, so the two grounds are separate wells.
+ */
+export type Well = "accent" | Theme;
+
+/** Where the colour last mixed in each well is kept. */
+const CUSTOM_KEY: Record<Well, string> = {
+  accent: "lazuli.custom.accent",
+  dark: "lazuli.custom.bg.dark",
+  light: "lazuli.custom.bg.light",
+};
+
+/**
  * What the user chose. `system` follows the OS; `dark` is what they get until
  * they choose anything, because the app is a dark blue one and opening it as a
  * white page on a light machine shows the wrong app.
@@ -99,6 +113,22 @@ export const backgroundColour = (): string => backgroundColourFor(activeTheme())
 
 /** The ground of either theme, whether or not it is the one on screen. */
 export const backgroundColourFor = (theme: Theme): string => background[theme];
+
+/**
+ * The colour last mixed in a well, or null if none ever was.
+ *
+ * Kept apart from the accent and the grounds themselves, and kept whether or
+ * not it is the one in force: a colour someone mixed is work, and stepping over
+ * to a preset to compare the two must not be what throws it away — not for the
+ * length of the dialog, and not for the length of the install either.
+ */
+export const customColour = (well: Well): string | null =>
+  normaliseHex(localStorage.getItem(CUSTOM_KEY[well]) ?? "");
+
+export function rememberCustomColour(well: Well, hex: string): void {
+  const normalised = normaliseHex(hex);
+  if (normalised) localStorage.setItem(CUSTOM_KEY[well], normalised);
+}
 
 /** The theme actually on screen, with `system` resolved. */
 export function activeTheme(): Theme {
@@ -272,11 +302,11 @@ function scale(hex: string, factor: number): string {
 }
 
 /**
- * The accent as it should be drawn on an export frame.
+ * The accent lightened until it reads over a dark scrim, whatever the theme is.
  *
- * Frames are the accent over a dark scrim whatever the app's theme is, so this
- * ignores the theme and only asks whether the colour is light enough to read
- * there — which a deep blue or purple accent is not.
+ * Nothing calls this: it was written for the video export's frames, which have
+ * been removed. Kept because it is the answer to a question the renderer that
+ * replaces them will ask again — see `ideas/video-export.md`.
  */
 export function accentOnDark(): string {
   const ink = 0.02; // Roughly the scrim at the top of a frame.

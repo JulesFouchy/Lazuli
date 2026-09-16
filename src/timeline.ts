@@ -10,15 +10,15 @@ import {
   toggleDateFormat,
 } from "./dates";
 import { openContextMenu } from "./context-menu";
-import { plainText, renderInline } from "./markdown";
+import { plainText, renderBlocks } from "./markdown";
 import { entryKey, isDeleting } from "./pending";
 import { el } from "./ui";
 
 
 export interface TimelineHandlers {
-  /** A plain click: the picture, full size. */
+  /** A click on the picture: the picture, full size. */
   viewEntry: (entry: Entry) => void;
-  /** The pencil, or Ctrl+click. */
+  /** A click anywhere else on the card. */
   editEntry: (entry: Entry) => void;
   deleteEntry: (entry: Entry) => void;
 }
@@ -112,16 +112,12 @@ function entryCard(
       class: "card",
       // So the viewer can put the page back on whichever card it ended on.
       "data-entry": entry.id,
-      // The card is the picture, so a click opens the picture — except on the
-      // note, which has its own handler below. Editing has the pencil too; a
-      // modified click is its shortcut, for the same reason a modified click
-      // opens a link in a new tab.
-      onclick: (event: Event) => {
-        const mouse = event as MouseEvent;
-        const modified = mouse.ctrlKey || mouse.metaKey || mouse.shiftKey;
-        if (modified) handlers.editEntry(entry);
-        else handlers.viewEntry(entry);
-      },
+      // The card edits, the picture views. Everything on a card other than the
+      // picture is something you would change rather than look at, so the whole
+      // of the rest of it — the date's row, the note, the padding between them
+      // — is one target, and only the picture opts out.
+      title: "Click to edit this entry",
+      onclick: () => handlers.editEntry(entry),
       oncontextmenu: (event: Event) =>
         openContextMenu(event as MouseEvent, [
           {
@@ -131,36 +127,16 @@ function entryCard(
           },
         ]),
     },
+    // No pencil: the card itself is the edit button, so a second one beside the
+    // date was a control that did what clicking next to it already did.
+    el("header", { class: "card__head" }, dateToggle(entry)),
+    // A `div` and not a `p`: the note can hold a heading or a list, and a
+    // paragraph cannot legally contain either — the browser would close the
+    // `p` before them and the card's own text would end up outside it.
     el(
-      "header",
-      { class: "card__head" },
-      dateToggle(entry),
-      el("span", { class: "card__grow" }),
-      el("button", {
-        class: "card__edit",
-        "aria-label": "Edit entry",
-        title: "Edit this entry — or Ctrl+click or Shift+click the card",
-        text: "✎",
-        onclick: (event: Event) => {
-          event.stopPropagation();
-          handlers.editEntry(entry);
-        },
-      }),
-    ),
-    // The note opens the editor rather than the picture: the sentence is the
-    // half of a card you come back to change, and the picture is right beside
-    // it for the other half.
-    el(
-      "p",
-      {
-        class: entry.text ? "card__text" : "card__text card__text--empty",
-        title: "Click to edit this entry",
-        onclick: (event: Event) => {
-          event.stopPropagation();
-          handlers.editEntry(entry);
-        },
-      },
-      entry.text ? renderInline(entry.text) : "No note yet",
+      "div",
+      { class: entry.text ? "card__text" : "card__text card__text--empty" },
+      entry.text ? renderBlocks(entry.text) : "No note yet",
     ),
     // No picture, no frame for one: an entry that is only a sentence is a
     // small card, not a card with a hole in it.
@@ -178,6 +154,13 @@ function entryCard(
           // once; the browser skips the offscreen ones.
           loading: "lazy",
           decoding: "async",
+          // The one part of a card that is to be looked at rather than
+          // changed, so it takes the click back off the card.
+          title: "Click to see the picture full size",
+          onclick: (event: Event) => {
+            event.stopPropagation();
+            handlers.viewEntry(entry);
+          },
         }),
       ),
   );

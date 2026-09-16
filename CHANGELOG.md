@@ -6,13 +6,16 @@ Each version's section becomes the release notes verbatim, so write it before cu
 
 ## 0.3.0 — unreleased
 
-- **Notes and project names take Markdown.** `**bold**`, `*italic*`, `` `code` `` and `~~struck~~`, on the timeline, in the viewer and in the exported video. Nothing else: a frame of the video is drawn on a canvas with no layout engine, so headings and lists could be shown on the page but never in the export, and the export is meant to be what you saw. The project name shows its formatting until you click into it, and the Markdown itself while you are editing it.
-- **Clicking a card's sentence opens the editor**, where clicking its picture still opens the viewer. The pencil and Ctrl+click are unchanged.
+- **Notes and project names take Markdown.** `**bold**`, `*italic*`, `` `code` ``, `~~struck~~`, `#` headings and `-` or `1.` lists, on the timeline and in the viewer. Nested lists, links, tables and quotes are not in: a day's note is a sentence and sometimes a short list.
+- **The field shows the Markdown working as you type it.** The `*` and the `#` stay where you put them, dimmed, and the text they mark is already bold, italic or a heading — the way a Markdown file looks in an editor rather than a preview beside one. A card and the viewer show it finished, markers gone. The project's name does both: formatted until you click into it, the Markdown itself while you are in it.
+- **Clicking a card opens its editor. Clicking its picture opens the viewer.** Anywhere else on the card — the date's row, the sentence, the space around the picture — is the editor now, which is the half of a card you came back to change. The pencil is gone, and so are Ctrl+click and Shift+click, which were shortcuts to something a plain click does.
 - **Pasting a copied path adds the image it points at.** Explorer's "Copy as path" puts text on the clipboard and no file, so it used to paste the path into the note.
 - **The light theme's blue is deeper, and the accent is brighter.** If you have chosen your own background or accent, yours is kept.
-- **The colour well in Appearance keeps what you mixed** when you step over to a preset to compare the two.
+- **The custom colour in Appearance stays yours.** It keeps what you mixed when you step over to a preset to compare the two, it comes back the next time you open the app, and clicking it both puts it back in use and opens the picker on it.
 - **Typing a project name survives the app saving.** A rescan landing mid-word used to take the field away, along with whatever was in it and any Windows emoji picker open over it.
 - Going forward to a project you have since deleted does nothing, rather than reporting an error about a folder you threw away yourself.
+- **The video export is gone for now, and will come back.** It could not be reached from the UI and had never worked end to end; the version that returns will be rendered by a tool of its own. Nothing in your projects changes — an entry was always a date, a sentence and a picture, which is all a frame needs.
+- Bold is properly bold, in a project's name most of all. The app bundled two weights of its typeface and a heading was already heavier than one of them, so `**bold**` there changed nothing; it now bundles the whole weight range in one variable file, which is slightly smaller than the two it replaces.
 
 ## 0.2.0 — 2026-09-16
 

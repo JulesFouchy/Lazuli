@@ -157,28 +157,6 @@ export const trashEntry = (id: string) => invoke<void>("trash_entry", { id });
 
 export const undoDelete = () => invoke<UndoOutcome | null>("undo_delete");
 
-export interface ExportOptions {
-  output: string;
-  seconds_per_frame: number;
-  width: number;
-  height: number;
-  fps: number;
-}
-
-/** The ffmpeg the app will use, or null if it could not find one. */
-export const ffmpegStatus = () => invoke<string | null>("ffmpeg_status");
-
-export const exportBegin = (options: ExportOptions) =>
-  invoke<void>("export_begin", { options });
-
-/** Resolves once ffmpeg has taken the frame, which paces the render loop. */
-export const exportPushFrame = (png: Uint8Array) =>
-  invoke<number>("export_push_frame", { png: Array.from(png) });
-
-export const exportFinish = () => invoke<string>("export_finish");
-
-export const exportCancel = () => invoke<void>("export_cancel");
-
 /**
  * Mirror the theme choice into the Rust settings file.
  *

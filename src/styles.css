@@ -1,7 +1,7 @@
 /* Lazuli — a quiet reading surface for a timeline of days, in two themes. */
 
-/* Bundled rather than relying on installed fonts: the video frames are drawn
-   with these, and an export should look the same on any machine. */
+/* Bundled rather than relying on installed fonts, so the app reads the same on
+   a machine that has neither Inter nor JetBrains Mono installed. */
 @font-face {
   font-family: "LazuliMono";
   src: url("./fonts/jetbrains-mono-400.woff2") format("woff2");
@@ -16,17 +16,15 @@
   font-display: block;
 }
 
+/* One variable file rather than a static face per weight, and it is the smaller
+   of the two: 500 and 600 alone came to more bytes than the whole axis does.
+   Which is what lets `**bold**` in a project name be bolder than the name —
+   the heading is already 650, and with only a 600 to match it against, bold and
+   not-bold resolved to the same face. */
 @font-face {
   font-family: "LazuliSans";
-  src: url("./fonts/inter-500.woff2") format("woff2");
-  font-weight: 500;
-  font-display: block;
-}
-
-@font-face {
-  font-family: "LazuliSans";
-  src: url("./fonts/inter-600.woff2") format("woff2");
-  font-weight: 600;
+  src: url("./fonts/inter-variable.woff2") format("woff2");
+  font-weight: 100 900;
   font-display: block;
 }
 
@@ -342,8 +340,7 @@ button {
   cursor: pointer;
 }
 
-input,
-textarea {
+input {
   font: inherit;
   color: inherit;
 }
@@ -493,6 +490,64 @@ textarea {
   align-self: flex-start;
   width: auto;
   min-width: 0;
+}
+
+/* --- the Markdown field --------------------------------------------------
+ *
+ * A `contenteditable` and not a `textarea`, because it styles the text it
+ * holds and a `textarea` cannot — `md-input.ts` has the whole of why. So the
+ * things a `textarea` came with have to be asked for: wrapping, the newlines,
+ * a placeholder, and a height that does not collapse when it is empty. */
+.md-input {
+  /* The placeholder below is absolutely positioned, and this is what it is
+     positioned against. */
+  position: relative;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Nothing in a note is worth a horizontal scrollbar; a long unbroken path
+     wraps mid-word rather than widening the dialog. */
+  word-break: break-word;
+}
+
+.md-input--note {
+  /* Three lines and then it grows, which is where `rows="3"` had it. */
+  min-height: calc(3 * 1.5em + 18px);
+  max-height: 40vh;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+/* The marker characters: still there, and out of the way. Dimmed rather than
+   hidden, because seeing them is the point — this is the Markdown as written,
+   with what it does already applied. */
+.md__mark {
+  color: var(--text-faint);
+  /* A code span's marker must not also take the span's ground, or the
+     backticks sit in two little boxes of their own. */
+  background: none;
+  padding: 0;
+}
+
+/* A heading's text in the editing view, where a real `h3` would break the
+   line box the caret is measured in. Weight and size only. */
+.md__heading-ink {
+  font-weight: 600;
+}
+
+.md__heading-ink--1 {
+  font-size: 1.32em;
+}
+
+.md__heading-ink--2 {
+  font-size: 1.15em;
+}
+
+.md-input--empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  /* So the caret sits at the start of the field rather than after the hint. */
+  position: absolute;
+  pointer-events: none;
 }
 
 /* --- launch screen ------------------------------------------------------- */
@@ -765,37 +820,10 @@ textarea {
   background: var(--accent-soft);
 }
 
+/* Takes the slack in a row, so what follows it sits at the far end. Named for
+   the card it was written for; the new-project dialog is what still uses it. */
 .card__grow {
   flex: 1;
-}
-
-/* The pencil in the header's top right. Not there at all until the card is
-   under the pointer: it is the second thing a card does, and the first is to
-   be looked at. */
-.card__edit {
-  align-self: center;
-  width: 26px;
-  height: 26px;
-  margin: -4px -6px -4px 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  line-height: 1;
-  color: var(--text-faint);
-  opacity: 0;
-  transition: opacity 120ms, background 120ms, color 120ms;
-}
-
-.card:hover .card__edit,
-.card__edit:focus-visible {
-  opacity: 1;
-}
-
-.card__edit:hover {
-  background: var(--accent-soft);
-  color: var(--accent-text);
 }
 
 /* The photograph is inset and ringed rather than bled to the card's edges. A
@@ -805,7 +833,10 @@ textarea {
   padding: 0 14px 14px;
 }
 
+/* The one thing on a card that does not open the editor, so it says so with
+   the same cursor the viewer uses for magnifying the picture further. */
 .card__image {
+  cursor: zoom-in;
   display: block;
   width: 100%;
   /* Tall enough to be the point of the card, short enough that several
@@ -834,15 +865,27 @@ textarea {
   font-style: italic;
 }
 
-/* --- inline Markdown -----------------------------------------------------
+/* --- Markdown ------------------------------------------------------------
  *
- * The four places text the user wrote is shown. `markdown.ts` says why the
- * grammar stops at inline, and `video.ts` draws the same runs on the export
- * canvas — anything given a *shape* here rather than a face or a colour would
- * have to be reimplemented there, so keep this to type.
+ * Four places show text the user wrote — a card, the viewer, the project's
+ * name in the banner and on a launch row — and two of them are also where it
+ * is written. `markdown.ts` says what the grammar is and what it leaves out.
  *
  * `<strong>`, `<em>` and `<s>` need nothing: the browser's own weight, slant
- * and rule are right. Only the code span has a face and a ground of its own. */
+ * and rule are right. What needs saying is the code span, the block spacing,
+ * and the dimmed markers of the editing view. */
+
+/* `**bold**` inside text that is already heavy. The name in the banner is 650
+   and a launch row's is 600, so plain `bold` would land on a weight barely
+   above them — these ask for the distance the variable face can now give. */
+.banner__name strong {
+  font-weight: 850;
+}
+
+.recent__name strong {
+  font-weight: 800;
+}
+
 .card__text code,
 .viewer__text code,
 .banner__name code,
@@ -861,6 +904,74 @@ textarea {
 .recent__row--cover .recent__name code {
   background: none;
   padding: 0;
+}
+
+/* Blocks inside a note. A card is a small surface, so the vertical rhythm is
+   tighter than a document's and the first block never pushes the card open:
+   the note's own padding is the space above it. */
+.md__paragraph {
+  margin: 0;
+  /* The line breaks someone typed are line breaks. `markdown.ts` keeps them in
+     the paragraph rather than folding them into spaces, and this is what shows
+     them. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.md__paragraph + .md__paragraph {
+  margin-top: 0.7em;
+}
+
+.md__heading {
+  margin: 0;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+/* `#` through `######` arrive as h3 down to h6 — see `blockElement`. Sized
+   from the note's own text rather than from the page, so a heading in a card
+   is a heading *of the note* and does not shout over the date above it. */
+.md__heading:is(h3) {
+  font-size: 1.32em;
+}
+
+.md__heading:is(h4) {
+  font-size: 1.15em;
+}
+
+.md__heading:is(h5),
+.md__heading:is(h6) {
+  font-size: 1em;
+  color: var(--text-dim);
+}
+
+:is(.md__paragraph, .md__list) + .md__heading {
+  margin-top: 0.9em;
+}
+
+.md__list {
+  margin: 0;
+  /* Enough for the marker and no more: a card is narrow, and the default
+     indent spends a fifth of its width on white space. */
+  padding-left: 1.4em;
+}
+
+:is(.md__paragraph, .md__heading, .md__list) + .md__list {
+  margin-top: 0.4em;
+}
+
+.md__list li {
+  overflow-wrap: anywhere;
+}
+
+.md__list li + li {
+  margin-top: 0.2em;
+}
+
+.md__list::marker,
+.md__list li::marker {
+  color: var(--text-faint);
 }
 
 /* The dashed rule between two entries that are not on consecutive days. Always
@@ -1186,6 +1297,14 @@ textarea {
   border-radius: 50%;
 }
 
+/* Chosen, when what it holds is what is in force — the same ring the presets
+   get. The dash goes with it: a dashed edge says "no colour picked here yet",
+   and by this point there is one. */
+.swatch--custom[data-chosen="true"] {
+  border: 2px solid var(--bg-raised);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 /* A live sample of what the accent will look like in use, so the choice is
    made against real controls rather than against a circle. */
 .appearance__preview {
@@ -1391,31 +1510,3 @@ textarea {
   }
 }
 
-/* --- export dialog ------------------------------------------------------- */
-
-.export {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.preview {
-  display: grid;
-  place-items: center;
-  min-height: 180px;
-  border-radius: var(--radius);
-  background: var(--bg-sunken);
-  border: 1px solid var(--line);
-  overflow: hidden;
-}
-
-.preview canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-select.input {
-  appearance: none;
-  width: 100%;
-}

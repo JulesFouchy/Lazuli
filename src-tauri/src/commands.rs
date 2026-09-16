@@ -14,7 +14,6 @@ use crate::model::{is_image, DateFormat, Project, ProjectMeta};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
 use crate::theme;
-use crate::video::{self, Encode, ExportOptions};
 use crate::watch::{self, ProjectWatcher};
 
 /// Emitted whenever a rescan finds the project has actually changed.
@@ -99,8 +98,6 @@ pub struct AppState {
     /// two quick clicks are two opens in flight, and the frontend keeps the
     /// one it asked for last, so that must also be the one left open here.
     opening: Mutex<()>,
-    /// The export in flight, if any. Frames are pushed into it one at a time.
-    export: Mutex<Option<Encode>>,
 }
 
 /// Cap on the undo stack. Session-only anyway; this just stops a long tidying
@@ -811,81 +808,6 @@ fn restore(original_path: &Path) -> Result<String> {
     bail!(
         "Lazuli cannot take {name} back out of the Trash on macOS.          It is still there — open the Trash and use Put Back."
     )
-}
-
-// --- video export ---------------------------------------------------------
-
-/// Where ffmpeg was found, so the UI can say what is wrong before the user
-/// spends time rendering frames.
-#[tauri::command]
-pub fn ffmpeg_status(app: AppHandle) -> Option<String> {
-    let resources = app.path().resource_dir().ok();
-    video::find_ffmpeg(resources.as_deref())
-        .map(|(path, _)| path.display().to_string())
-}
-
-/// Start ffmpeg and leave it waiting for frames.
-#[tauri::command]
-pub fn export_begin(app: AppHandle, state: State<AppState>, options: ExportOptions) -> CmdResult<()> {
-    let resources = app.path().resource_dir().ok();
-    let (ffmpeg, _) = video::find_ffmpeg(resources.as_deref()).ok_or_else(|| {
-        anyhow!(
-            "ffmpeg was not found. Install ffmpeg and make sure it is on your PATH."
-        )
-    })?;
-
-    let mut slot = state.export.lock().expect("export lock was poisoned");
-    if slot.is_some() {
-        return Err(anyhow!("an export is already running").into());
-    }
-    *slot = Some(Encode::start(&ffmpeg, &options)?);
-    Ok(())
-}
-
-/// Hand ffmpeg the next frame. Blocks while ffmpeg is busy, which is what
-/// paces the frontend's render loop and keeps memory flat.
-#[tauri::command]
-pub fn export_push_frame(state: State<AppState>, png: Vec<u8>) -> CmdResult<u32> {
-    let mut slot = state.export.lock().expect("export lock was poisoned");
-    let encode = slot
-        .as_mut()
-        .ok_or_else(|| anyhow!("no export is running"))?;
-    match encode.push_frame(&png) {
-        Ok(()) => Ok(encode.frames_written),
-        Err(err) => {
-            // ffmpeg has died; tear the export down rather than leaving a
-            // wedged encoder for the next attempt to trip over.
-            if let Some(encode) = slot.take() {
-                encode.cancel();
-            }
-            Err(err.into())
-        }
-    }
-}
-
-/// Close the stream and wait for the file to be written.
-#[tauri::command]
-pub fn export_finish(state: State<AppState>) -> CmdResult<PathBuf> {
-    let encode = state
-        .export
-        .lock()
-        .expect("export lock was poisoned")
-        .take()
-        .ok_or_else(|| anyhow!("no export is running"))?;
-    Ok(encode.finish()?)
-}
-
-/// Abandon the export and delete the half-written file.
-#[tauri::command]
-pub fn export_cancel(state: State<AppState>) {
-    if let Some(encode) = state
-        .export
-        .lock()
-        .expect("export lock was poisoned")
-        .take()
-    {
-        encode.cancel();
-    }
 }
 
 // --- misc ----------------------------------------------------------------

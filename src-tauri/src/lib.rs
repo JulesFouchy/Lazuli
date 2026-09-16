@@ -11,7 +11,6 @@ pub mod paths;
 pub mod store;
 pub mod theme;
 pub mod updates;
-pub mod video;
 pub mod watch;
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
@@ -129,11 +128,6 @@ pub fn run() {
             commands::startup_project,
             commands::default_projects_dir,
             commands::set_theme_preference,
-            commands::ffmpeg_status,
-            commands::export_begin,
-            commands::export_push_frame,
-            commands::export_finish,
-            commands::export_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lazuli");

@@ -1,6 +1,6 @@
 # Lazuli
 
-Local-first project journal: a project is a folder on disk, each entry is a dated sentence plus a picture, viewable as a timeline or exported as a one-second-per-entry summary video.
+Local-first project journal: a project is a folder on disk, each entry is a dated sentence plus a picture, viewable as a timeline and, one day, exportable as a one-second-per-entry summary video.
 
 ## Rules
 
@@ -17,7 +17,7 @@ Local-first project journal: a project is a folder on disk, each entry is a date
 - **Every date derived from a timestamp goes through `journal_date` in `dates.rs`.** A journal day runs 05:00 → 04:59 local, so an entry written at 01:00 belongs to the previous day. That governs a new entry's default date, `start_date`, and reading an entry that has no `date:` of its own. Never take a calendar date off a timestamp directly.
 - **Never convert to UTC before extracting a date.** `created` carries a local offset and that offset is load-bearing — an entry keeps its original local meaning when read on a machine in another timezone.
 - **Nothing is ever overwritten or deleted without the user asking.** Filename clashes go through `unique_path` and keep both files. Deletions go to the Recycle Bin via the `trash` crate, never `fs::remove_file`.
-- **Video frames are drawn on a canvas**, which has no layout engine. Anything added to an entry card must be reproducible there, or it will silently vanish from exports.
+- **An entry card may contain anything the page can draw.** The video export used to constrain it — frames were drawn on a `<canvas>`, which has no layout engine, so anything on a card had to be reproducible there or it vanished from the export. That code is gone and the export is coming back rendered by other means; see [ideas/video-export.md](ideas/video-export.md). Whatever renders the frames next accommodates the card, not the other way round.
 
 ## Git
 

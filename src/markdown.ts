@@ -1,25 +1,24 @@
-// Inline Markdown, parsed once for both the things that draw it.
+// Markdown in entry notes and project names.
 //
-// `renderInline` builds DOM for the timeline, the viewer and the project name;
-// `video.ts` paints the same runs on the export canvas. Sharing the parse is
-// what stops the page and the video drifting apart.
+// Three views of one source, and one scanner behind all three:
 //
-// **Inline only** — bold, italic, code, strikethrough. Not headings, lists or
-// blockquotes, and the reason is the video rather than the page. Timeline cards
-// are HTML and could render anything; frames are drawn on a `<canvas>`, which
-// has no layout engine, so a block element would mean hand-implementing bullets,
-// indentation and margin collapsing inside the frame renderer. Inline runs are
-// tractable because each one is a `ctx.font` variant measured with `measureText`.
-// Rendering formatting on the timeline and silently dropping it from the export
-// would be worse than not offering it at all — the export is meant to be what
-// you saw.
+// - `renderBlocks` — the note as it reads. Headings, lists and paragraphs,
+//   markers gone. What a card and the viewer show.
+// - `highlight` — the note as it is written. Every character of the source is
+//   still there, the markers dimmed and the text they mark already styled, the
+//   way a Markdown file looks in an editor. What the editing fields show.
+// - `plainText` — the words alone, for an `alt`, a title, a filename.
 //
-// Hand-rolled rather than `marked`: the whole grammar is four delimiters, where
-// a CommonMark library would have to be argued out of every block construct it
-// knows, and each one it produced would be a hole in the frame renderer. The
-// cost is the flanking rules below, which are the only subtle part — and they
-// matter here more than the rest of CommonMark does, because `2 * 3` and
-// `entry_editor.ts` are things people write in a note.
+// Hand-rolled rather than a CommonMark library, and `highlight` is the reason.
+// A library turns source into HTML and throws the source away; this needs the
+// source kept, with styling that points into it. Everything else follows from
+// the scanner emitting the markers as tokens instead of consuming them: drop
+// them and you have the reading view, keep them and you have the editing one.
+//
+// Not supported, and each one deliberately: nested lists, links, images,
+// tables, blockquotes, code fences, footnotes, thematic breaks. A day's note is
+// a sentence and sometimes a short list. Every one of these is a thing to
+// render in three places and to explain to someone who typed it by accident.
 
 /** A stretch of text carrying one set of emphases. */
 export interface Run {
@@ -32,6 +31,20 @@ export interface Run {
 
 type Style = Omit<Run, "text">;
 
+/**
+ * What the scanner emits.
+ *
+ * A marker is a delimiter — `**`, a backtick, the backslash of an escape — and
+ * carries the style it turns on, so the asterisks of `**bold**` come out bold
+ * themselves. That is what makes the editing view read as one phrase rather
+ * than as punctuation with words in between.
+ */
+interface Token {
+  text: string;
+  style: Style;
+  marker: boolean;
+}
+
 const PLAIN: Style = {
   bold: false,
   italic: false,
@@ -40,8 +53,8 @@ const PLAIN: Style = {
 };
 
 /**
- * The delimiters, longest first so that `**` is never read as two `*` and
- * `***` is never read as `**` followed by a stray one.
+ * The emphasis delimiters, longest first so that `**` is never read as two `*`
+ * and `***` is never read as `**` and a stray one.
  */
 const DELIMITERS: { mark: string; adds: Partial<Style> }[] = [
   { mark: "***", adds: { bold: true, italic: true } },
@@ -53,51 +66,237 @@ const DELIMITERS: { mark: string; adds: Partial<Style> }[] = [
   { mark: "_", adds: { italic: true } },
 ];
 
-/** The source as a flat list of styled runs, in order. */
-export function parseInline(source: string): Run[] {
-  return merge(scan(source, PLAIN));
-}
+// --- blocks ---------------------------------------------------------------
 
-/** The text without its markers: for an `alt`, a title, a filename, a toast. */
-export function plainText(source: string): string {
-  return parseInline(source)
-    .map((run) => run.text)
-    .join("");
-}
+export type Block =
+  | { kind: "heading"; level: number; text: string }
+  | { kind: "paragraph"; text: string }
+  | { kind: "list"; ordered: boolean; start: number; items: string[] };
 
 /**
- * Whether the source and what it renders to are different text.
+ * The line shapes. Each keeps its parts as separate groups, because `highlight`
+ * has to put the line back together exactly as it was typed.
  *
- * Which is the question "is there any markup here at all" — a name or a note
- * with none can be shown and edited as the same string, and the places that
- * swap between the two use this to leave the common case alone.
+ * A space after the marker is required throughout, and that is what keeps
+ * `*italic*` at the start of a line from being a bullet.
  */
-export function hasMarkup(source: string): boolean {
-  return plainText(source) !== source;
+const HEADING = /^(#{1,6})([ \t]+)(.*)$/;
+const BULLET = /^([ \t]*)([-*+])([ \t]+)(.*)$/;
+const NUMBERED = /^([ \t]*)(\d{1,9}[.)])([ \t]+)(.*)$/;
+
+/**
+ * The source as blocks.
+ *
+ * A paragraph keeps the line breaks inside it rather than folding them into
+ * spaces the way Markdown proper would: someone who pressed Enter in a note
+ * meant it, and the card has always shown it. `white-space: pre-wrap` on the
+ * paragraph is the other half of that.
+ */
+export function parseBlocks(source: string): Block[] {
+  const blocks: Block[] = [];
+  let paragraph: string[] = [];
+
+  const flush = (): void => {
+    if (paragraph.length > 0) {
+      blocks.push({ kind: "paragraph", text: paragraph.join("\n") });
+    }
+    paragraph = [];
+  };
+
+  for (const line of source.split(/\r?\n/)) {
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+
+    const heading = HEADING.exec(line);
+    if (heading) {
+      flush();
+      blocks.push({
+        kind: "heading",
+        level: heading[1].length,
+        text: heading[3].trim(),
+      });
+      continue;
+    }
+
+    const bullet = BULLET.exec(line);
+    const numbered = bullet ? null : NUMBERED.exec(line);
+    const item = bullet ?? numbered;
+    if (item) {
+      flush();
+      const ordered = numbered !== null;
+      const last = blocks[blocks.length - 1];
+      // A run of items of the same kind is one list; switching between bullets
+      // and numbers starts another, because the two are different lists.
+      if (last?.kind === "list" && last.ordered === ordered) {
+        last.items.push(item[4]);
+      } else {
+        blocks.push({
+          kind: "list",
+          ordered,
+          start: ordered ? Number.parseInt(item[2], 10) : 1,
+          items: [item[4]],
+        });
+      }
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+  flush();
+  return blocks;
 }
 
-/** The runs as DOM. Empty source gives an empty fragment. */
+/** The blocks as DOM: what a card and the viewer show. */
+export function renderBlocks(source: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  for (const block of parseBlocks(source)) {
+    fragment.append(blockElement(block));
+  }
+  return fragment;
+}
+
+function blockElement(block: Block): HTMLElement {
+  if (block.kind === "heading") {
+    // `h3` and down, never `h1`: the project's name is the page's `h1`, and a
+    // card is inside it. Levels 4, 5 and 6 all land on `h6`, which is a
+    // distinction nobody writing a day's note is drawing.
+    const node = document.createElement(
+      `h${Math.min(6, block.level + 2)}` as "h3",
+    );
+    node.className = "md__heading";
+    node.append(renderInline(block.text));
+    return node;
+  }
+
+  if (block.kind === "list") {
+    const list = document.createElement(block.ordered ? "ol" : "ul");
+    list.className = "md__list";
+    // A list that starts at 3 is numbered from 3, so `<ol>` is told where the
+    // numbers the user typed began.
+    if (list instanceof HTMLOListElement && block.start !== 1) {
+      list.start = block.start;
+    }
+    for (const item of block.items) {
+      const node = document.createElement("li");
+      node.append(renderInline(item));
+      list.append(node);
+    }
+    return list;
+  }
+
+  const node = document.createElement("p");
+  node.className = "md__paragraph";
+  node.append(renderInline(block.text));
+  return node;
+}
+
+// --- the editing view ------------------------------------------------------
+
+/**
+ * The source with its markers still in it, dimmed, and the text they mark
+ * already styled.
+ *
+ * Every character of `source` comes out, in order, so the result can sit under
+ * a caret: this is what the editing fields show, and what makes them show
+ * formatting without hiding the Markdown that produces it.
+ */
+export function highlight(source: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const lines = source.split("\n");
+
+  lines.forEach((line, index) => {
+    if (index > 0) fragment.append(document.createTextNode("\n"));
+    fragment.append(highlightLine(line));
+  });
+  return fragment;
+}
+
+function highlightLine(line: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+
+  const heading = HEADING.exec(line);
+  if (heading) {
+    fragment.append(markerNode(heading[1] + heading[2]));
+    const rest = document.createElement("span");
+    rest.className = `md__heading-ink md__heading-ink--${heading[1].length}`;
+    rest.append(highlightInline(heading[3]));
+    fragment.append(rest);
+    return fragment;
+  }
+
+  const bullet = BULLET.exec(line);
+  const item = bullet ?? NUMBERED.exec(line);
+  if (item) {
+    fragment.append(markerNode(item[1] + item[2] + item[3]));
+    fragment.append(highlightInline(item[4]));
+    return fragment;
+  }
+
+  fragment.append(highlightInline(line));
+  return fragment;
+}
+
+/** One inline stretch, markers included. */
+function highlightInline(source: string): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  for (const token of scan(source, PLAIN)) {
+    const node = styled(token.text, token.style);
+    fragment.append(token.marker ? dim(node) : node);
+  }
+  return fragment;
+}
+
+function markerNode(text: string): HTMLElement {
+  const node = document.createElement("span");
+  node.className = "md__mark";
+  node.textContent = text;
+  return node;
+}
+
+function dim(inner: Node): HTMLElement {
+  const node = document.createElement("span");
+  node.className = "md__mark";
+  node.append(inner);
+  return node;
+}
+
+// --- the reading view of one inline stretch --------------------------------
+
+/** A single inline stretch as runs: no blocks, markers dropped. */
+export function parseInline(source: string): Run[] {
+  return merge(
+    scan(source, PLAIN)
+      .filter((token) => !token.marker)
+      .map((token) => ({ text: token.text, ...token.style })),
+  );
+}
+
+/** A single inline stretch as DOM, markers dropped. */
 export function renderInline(source: string): DocumentFragment {
   const fragment = document.createDocumentFragment();
-  for (const run of parseInline(source)) fragment.append(asElement(run));
+  for (const run of parseInline(source)) {
+    fragment.append(styled(run.text, run));
+  }
   return fragment;
 }
 
 /**
- * One run, wrapped in the tags its emphases call for.
+ * Text wrapped in the tags its emphases call for.
  *
  * `code` goes innermost, so emphasis around a code span reads as emphasis on
  * the span rather than as a bolder monospace.
  */
-function asElement(run: Run): Node {
+function styled(text: string, style: Style): Node {
   const wrappers = [
-    [run.code, "code"],
-    [run.italic, "em"],
-    [run.strike, "s"],
-    [run.bold, "strong"],
+    [style.code, "code"],
+    [style.italic, "em"],
+    [style.strike, "s"],
+    [style.bold, "strong"],
   ] as const;
 
-  let node: Node = document.createTextNode(run.text);
+  let node: Node = document.createTextNode(text);
   for (const [wanted, tag] of wrappers) {
     if (!wanted) continue;
     const element = document.createElement(tag);
@@ -107,13 +306,54 @@ function asElement(run: Run): Node {
   return node;
 }
 
-/** Walk `source`, emitting runs; recurses once per nested emphasis. */
-function scan(source: string, style: Style): Run[] {
-  const runs: Run[] = [];
+// --- plain text -----------------------------------------------------------
+
+/**
+ * The words alone: for an `alt`, a title, a toast, a filename.
+ *
+ * Blocks are joined with a single space rather than with their line breaks,
+ * because every caller of this wants one line of text.
+ */
+export function plainText(source: string): string {
+  return parseBlocks(source)
+    .flatMap((block) =>
+      block.kind === "list" ? block.items : [block.text],
+    )
+    // A paragraph's own line breaks go too: one line means one line.
+    .map((text) => plainInline(text).replace(/\s+/g, " "))
+    .join(" ")
+    .trim();
+}
+
+const plainInline = (source: string): string =>
+  scan(source, PLAIN)
+    .filter((token) => !token.marker)
+    .map((token) => token.text)
+    .join("");
+
+/**
+ * Whether the source and what it renders to are different text.
+ *
+ * Which is the question "is there any markup here at all", and is asked only of
+ * a project name — one line, no blocks — where a name with none can be shown
+ * and edited as the same string.
+ */
+export function hasMarkup(source: string): boolean {
+  return plainInline(source) !== source;
+}
+
+// --- the scanner ----------------------------------------------------------
+
+/** Walk `source`, emitting tokens; recurses once per nested emphasis. */
+function scan(source: string, style: Style): Token[] {
+  const tokens: Token[] = [];
   let literal = "";
   const flush = (): void => {
-    if (literal) runs.push({ text: literal, ...style });
+    if (literal) tokens.push({ text: literal, style, marker: false });
     literal = "";
+  };
+  const mark = (text: string, inner: Style): void => {
+    tokens.push({ text, style: inner, marker: true });
   };
 
   let at = 0;
@@ -121,9 +361,12 @@ function scan(source: string, style: Style): Run[] {
     const char = source[at];
 
     // A backslash before punctuation is that punctuation: the way to write
-    // about asterisks in a note.
+    // about asterisks in a note. The backslash is the marker and the character
+    // it protects is text.
     if (char === "\\" && isPunctuation(source[at + 1] ?? "")) {
-      literal += source[at + 1];
+      flush();
+      mark("\\", style);
+      tokens.push({ text: source[at + 1], style, marker: false });
       at += 2;
       continue;
     }
@@ -132,9 +375,12 @@ function scan(source: string, style: Style): Run[] {
       const span = codeSpan(source, at);
       if (span) {
         flush();
+        const inner = { ...style, code: true };
         // Nothing inside a code span is a delimiter, so it is taken whole and
         // not scanned. Backslashes in it are backslashes.
-        runs.push({ text: span.text, ...style, code: true });
+        mark(span.fence, inner);
+        tokens.push({ text: span.text, style: inner, marker: false });
+        mark(span.fence, inner);
         at = span.end;
         continue;
       }
@@ -143,7 +389,10 @@ function scan(source: string, style: Style): Run[] {
     const emphasis = openDelimiter(source, at);
     if (emphasis) {
       flush();
-      runs.push(...scan(emphasis.inner, { ...style, ...emphasis.adds }));
+      const inner = { ...style, ...emphasis.adds };
+      mark(emphasis.mark, inner);
+      tokens.push(...scan(emphasis.inner, inner));
+      mark(emphasis.mark, inner);
       at = emphasis.end;
       continue;
     }
@@ -152,14 +401,14 @@ function scan(source: string, style: Style): Run[] {
     at += 1;
   }
   flush();
-  return runs;
+  return tokens;
 }
 
 /** The emphasis starting at `at`, if one both opens and closes there. */
 function openDelimiter(
   source: string,
   at: number,
-): { inner: string; adds: Partial<Style>; end: number } | null {
+): { mark: string; inner: string; adds: Partial<Style>; end: number } | null {
   for (const { mark, adds } of DELIMITERS) {
     if (!source.startsWith(mark, at)) continue;
     if (!canOpen(source, at, mark)) continue;
@@ -169,6 +418,7 @@ function openDelimiter(
     // the second one and eats them both.
     if (close <= at + mark.length) continue;
     return {
+      mark,
       inner: source.slice(at + mark.length, close),
       adds,
       end: close + mark.length,
@@ -235,16 +485,19 @@ function findClose(source: string, from: number, mark: string): number {
 function codeSpan(
   source: string,
   at: number,
-): { text: string; end: number } | null {
-  const fence = runLength(source, at, "`");
-  let from = at + fence;
+): { fence: string; text: string; end: number } | null {
+  const length = runLength(source, at, "`");
+  const fence = source.slice(at, at + length);
+  let from = at + length;
   while (from < source.length) {
     if (source[from] !== "`") {
       from += 1;
       continue;
     }
     const run = runLength(source, from, "`");
-    if (run === fence) return { text: source.slice(at + fence, from), end: from + run };
+    if (run === length) {
+      return { fence, text: source.slice(at + length, from), end: from + run };
+    }
     from += run;
   }
   return null;

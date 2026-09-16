@@ -6,7 +6,7 @@
 
 A local-first journal for a long project. One picture and one sentence for each day you worked on it, shown as a timeline where the gaps between entries are named as plainly as the entries themselves.
 
-A one-second-per-entry summary video is written and working, but not reachable from the UI yet — see [ideas/ship-video-export.md](ideas/ship-video-export.md) for what it is waiting on.
+A one-second-per-entry summary video is planned and not yet built — see [ideas/video-export.md](ideas/video-export.md) for what it is waiting on.
 
 ## Local-first
 

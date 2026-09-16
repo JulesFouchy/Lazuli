@@ -9,7 +9,7 @@
 import type { Entry, Project } from "./api";
 import { assetUrl } from "./api";
 import { onDateFormatChange } from "./dates";
-import { plainText, renderInline } from "./markdown";
+import { plainText, renderBlocks } from "./markdown";
 import { closeModal, openModal } from "./modal";
 import { dateToggle } from "./timeline";
 import { el } from "./ui";
@@ -191,14 +191,16 @@ function drawCaption(entry: Entry): void {
     el(
       "div",
       { class: "viewer__note" },
+      // A `div`, as on the card and for the same reason: the note can hold a
+      // heading or a list, and a `p` cannot contain either.
       el(
-        "p",
+        "div",
         {
           class: entry.text
             ? "viewer__text"
             : "viewer__text viewer__text--empty",
         },
-        entry.text ? renderInline(entry.text) : "No note yet",
+        entry.text ? renderBlocks(entry.text) : "No note yet",
       ),
     ),
   );

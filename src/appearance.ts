@@ -8,8 +8,10 @@ import {
   BG_PRESETS,
   backgroundColour,
   backgroundColourFor,
+  customColour,
   normaliseHex,
   onAppearanceChange,
+  rememberCustomColour,
   setAccent,
   setBackground,
   setThemeChoice,
@@ -36,24 +38,29 @@ export function openAppearanceDialog(): void {
 
   const themeRow = el("div", { class: "segmented" });
 
-  // What each well shows, which is the last colour chosen *through that well*
-  // rather than the colour in force — see `paintSwatches`. The grounds are kept
-  // per theme, because a ground mixed for paper is not a colour to hold on to
-  // once the page has gone dark.
-  let wellAccent = accentColour();
+  // What each well shows, which is the last colour mixed *in that well* rather
+  // than the colour in force — see `paintSwatches`. It outlives the dialog, so
+  // a well that has been mixed in once opens on that colour rather than on
+  // whichever preset happens to be selected.
+  let wellAccent = customColour("accent") ?? accentColour();
   const wellGround: Record<Theme, string> = {
-    dark: backgroundColourFor("dark"),
-    light: backgroundColourFor("light"),
+    dark: customColour("dark") ?? backgroundColourFor("dark"),
+    light: customColour("light") ?? backgroundColourFor("light"),
   };
 
   const customGround = el("input", {
     class: "swatch swatch--custom",
     type: "color",
-    title: "Any other colour",
+    title: "The colour you mixed. Click to use it, and to change it",
     "aria-label": "Custom background colour",
+    // Not `preventDefault`: the OS picker opens on this same click, which is
+    // the other half of what it is for.
+    onclick: () => setBackground(wellGround[activeTheme()]),
     oninput: (event: Event) => {
-      wellGround[activeTheme()] = (event.target as HTMLInputElement).value;
-      setBackground((event.target as HTMLInputElement).value);
+      const hex = (event.target as HTMLInputElement).value;
+      wellGround[activeTheme()] = hex;
+      rememberCustomColour(activeTheme(), hex);
+      setBackground(hex);
     },
   });
 
@@ -62,11 +69,14 @@ export function openAppearanceDialog(): void {
   const custom = el("input", {
     class: "swatch swatch--custom",
     type: "color",
-    title: "Any other colour",
+    title: "The colour you mixed. Click to use it, and to change it",
     "aria-label": "Custom accent colour",
+    onclick: () => setAccent(wellAccent),
     oninput: (event: Event) => {
-      wellAccent = (event.target as HTMLInputElement).value;
-      setAccent((event.target as HTMLInputElement).value);
+      const hex = (event.target as HTMLInputElement).value;
+      wellAccent = hex;
+      rememberCustomColour("accent", hex);
+      setAccent(hex);
     },
   });
 
@@ -179,4 +189,7 @@ function paintSwatches(
     ),
   );
   well.value = wellHex;
+  // And it reads as chosen when what it holds is what is in force, so the row
+  // has exactly one ring on it however the colour was arrived at.
+  well.dataset.chosen = String(current === normaliseHex(wellHex));
 }

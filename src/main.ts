@@ -39,7 +39,6 @@ import {
   refreshEntryEditor,
   type EditorContext,
 } from "./entry-editor";
-import { openExportDialog } from "./export-dialog";
 import { addDroppedPaths } from "./image-picker";
 import {
   openLightbox,
@@ -47,6 +46,12 @@ import {
   type ViewerContext,
 } from "./lightbox";
 import { hasMarkup, plainText, renderInline } from "./markdown";
+import {
+  caretOffset,
+  markdownInput,
+  placeCaret,
+  type MarkdownInput,
+} from "./md-input";
 import { closeModal, isModalOpen, onModalDismissed } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
@@ -129,48 +134,24 @@ interface NameEdit {
   caret: number;
 }
 
+/** The name field on screen, which `banner` replaces on every render. */
+let nameInput: MarkdownInput | null = null;
+
 /** What the name field holds, if it is the thing with the caret in it. */
 function captureNameEdit(): NameEdit | null {
-  const field = root.querySelector<HTMLElement>(".banner__name");
+  const field = nameInput?.node;
   if (!field || document.activeElement !== field) return null;
   return { source: field.textContent ?? "", caret: caretOffset(field) };
 }
 
 function restoreNameEdit(edit: NameEdit | null): void {
-  const field = root.querySelector<HTMLElement>(".banner__name");
-  if (!edit || !field) return;
-  field.textContent = edit.source;
-  field.focus();
-  placeCaret(field, edit.caret);
-}
-
-/** How many characters of the field are before the caret. */
-function caretOffset(field: HTMLElement): number {
-  const selection = window.getSelection();
-  const length = (field.textContent ?? "").length;
-  if (!selection || selection.rangeCount === 0) return length;
-  const caret = selection.getRangeAt(0);
-  if (!field.contains(caret.endContainer)) return length;
-  // From the start of the field to the caret, as text: the field is a single
-  // text node nearly always, and this does not depend on it being one.
-  const range = document.createRange();
-  range.selectNodeContents(field);
-  range.setEnd(caret.endContainer, caret.endOffset);
-  return range.toString().length;
-}
-
-function placeCaret(field: HTMLElement, at: number): void {
-  const range = document.createRange();
-  const text = field.firstChild;
-  if (text instanceof Text) {
-    range.setStart(text, Math.min(at, text.length));
-  } else {
-    range.selectNodeContents(field);
-  }
-  range.collapse(true);
-  const selection = window.getSelection();
-  selection?.removeAllRanges();
-  selection?.addRange(range);
+  // A different field from the one captured from: `render` has run in between
+  // and `banner` has put a new one here.
+  if (!edit || !nameInput) return;
+  nameInput.setValue(edit.source);
+  nameInput.showValue();
+  nameInput.focus();
+  placeCaret(nameInput.node, edit.caret);
 }
 
 function launchView(): HTMLElement {
@@ -294,51 +275,56 @@ function projectView(project: Project): HTMLElement {
 function banner(project: Project): HTMLElement {
   const cover = project.meta.cover;
 
-  const nameField = el("h1", {
-    class: "banner__name",
-    contenteditable: "true",
-    title: "The project's name. Markdown works here",
-  });
-  nameField.replaceChildren(renderInline(project.meta.name));
-
-  nameField.addEventListener("click", (event) => event.stopPropagation());
   // Formatted while it is read, the Markdown itself while it is written. The
   // name on disk is `**Trip** to Rome`, and a field that hid that would be a
-  // different thing from the text it saves — but a name with no markup in it is
-  // the same string either way, and swapping that one would only throw away
-  // wherever in it the user just clicked.
-  //
-  // Only when the field is showing the formatted name and nothing else. A
-  // field holding an edit in progress must be left alone, and that is not a
-  // hypothetical ordering: a focus asked for while the window has none is
-  // *deferred* by the browser until the window gets it back, so a render that
-  // put an unsaved name back while the emoji picker had the keyboard arrives
-  // here a good deal later, with that name in the field.
-  nameField.addEventListener("focus", () => {
-    const source = project.meta.name;
-    if (!hasMarkup(source) || nameField.textContent !== plainText(source)) {
-      return;
-    }
-    nameField.textContent = source;
-    placeCaret(nameField, source.length);
+  // different thing from the text it saves.
+  const name = markdownInput({
+    // Still the page's `h1`: it is the name of what you are looking at as much
+    // as it is a field you can type in.
+    tag: "h1",
+    class: "banner__name",
+    singleLine: true,
+    // Only when the field is showing the formatted name and nothing else. A
+    // field holding an edit in progress must be left alone, and that is not a
+    // hypothetical ordering: a focus asked for while the window has none is
+    // *deferred* by the browser until the window gets it back, so a render that
+    // put an unsaved name back while the emoji picker had the keyboard arrives
+    // here a good deal later, with that name in the field.
+    //
+    // A name with no markup is the same string in both views, and swapping that
+    // one would only throw away wherever in it the user just clicked.
+    onFocus: () => {
+      const source = project.meta.name;
+      if (!hasMarkup(source) || name.node.textContent !== plainText(source)) {
+        return;
+      }
+      name.showValue();
+      placeCaret(name.node, source.length);
+    },
+    onBlur: (written) => {
+      const trimmed = written.trim();
+      if (trimmed && trimmed !== project.meta.name) {
+        void setProjectName(trimmed).catch((err) =>
+          toastError("Could not rename the project", err),
+        );
+      }
+      // Back to the formatted name either way. The rescan a save triggers
+      // would redraw this too, but not for another moment.
+      name.showInstead(renderInline(trimmed || project.meta.name));
+    },
+    onKeydown: (event) => {
+      // Enter is "done" on a one-line field, and `singleLine` has already
+      // stopped it inserting a newline.
+      if (event.key === "Enter") name.node.blur();
+    },
   });
-  nameField.addEventListener("blur", () => {
-    const name = nameField.textContent?.trim() ?? "";
-    if (name && name !== project.meta.name) {
-      void setProjectName(name).catch((err) =>
-        toastError("Could not rename the project", err),
-      );
-    }
-    // Back to the formatted name either way. The rescan a save triggers would
-    // redraw this too, but not for another moment.
-    nameField.replaceChildren(renderInline(name || project.meta.name));
-  });
-  nameField.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      nameField.blur();
-    }
-  });
+  name.setValue(project.meta.name);
+  name.showInstead(renderInline(project.meta.name));
+
+  const nameField = name.node;
+  nameField.title = "The project's name. Markdown works here";
+  nameField.addEventListener("click", (event) => event.stopPropagation());
+  nameInput = name;
 
   return el(
     "header",
@@ -400,10 +386,6 @@ function timelineSection(project: Project): HTMLElement {
         text: "New entry",
         onclick: () => void addEntry(),
       }),
-      // No "Export video…" button: the export needs an ffmpeg the app has not
-      // decided how to ship yet, so it would offer the user a feature that
-      // fails on any machine without one on PATH. The dialog and the encoder
-      // below it are intact — see ideas/ship-video-export.md.
       el("span", { class: "timeline__spacer" }),
       el("button", {
         class: "button button--ghost",
@@ -715,7 +697,6 @@ type Modal =
   | { kind: "view"; id: string }
   | { kind: "cover" }
   | { kind: "start-date" }
-  | { kind: "export" }
   | { kind: "new-project" }
   | { kind: "appearance" };
 
@@ -775,7 +756,6 @@ function isPlace(value: unknown): value is Place {
   return (
     kind === "cover" ||
     kind === "start-date" ||
-    kind === "export" ||
     kind === "new-project" ||
     kind === "appearance"
   );
@@ -1051,9 +1031,6 @@ function showModal(modal: Modal): void {
       break;
     case "start-date":
       if (project) openStartDateEditor(project);
-      break;
-    case "export":
-      if (project) openExportDialog(project);
       break;
     case "new-project":
       openNewProjectDialog(projectCreated);

@@ -8,6 +8,10 @@ timeline partagéé, version décentralisée sans serveur où juste on s'envoie 
 
 add "folders", as tabs to the right of "recent", which becomes default, and on hover you have a + button to add your own tabs if you want to organize. And you can drag and drop a project onto a tab to move it (eg for me i could have my Wip and my Done tabs)
 
+keep projects in fixed order, and drag to reorder them
+
+CTRL+; shortcut to show corrections of spell checker
+
 make the UI juicy
 
 tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"

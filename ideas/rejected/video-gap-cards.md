@@ -1,7 +1,7 @@
 ---
 summary: Rejected — title cards between entries that are not on consecutive days
 decided: 2026-09-08
-affects: [src/video.ts]
+affects: [ideas/video-export.md]
 ---
 
 # Gap cards in the exported video
