@@ -128,8 +128,8 @@ pub struct NewProjectTarget {
 }
 
 #[tauri::command]
-pub fn new_project_target(parent: PathBuf, name: String) -> NewProjectTarget {
-    let path = parent.join(folder_name_for(&name));
+pub fn new_project_target(parent: PathBuf, folder: String) -> NewProjectTarget {
+    let path = parent.join(folder_name_for(&folder));
     NewProjectTarget {
         problem: store::new_project_problem(&path),
         path,
@@ -138,16 +138,21 @@ pub fn new_project_target(parent: PathBuf, name: String) -> NewProjectTarget {
 
 /// Create a project in a *new* folder inside `parent`, named after the project.
 ///
-/// The folder name is derived here rather than taken from the frontend, so it
-/// is the same string [`new_project_target`] previewed.
+/// `folder` and `name` are both given, and are the same string only when the
+/// name is plain. A project's name is Markdown — `**Test** Test` — and a folder
+/// should be called what that name *reads* as rather than how it is written;
+/// only the frontend can strip the markers, so only the frontend can say what
+/// the folder is called. Sanitising it for the filesystem still happens here,
+/// so the path is the one [`new_project_target`] previewed from the same string.
 #[tauri::command]
 pub async fn create_project(
     app: AppHandle,
     parent: PathBuf,
+    folder: String,
     name: String,
     start_date: NaiveDate,
 ) -> CmdResult<Project> {
-    let path = parent.join(folder_name_for(&name));
+    let path = parent.join(folder_name_for(&folder));
     Ok(off_thread(move || {
         store::create_project(&path, &name, start_date)?;
         remember_projects_dir(&app, &path);
@@ -265,20 +270,32 @@ fn root_of(open: &OpenProject) -> PathBuf {
 
 /// Rename the project, and the folder it lives in along with it.
 ///
+/// `name` is what the project is called and goes in `lazuli.yaml`; `folder` is
+/// what that name reads as with its Markdown markers stripped, and is what the
+/// folder is called. `was_folder` is the same for the name being replaced,
+/// which is what says whether the folder on disk was named after the project at
+/// all — see [`follow_with_folder`]. Both come from the frontend because
+/// stripping Markdown is the frontend's to do.
+///
 /// Async because the rename closes and reopens the project, which waits for the
 /// watcher thread.
 #[tauri::command]
-pub async fn set_project_name(app: AppHandle, name: String) -> CmdResult<()> {
+pub async fn set_project_name(
+    app: AppHandle,
+    name: String,
+    folder: String,
+    was_folder: String,
+) -> CmdResult<()> {
     Ok(off_thread(move || {
         let state = app.state::<AppState>();
-        let (root, was_called) = with_project(&app, &state, |open| {
+        let root = with_project(&app, &state, |open| {
             let root = root_of(open);
             let mut meta = store::read_meta(&root)?;
-            let was_called = std::mem::replace(&mut meta.name, name.clone());
+            meta.name = name.clone();
             store::write_meta(&root, &meta)?;
-            Ok((root, was_called))
+            Ok(root)
         })?;
-        follow_with_folder(&app, &root, &was_called, &name)
+        follow_with_folder(&app, &root, &was_folder, &folder)
     })
     .await?)
 }
@@ -289,6 +306,9 @@ pub async fn set_project_name(app: AppHandle, name: String) -> CmdResult<()> {
 /// kept at the root of its own repository, or in a folder the user named
 /// themselves, stays where it is: typing in the title is a rename of the
 /// journal, and it should not silently rename someone's source tree.
+///
+/// Both names here are folder names — the project's name with its Markdown
+/// stripped — and not the names in `lazuli.yaml`.
 fn follow_with_folder(app: &AppHandle, root: &Path, was_called: &str, name: &str) -> Result<()> {
     let Some(parent) = root.parent() else {
         return Ok(());

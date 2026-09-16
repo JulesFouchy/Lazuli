@@ -304,7 +304,7 @@ function banner(project: Project): HTMLElement {
     onBlur: (written) => {
       const trimmed = written.trim();
       if (trimmed && trimmed !== project.meta.name) {
-        void setProjectName(trimmed).catch((err) =>
+        void setProjectName(trimmed, project.meta.name).catch((err) =>
           toastError("Could not rename the project", err),
         );
       }

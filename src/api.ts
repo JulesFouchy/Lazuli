@@ -3,8 +3,9 @@
 // The shapes here mirror `src-tauri/src/model.rs`. Rust derives the journal
 // date and day number, so the UI never recomputes the 5am rule.
 
-import { invoke } from "@tauri-apps/api/core";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+
+import { plainText } from "./markdown";
 
 export interface ProjectMeta {
   name: string;
@@ -61,22 +62,44 @@ export const openProject = (path: string) =>
   invoke<Project>("open_project", { path });
 
 export interface NewProjectTarget {
-  /** The folder that would be created: `parent` plus a name derived from the project's. */
+  /** The folder that would be created: `parent` plus the project's `folderName`. */
   path: string;
   /** Why that folder cannot be used, or null when it can. */
   problem: string | null;
 }
 
+/**
+ * What a project called `name` should have as its folder.
+ *
+ * A name is Markdown, and a folder should be called what the name *reads* as:
+ * `**Test** Test` belongs in `Test Test`, not in a folder with the asterisks
+ * still in it. Rust cannot work this out — it knows nothing about Markdown — so
+ * every command that touches the folder is told, and it is worked out here
+ * rather than at each call so that none of them can forget.
+ *
+ * Rust still sanitises whatever it is given for the filesystem.
+ */
+const folderName = (name: string): string => plainText(name);
+
 /** Preview the folder a new project would land in, without creating anything. */
 export const newProjectTarget = (parent: string, name: string) =>
-  invoke<NewProjectTarget>("new_project_target", { parent, name });
+  invoke<NewProjectTarget>("new_project_target", {
+    parent,
+    folder: folderName(name),
+  });
 
 /** Create a project in a new folder inside `parent`. `startDate` is `YYYY-MM-DD`. */
 export const createProject = (
   parent: string,
   name: string,
   startDate: string,
-) => invoke<Project>("create_project", { parent, name, startDate });
+) =>
+  invoke<Project>("create_project", {
+    parent,
+    folder: folderName(name),
+    name,
+    startDate,
+  });
 
 export const closeProject = () => invoke<void>("close_project");
 
@@ -103,8 +126,20 @@ export const trashProject = (path: string) =>
 export const restoreProject = (path: string, index: number) =>
   invoke<string>("restore_project", { path, index });
 
-export const setProjectName = (name: string) =>
-  invoke<void>("set_project_name", { name });
+/**
+ * Rename the project, and the folder it lives in if the folder was named after
+ * it.
+ *
+ * `wasCalled` is the name being replaced. Rust needs it to tell a folder it
+ * named itself from one the user named — and needs it as a *folder* name, for
+ * the same reason the new one is a folder name.
+ */
+export const setProjectName = (name: string, wasCalled: string) =>
+  invoke<void>("set_project_name", {
+    name,
+    folder: folderName(name),
+    wasFolder: folderName(wasCalled),
+  });
 
 export const setStartDate = (startDate: string) =>
   invoke<void>("set_start_date", { startDate });

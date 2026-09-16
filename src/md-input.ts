@@ -27,10 +27,10 @@ import { el } from "./ui";
  * where a heading or a list has nowhere to go.
  */
 export const MARKDOWN_HINT =
-  "Markdown: **bold**, *italic*, `code`, ~~struck~~, # headings and - lists.";
+  "Markdown: **bold**, *italic*, `code`, ~~struck~~, # headings and - lists";
 
 export const MARKDOWN_HINT_INLINE =
-  "Markdown: **bold**, *italic*, `code` and ~~struck~~.";
+  "Markdown: **bold**, *italic*, `code` and ~~struck~~";
 
 export interface MarkdownInputOptions {
   /**
