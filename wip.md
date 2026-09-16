@@ -16,6 +16,8 @@ default light color should be 198, 218, 251, and maybe also adapt accent color t
 
 the custom color picker should not lose color when we move back to a predefined swatch color
 
+when going forward to a project that has since been deleted, it gives an error, it should just do nothing
+
 - release version 1.0
 - setup store to sell for 1€
 
