@@ -2,7 +2,7 @@
 
 transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
 
-tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès
+tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"
 
 we should see the current date at the top
 
@@ -11,6 +11,8 @@ the button shouldn't say "Open folder..." but "Open project...", or "Import proj
 ctrl + scroll to zoom in/out when in project page to better see the whole timeline (and a popup you canc click to reset zoom to normal) Maybe it just scales down the image, and when too small we switch to the mode where there is the small square image to the left, and the sentence to the right, which is a nice view mode in and of itself
 
 - consider using this as the icon : "C:\Users\fouch\Downloads\ChatGPT Image Sep 15, 2026, 10_13_29 PM.png"
+
+default light color should be 198, 218, 251, and maybe also adapt 
 
 - release version 1.0
 - setup store to sell for 1€
