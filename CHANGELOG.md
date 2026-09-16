@@ -4,7 +4,7 @@ What changed in each release, for the person using Lazuli rather than the person
 
 Each version's section becomes the release notes verbatim, so write it before cutting the release — `scripts/release.mjs` refuses a version that has no section here, or one whose heading still says "unreleased". Headings are `## <version> — <date>`.
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-09-16
 
 - **Notes and project names take Markdown.** `**bold**`, `*italic*`, `` `code` ``, `~~struck~~`, `#` headings and `-` or `1.` lists, on the timeline and in the viewer. Nested lists, links, tables and quotes are not in: a day's note is a sentence and sometimes a short list.
 - **Every field that holds Markdown shows it working as you type it** — the note, the project's name in its banner, and the name in the New project dialog. The `*` and the `#` stay where you put them, dimmed, and the text they mark is already bold, italic or a heading: the way a Markdown file looks in an editor rather than a preview beside one. A card and the viewer show it finished, markers gone. The name in the banner does both: formatted until you click into it, the Markdown itself while you are in it. Double-clicking a word selects the word and not the markers around it.
@@ -19,6 +19,7 @@ Each version's section becomes the release notes verbatim, so write it before cu
 - Going forward to a project you have since deleted does nothing, rather than reporting an error about a folder you threw away yourself.
 - Leaving a project for the Recent list stays on the Recent list. Editing a file in that project's folder from outside the app used to put the project back on screen a moment later.
 - **The video export is gone for now, and will come back.** It could not be reached from the UI and had never worked end to end; the version that returns will be rendered by a tool of its own. Nothing in your projects changes — an entry was always a date, a sentence and a picture, which is all a frame needs.
+- **The title bar comes down whenever you reach the top edge.** On a window that opened maximised it often did not come at all, and where it did it stopped beside the scrollbar instead of passing over it. The strip that summons it is wider, so it no longer competes with the pixels Windows keeps for resizing, and the bar itself is the three buttons and nothing else — the name and the icon were repeating what the window already says.
 - Bold is properly bold and italic is a real italic. The app bundled two weights of its typeface and no italic at all, so `**bold**` in a project's name — already a heading, already heavy — changed nothing, and `*italic*` was an upright letter the browser sheared. It now bundles the whole weight range, and the drawn italic alongside it.
 
 ## 0.2.0 — 2026-09-16
