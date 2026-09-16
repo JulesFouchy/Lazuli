@@ -2112,12 +2112,13 @@ dependencies = [
 
 [[package]]
 name = "lapis"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
  "notify",
  "notify-debouncer-full",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",

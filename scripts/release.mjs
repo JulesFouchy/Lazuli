@@ -47,12 +47,21 @@ if (run("git", ["rev-parse", "--abbrev-ref", "HEAD"]) !== "main") {
   fail("not on main. Releases are cut from main.");
 }
 
-// A dirty tree would ride along in the version commit below, which names no
-// paths — this is the one place in this repo where that is the right shape,
-// because a release must be a commit of exactly the version bump.
-if (run("git", ["status", "--porcelain"])) {
-  fail("the working tree has changes. Commit or stash them first:\n" +
-    run("git", ["status", "--short"]));
+// The files the bump rewrites, and the lockfile that follows Cargo.toml. The
+// version commit names exactly these, so anything else uncommitted in the tree
+// — the normal state here — stays out of the release and is left alone. What
+// must not happen is an unrelated edit to one of *these* being swept in, so
+// those four have to be clean before the bump.
+const VERSION_FILES = [
+  "package.json",
+  "src-tauri/tauri.conf.json",
+  "src-tauri/Cargo.toml",
+  "src-tauri/Cargo.lock",
+];
+const dirty = run("git", ["status", "--porcelain", "--", ...VERSION_FILES]);
+if (dirty) {
+  fail(`these hold the version and have uncommitted changes; commit them first:
+${dirty}`);
 }
 
 // The section that becomes the release notes. Checked here as well as in CI,
@@ -84,8 +93,8 @@ step(`  version → ${version}`, "node", ["scripts/set-version.mjs", version]);
 // Normally the line above just changed three files. On a first release, or on
 // a re-run after the bump was committed by hand, it changed nothing and there
 // is no commit to make — which is fine, as long as the tag still gets cut.
-if (dryRun || run("git", ["status", "--porcelain"])) {
-  step("  commit", "git", ["commit", "-am", `Lapis ${version}`]);
+if (dryRun || run("git", ["status", "--porcelain", "--", ...VERSION_FILES])) {
+  step("  commit", "git", ["commit", "-m", `Lapis ${version}`, "--", ...VERSION_FILES]);
 } else {
   console.log(`  commit — nothing to commit, HEAD is already ${version}`);
 }
@@ -103,5 +112,5 @@ Roughly fifteen minutes.
   watch it:   gh run watch --repo JulesFouchy/Lapis
   the result: https://github.com/JulesFouchy/lapis-releases/releases
 
-Once it is published, every existing install picks it up silently the next time
-it is closed.`);
+Once it is published, every existing install picks it up silently: downloaded
+during a session, applied between sessions.`);

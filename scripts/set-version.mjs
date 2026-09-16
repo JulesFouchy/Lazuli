@@ -20,6 +20,10 @@ const FILES = [
   // Anchored to the `[package]` block's own `version`, which is the first one
   // in the file; a dependency's `version = "2"` further down must not match.
   { path: "src-tauri/Cargo.toml", pattern: /^(version = ")([^"]+)(")/m },
+  // Cargo would rewrite this on its next run anyway, but "its next run" was
+  // after the release commit, so the committed lockfile lagged the version by
+  // one release. Anchored on the package name so no dependency can match.
+  { path: "src-tauri/Cargo.lock", pattern: /^(name = "lapis"\s+version = ")([^"]+)(")/m },
 ];
 
 const next = process.argv[2];

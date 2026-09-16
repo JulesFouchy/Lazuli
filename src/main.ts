@@ -51,7 +51,6 @@ import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
 import { displayedEntries, renderTimeline } from "./timeline";
 import { clear, el, isEditing, toast, toastError } from "./ui";
-import { startUpdates } from "./updates";
 
 function appRoot(): HTMLElement {
   const node = document.getElementById("app");
@@ -1223,11 +1222,6 @@ onDateFormatChange(render);
 // the root element; this adds the accent's derived shades and starts following
 // the OS while the choice is `system`.
 startTheme();
-
-// Checks for a new version a few seconds from now, downloads it in the
-// background if there is one, and installs it as the window closes. Says
-// nothing at any point.
-startUpdates();
 
 // Pick up where the last session left off. The first paint is only drawn here
 // when it is the launch screen; a project is drawn once it has loaded, rather

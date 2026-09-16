@@ -27,6 +27,9 @@ thiserror = "2"
 notify = "7"
 notify-debouncer-full = "0.4"
 trash = "5"
+# Already in the tree through tauri. Compares a downloaded update's version
+# with the running one, at the launch that applies it.
+semver = "1"
 
 [target.'cfg(windows)'.dependencies]
 # Already in the tree through tauri; pinned to the same version so it is not

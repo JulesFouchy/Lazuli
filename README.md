@@ -74,13 +74,13 @@ Write the `## 0.2.0` section in [CHANGELOG.md](CHANGELOG.md) first — it become
 node scripts/release.mjs 0.2.0
 ```
 
-That is the whole thing. It refuses to start if you are not on `main`, if the tree is dirty, if the tag exists, or if the CHANGELOG has nothing to say; otherwise it sets the version in all three manifests, commits, tags and pushes. `--dry-run` prints what it would do.
+That is the whole thing. It refuses to start if you are not on `main`, if any of the files that hold the version has uncommitted changes, if the tag exists, or if the CHANGELOG has nothing to say; otherwise it sets the version in all three manifests, commits exactly those files, tags and pushes. Everything else uncommitted in the tree is left alone and stays out of the release. `--dry-run` prints what it would do.
 
 Everything after that is unattended. [`.github/workflows/release.yml`](.github/workflows/release.yml) builds for Windows, macOS (Apple Silicon and Intel) and Linux, signs each installer with the updater key, uploads them to the public [`lapis-releases`](https://github.com/JulesFouchy/lapis-releases) repo as a draft, and publishes that draft once all four have landed. About fifteen minutes.
 
 The draft matters: the updater reads `latest.json` from the *latest published* release, so publishing early would offer everyone an update while three of the four installers were still building.
 
-Once it publishes, every install picks the new version up on its own — downloaded quietly in the background, installed as the app closes, running the next time it opens.
+Once it publishes, every install picks the new version up on its own: downloaded quietly in the background during a session, applied between sessions, never with a prompt. On Windows it is applied at the start of the next launch, before the window appears, because a running executable cannot be replaced and doing it at close raced with the user reopening the app; on macOS and Linux the files are swapped in place as the window closes. Either way the version changes only between sessions.
 
 ### What the repository needs, once
 

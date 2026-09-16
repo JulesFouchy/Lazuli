@@ -10,6 +10,7 @@ pub mod model;
 pub mod paths;
 pub mod store;
 pub mod theme;
+pub mod updates;
 pub mod video;
 pub mod watch;
 
@@ -51,6 +52,11 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
+            // Before the window: on Windows this is where a downloaded update
+            // is applied, and it must happen while there is nothing on screen
+            // to close. See `updates.rs`.
+            updates::at_launch(app.handle());
+
             let dress =
                 theme::dress_for(&commands::appearance_preference(app.handle()));
             // "main" is the label the capabilities file grants permissions to.
@@ -68,8 +74,15 @@ pub fn run() {
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::open_project,
+
+            // Looks for a newer version a few seconds from now, downloads it
+            // in the background if there is one, and says nothing.
+            updates::start(app.handle().clone());
             commands::create_project,
             commands::new_project_target,
+        // Only on macOS and Linux does this do anything: a downloaded update
+        // is applied as the window closes. On Windows it was applied at launch.
+        .on_window_event(updates::on_window_event)
             commands::close_project,
             commands::peek_project,
             commands::recent_projects,

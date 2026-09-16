@@ -4,6 +4,10 @@ What changed in each release, for the person using Lapis rather than the person 
 
 Each version's section becomes the release notes verbatim, so write it before cutting the release — `scripts/release.mjs` refuses a version that has no section here, or one whose heading still says "unreleased". Headings are `## <version> — <date>`.
 
+## 0.1.2 — 2026-09-16
+
+- Updates no longer close Lapis. Before, a new version was installed as you closed the app, and if you opened Lapis again in the few seconds that took, the installer shut it straight back down. Now the download waits on disk and is applied at the start of your next launch, before the window appears — that one launch takes a moment longer, and nothing else changes.
+
 ## 0.1.1 — 2026-09-16
 
 - **F11** puts Lapis fullscreen, and takes it back out. It works from anywhere — the timeline, an open entry, the image viewer.
