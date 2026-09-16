@@ -12,10 +12,19 @@ ctrl + scroll to zoom in/out when in project page to better see the whole timeli
 
 - consider using this as the icon : "C:\Users\fouch\Downloads\ChatGPT Image Sep 15, 2026, 10_13_29 PM.png"
 
-default light color should be 198, 218, 251, and maybe also adapt 
+default light color should be 198, 218, 251, and maybe also adapt accent color to 255, 201, 92
+
+the custom color picker should not lose color when we move back to a predefined swatch color
 
 - release version 1.0
 - setup store to sell for 1€
+
+add to global claude to always use american english spelling
+
+titlebar bug when scrollbar, make it theme color, add icon, nicer font, (nicer icons ?)
+
+make pasting a path work for pasting an image
+
 
 ## Import initial projects
 
