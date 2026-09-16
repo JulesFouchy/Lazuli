@@ -130,7 +130,11 @@ jobs:
         working-directory: src-tauri
 
   build:
-    needs: verify
+    # Both, not just `verify`: a job can read `needs.<job>.outputs` only for
+    # jobs named in its own `needs`. With `verify` alone in the way, the release
+    # notes from `check-version` silently became an empty string, and 0.1.2
+    # went out with no body.
+    needs: [check-version, verify]
     permissions:
       contents: read
     strategy:
