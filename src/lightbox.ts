@@ -165,6 +165,9 @@ function draw(options: { reset?: boolean } = {}): void {
             entry.image,
           ),
           alt: plainText(entry.text) || "Entry illustration",
+          // Until it has loaded there is no `naturalWidth`, and so no
+          // rectangle to give it; this is the first moment there is one.
+          onload: () => applyTransform(),
         }) as HTMLImageElement)
       : null;
     stage.replaceChildren(
@@ -208,11 +211,18 @@ function drawCaption(entry: Entry): void {
 
 // --- zoom and pan ----------------------------------------------------------
 //
-// The picture is laid out by `object-fit: contain`, so the element is the whole
-// stage and the picture sits letterboxed inside it. Magnifying is therefore a
-// transform on the element, and the geometry below is about the picture's own
-// rectangle within it — which is what panning has to be clamped against, and
-// what tells a click on the picture from a click on the bare stage beside it.
+// The stage is whatever the caption leaves, and the picture is the largest
+// rectangle of its own proportions that fits in it. Nothing in the stylesheet
+// can work that rectangle out, so `sizeToPicture` below measures it and gives
+// it to the element: the element is then the picture exactly, which is what
+// lets the stylesheet give it an opaque background without blacking out the
+// letterbox bars either side. That rectangle is also what panning is clamped
+// against, and what tells a click on the picture from a click on the bare
+// stage beside it.
+//
+// Magnifying is a transform on the element, so it leaves that rectangle alone —
+// every measurement here is of the unmagnified picture, and `ZOOM` is applied
+// to it where it matters.
 
 /** Where the picture actually is: its size within the stage, and the stage's. */
 function geometry(): {
@@ -249,8 +259,25 @@ function clampPan(): void {
   viewer.panY = Math.max(-limitY, Math.min(limitY, viewer.panY));
 }
 
+/**
+ * Give the element the picture's rectangle, so the two are the same thing.
+ *
+ * Fills the stage rather than only shrinking to it: a small picture is exactly
+ * the one worth blowing up. Before the picture has loaded there is no rectangle
+ * to give, and the stylesheet's max-widths hold it until there is.
+ */
+function sizeToPicture(): void {
+  const image = viewer?.image;
+  if (!image) return;
+  const geo = geometry();
+  if (!geo) return;
+  image.style.width = `${geo.width}px`;
+  image.style.height = `${geo.height}px`;
+}
+
 function applyTransform(): void {
   if (!viewer) return;
+  sizeToPicture();
   clampPan();
   const { image, body, zoomed, panX, panY } = viewer;
   if (image) {
@@ -402,6 +429,13 @@ function bindPointer(body: HTMLElement): void {
 // outside the window, or with the window losing focus underneath it.
 window.addEventListener("pointerup", endDrag);
 window.addEventListener("blur", endDrag);
+
+// A stage of a different size is a picture of a different size, and the pan it
+// will take is different too. Every other way the stage can change shape goes
+// through `draw`, which ends in the same place.
+window.addEventListener("resize", () => {
+  if (viewer) applyTransform();
+});
 
 /** Magnify about a point, so whatever was under the cursor stays under it. */
 function zoomAt(clientX: number, clientY: number): void {

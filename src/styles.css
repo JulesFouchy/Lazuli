@@ -1221,14 +1221,12 @@ body.dragging * {
 /* --- fullscreen entry viewer --------------------------------------------- */
 
 /* The other dialogs are panels laid over a page you can still read; this one
-   is a picture, and the page behind it is competition. So its backdrop is
-   black in both themes, and opaque: a picture with an alpha channel is
-   composited against whatever is behind it, and anything short of opaque here
-   puts the timeline inside the photograph. Its margin is the viewer's own
-   (below), not the overlay's: the overlay does not take part in dragging, and
-   a magnified picture has to be draggable from every pixel of the window. */
+   is a picture, and the page behind it is competition. So its backdrop goes
+   near-black in both themes. Its margin is the viewer's own (below), not the
+   overlay's: the overlay does not take part in dragging, and a magnified
+   picture has to be draggable from every pixel of the window. */
 .overlay:has(.modal--viewer) {
-  background: #000;
+  background: rgba(0, 0, 0, 0.88);
   padding: 0;
 }
 
@@ -1298,18 +1296,28 @@ body.dragging * {
   cursor: zoom-in;
 }
 
-/* Fills the stage rather than only shrinking to it: a small picture is exactly
-   the one worth blowing up, and `contain` keeps its proportions either way.
-   No ring here — `contain` letterboxes inside the element, so a ring would
-   trace the stage rather than the picture, and the near-black backdrop gives
-   the edge that the card's ring gives on the page. */
+/* Sized in pixels by `lightbox.ts`, to the rectangle the picture actually
+   occupies: the element is the picture and nothing else. Which is what lets
+   the background below be the picture's own, rather than a black slab over
+   the whole stage — `width: 100%` with `object-fit: contain` would letterbox
+   the picture inside a full-stage element, and a background there paints the
+   bars too. The max-widths are for the moment before the picture has loaded
+   and there is no rectangle to give it yet.
+
+   No ring here: the backdrop is near-black, which gives the edge that the
+   card's ring gives on the page. */
 .viewer__image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  /* The element covers its own letterbox bars, so it cannot be the thing that
-     decides what a click meant. Every pointer event goes to the viewer, which
-     works out from the picture's real rectangle whether the click was on it. */
+  max-width: 100%;
+  max-height: 100%;
+  /* Opaque, and under the picture rather than behind the whole viewer: an
+     image with an alpha channel is composited against whatever it is laid on,
+     and the backdrop is deliberately not opaque — without this, a picture that
+     is not quite opaque has the timeline showing through it. */
+  background: #000;
+  /* The picture is never the target of anything: the viewer reads every
+     pointer event itself, working out from the picture's rectangle whether a
+     click was on it or beside it, and a press it does not see is a press the
+     browser is free to turn into a drag of the image file. */
   pointer-events: none;
 }
 
