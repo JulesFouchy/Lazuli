@@ -4,7 +4,7 @@ transparent images background, eg the transition isf demo in coollab timeline, i
 
 pouvoir recadrer une photo / choisir le mod de fit genre stretch, fit avec en background la photo blurée 
 
-timeline partagéé, version décentralisée sans serveur où juste on s'envoie des messages pour se mettre à jour
+timeline partagéé, version décentralisée sans serveur où juste on s'envoie des messages pour se mettre à jour : reconciliation algo : if the image was edited, keep both images in the list of images of the entry, and ask user to choose what the current one should be. For text just ask the user to choose, or edit manually to write the new text. Changing project name is a bit tricky
 
 make the UI juicy
 
@@ -27,7 +27,6 @@ ctrl + scroll to zoom in/out when in project page to better see the whole timeli
 add to global claude to always use american english spelling
 
 
-button to take a picture via webcam
 
 mobile version
 

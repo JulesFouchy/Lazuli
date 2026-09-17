@@ -5,7 +5,9 @@
 // attempts that were kept. Nothing is removed except by an explicit delete.
 
 import { assetUrl, importImageBytes, importImages, trashImage } from "./api";
+import { cameraAvailable, openCamera, stopCamera } from "./camera";
 import { openContextMenu } from "./context-menu";
+import { fileStamp } from "./dates";
 import { imageKey, isDeleting, markDeleting, unmarkDeleting } from "./pending";
 import { el, toast, toastError } from "./ui";
 
@@ -24,27 +26,50 @@ export interface PickerOptions {
 }
 
 export function renderImagePicker(options: PickerOptions): HTMLElement {
-  const grid = el("div", { class: "thumbs" });
+  const zone = el("div", { class: "dropzone" });
 
-  // A thumbnail whose delete is still running is already gone from the page.
-  const filenames = options.filenames.filter(
-    (filename) => !isDeleting(imageKey(options.directory, filename)),
-  );
-  for (const filename of filenames) {
-    grid.append(thumbnail(filename, options));
-  }
+  // Rebuilding the picker leaves any preview that was in it off the page, and
+  // a stream nobody stopped keeps the camera light on.
+  stopCamera();
 
-  const zone = el(
-    "div",
-    { class: "dropzone" },
-    filenames.length > 0
-      ? grid
-      : el("p", { class: "hint", text: "No images yet." }),
-    el("p", {
-      class: "hint",
-      text: "Drop images here, or paste one — a file, a screenshot, or a copied path. Every image you add is kept.",
-    }),
-  );
+  /** Draw the grid, which is also what the camera view closes back to. */
+  const paint = (): void => {
+    const grid = el("div", { class: "thumbs" });
+
+    // A thumbnail whose delete is still running is already gone from the page.
+    const filenames = options.filenames.filter(
+      (filename) => !isDeleting(imageKey(options.directory, filename)),
+    );
+    for (const filename of filenames) {
+      grid.append(thumbnail(filename, options));
+    }
+
+    const takePhoto = el("button", {
+      class: "button camera__open",
+      text: "Take a photo…",
+      onclick: () =>
+        void openCamera(zone, {
+          entryId: options.entryId,
+          onChanged: options.onChanged,
+          // One shot, then the grid: the new picture is chosen, and the rescan
+          // that brings its thumbnail in is on its way.
+          onClosed: paint,
+        }),
+    });
+
+    zone.replaceChildren(
+      filenames.length > 0
+        ? grid
+        : el("p", { class: "hint", text: "No images yet." }),
+      // Nothing to offer on a machine with no camera at all.
+      ...(cameraAvailable() ? [takePhoto] : []),
+      el("p", {
+        class: "hint",
+        text: "Drop images here, or paste one — a file, a screenshot, or a copied path. Every image you add is kept.",
+      }),
+    );
+  };
+  paint();
 
   wireDrop(zone);
   openPicker = { zone, options };
@@ -194,14 +219,10 @@ const UNNAMED = /^image\.[a-z0-9]+$/i;
 
 async function addPastedFile(file: File, options: PickerOptions): Promise<void> {
   const extension = file.type.split("/")[1] ?? "png";
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[:.]/g, "-")
-    .slice(0, 19);
   const filename =
     file.name && !UNNAMED.test(file.name)
       ? file.name
-      : `pasted-${stamp}.${extension}`;
+      : `pasted-${fileStamp()}.${extension}`;
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const saved = await importImageBytes(options.entryId, filename, bytes);

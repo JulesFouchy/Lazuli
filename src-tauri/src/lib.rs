@@ -4,6 +4,7 @@
 //! re-read from that folder; see [`store`] for the read path and [`watch`] for
 //! how external edits get noticed.
 
+pub mod camera;
 pub mod commands;
 pub mod dates;
 pub mod keys;
@@ -93,6 +94,11 @@ pub fn run() {
             window.unmaximize()?;
             window.maximize()?;
             window.show()?;
+
+            // Before anything can ask: the webview answers permission
+            // questions itself, and the page is free to ask from its first
+            // frame.
+            camera::allow(&window);
 
             // Looks for a newer version a few seconds from now, downloads it
             // in the background if there is one, and says nothing.

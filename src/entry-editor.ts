@@ -8,6 +8,7 @@
 
 import type { Entry, Project } from "./api";
 import { setCover, trashEntry, updateEntry } from "./api";
+import { stopCamera } from "./camera";
 import { renderImagePicker } from "./image-picker";
 import {
   markdownInput,
@@ -75,6 +76,8 @@ export function openEntryEditor(id: string, context: EditorContext): void {
       // Escape, the backdrop and Back all land here. Whatever is still sitting
       // in the debounce is written rather than lost.
       editor?.flushNote();
+      // Closing the dialog on an open preview leaves nothing to stop it.
+      stopCamera();
       editor = null;
     },
   });
@@ -259,7 +262,12 @@ export function deleteEntry(id: string, context: EditorContext): void {
 }
 
 export function openCoverPicker(context: EditorContext): void {
-  openModal({ title: "Cover image", body: coverBody(context) });
+  openModal({
+    title: "Cover image",
+    body: coverBody(context),
+    // Same as the entry editor: the preview goes off the page with the dialog.
+    onClose: stopCamera,
+  });
 }
 
 export function refreshCoverPicker(context: EditorContext): void {

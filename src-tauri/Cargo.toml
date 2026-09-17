@@ -38,6 +38,9 @@ winreg = "0.55"
 # Same: already in the tree through tauri, same version so it is not built
 # twice. `SendInput`, to press the Menu key — see `keys.rs`.
 windows = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+# Also already in the tree through wry, which is what makes the version a copy
+# rather than a choice. The WebView2 permission event — see `camera.rs`.
+webview2-com = "0.38"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 # Desktop-only by construction: there is no updater for iOS or Android, so the

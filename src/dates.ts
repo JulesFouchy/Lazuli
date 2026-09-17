@@ -94,6 +94,21 @@ export function daysBetween(from: string, to: string): number {
   return Math.round(ms / 86_400_000);
 }
 
+/**
+ * `2026-09-17T13-47-48`: a moment, spelled so a filesystem will take it.
+ *
+ * Local, like the `created` stamp Rust writes beside it, and for the same
+ * reason — an image named for 11-47 when it was taken at 13:47 is one nobody
+ * can match to the moment they remember. `toISOString` converts to UTC first,
+ * which is what this exists instead of.
+ */
+export function fileStamp(when: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const day = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
+  const time = `${pad(when.getHours())}-${pad(when.getMinutes())}-${pad(when.getSeconds())}`;
+  return `${day}T${time}`;
+}
+
 /** `3 days`, `1 day`, `2 months` — the label on a timeline gap connector. */
 export function formatGap(days: number): string {
   if (days < 60) return days === 1 ? "1 day" : `${days} days`;

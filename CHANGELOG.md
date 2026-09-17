@@ -6,6 +6,7 @@ Each version's section becomes the release notes verbatim, so write it before cu
 
 ## unreleased
 
+- **Take the picture with your camera, from inside the entry.** "Take a photo…" sits under the images in the entry editor and in the cover picker: press it and the preview takes the grid's place, press Take photo and the shot is saved into the entry and chosen. The preview is a mirror, like a mirror is, and the picture you keep is the one you saw. A machine with more than one camera gets a button to switch between them.
 - **Your projects stay in the order you put them in, and you drag them into it.** The launch screen no longer reshuffles itself: opening a project leaves it exactly where it is, and dragging a row up or down the list is what moves it. The list is no longer capped at twelve either — nothing falls off the bottom because you added a thirteenth.
 - **Tabs, for filing projects into groups of your own.** The list starts under one tab called Projects; hover the strip above it and a `+` appears to add more — Wip and Done, say, or one per part of your life. Drag a project onto a tab to file it there. Right-click a tab to rename or delete it, and drag it along the strip to reorder. Deleting a tab keeps every project in it, handing them back to the first tab, and Undo puts the tab back as it was. Nothing on disk moves: a tab is filing and nothing else. With a single tab the screen looks exactly as it did.
 
