@@ -215,68 +215,85 @@ function dialogBody(): HTMLElement {
         "copied into each project you write in, so whoever else opens it can " +
         "see who wrote what — and a project only you write in shows neither.",
     }),
-    accountSection(),
+    accountControl().node,
   );
 }
 
 /**
  * The Google account, which is where synced projects live.
  *
- * In this dialog because it is about *you* rather than about a project: one
- * account, and each project then says for itself whether it uses it.
+ * One control, used both in this dialog — where it belongs, because an account
+ * is about *you* rather than about a project — and in a project's own Syncing
+ * dialog, where somebody who has come to turn syncing on would otherwise hit a
+ * button that cannot work and no way forward.
  */
-function accountSection(): HTMLElement {
+export interface AccountControl {
+  node: HTMLElement;
+  /** Re-read the account and repaint. Resolves with what it found. */
+  refresh: () => Promise<Account>;
+}
+
+export function accountControl(
+  onChanged?: (account: Account) => void,
+): AccountControl {
   const state = el("p", { class: "hint", text: "…" });
   const button = el("button", { class: "button", text: "Connect Google Drive" });
-  const section = el(
+  const node = el(
     "div",
     { class: "field" },
-    el("label", { text: "Syncing" }),
+    el("label", { text: "Google account" }),
     state,
     button,
   );
 
+  let connected = false;
+
   const paint = (account: Account) => {
+    connected = account.connected;
     if (account.unavailable) {
       state.textContent = account.unavailable;
       button.hidden = true;
+      onChanged?.(account);
       return;
     }
     button.hidden = false;
+    button.textContent = account.connected
+      ? "Disconnect"
+      : "Connect Google Drive";
     state.textContent = account.connected
       ? "Connected. Each project says for itself whether it syncs."
-      : "Not connected. Connect an account to sync projects between your devices, and to share one.";
-    button.textContent = account.connected ? "Disconnect" : "Connect Google Drive";
+      : "Not connected. Connect an account to keep projects on your Drive, so your other devices — and anyone you share one with — can reach them.";
+    onChanged?.(account);
   };
 
-  const act = async (call: Promise<Account>, whenItFails: string) => {
-    button.disabled = true;
-    try {
-      paint(await call);
-    } catch (err) {
-      toastError(whenItFails, err);
-    }
-    button.disabled = false;
-  };
-
-  let connected = false;
-  button.onclick = () =>
-    void act(
-      connected ? disconnectDrive() : connectDrive(),
-      connected ? "Could not disconnect" : "Could not connect to Google Drive",
-    ).then(() => void refreshAccount());
-
-  const refreshAccount = async () => {
+  const refresh = async (): Promise<Account> => {
     try {
       const account = await driveAccount();
-      connected = account.connected;
       paint(account);
+      return account;
     } catch {
       state.textContent = "Could not read the account.";
       button.hidden = true;
+      return { connected: false, unavailable: null };
     }
   };
-  void refreshAccount();
 
-  return section;
+  button.onclick = () => {
+    button.disabled = true;
+    const was = connected;
+    void (was ? disconnectDrive() : connectDrive())
+      .then(paint)
+      .catch((err) =>
+        toastError(
+          was ? "Could not disconnect" : "Could not connect to Google Drive",
+          err,
+        ),
+      )
+      .finally(() => {
+        button.disabled = false;
+      });
+  };
+
+  void refresh();
+  return { node, refresh };
 }

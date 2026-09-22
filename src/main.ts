@@ -74,7 +74,7 @@ import {
 } from "./md-input";
 import { closeModal, isModalOpen, onModalDismissed, openModal } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
-import { profileButton, startProfile } from "./profile";
+import { accountControl, profileButton, startProfile } from "./profile";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
 import { openTrashDialog } from "./trash-view";
@@ -1038,8 +1038,20 @@ function openSyncDialog(project: Project): void {
   const act = el("button", { class: "button" });
   const now = el("button", { class: "button button--ghost", text: "Sync now" });
 
+  // The account belongs in the profile dialog, and it is here as well: somebody
+  // who came to turn syncing on would otherwise meet a button that cannot work,
+  // and nothing saying where to go instead.
+  let connected = false;
+  const account = accountControl((read) => {
+    connected = read.connected;
+    act.disabled = !connected;
+    act.title = connected ? "" : "Connect a Google account first.";
+  });
+
   const paint = (status: SyncStatus) => {
     act.textContent = status.on ? "Stop syncing this project" : "Sync this project";
+    // Nothing to sync to, so nothing to stop either.
+    act.disabled = !connected && !status.on;
     now.hidden = !status.on;
     state.textContent = status.problem
       ? `Last try: ${status.problem}`
@@ -1078,7 +1090,8 @@ function openSyncDialog(project: Project): void {
     body: el(
       "div",
       { class: "modal__body-inner" },
-      state,
+      account.node,
+      el("div", { class: "field" }, el("label", { text: "This project" }), state),
       el("div", { class: "row" }, act, now),
       el("p", {
         class: "hint",
