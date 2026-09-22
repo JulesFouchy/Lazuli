@@ -43,6 +43,8 @@ Each stands on its own, and each was a prerequisite.
 
 **A client id.** Nothing that talks to Google has ever run without one; see the README.
 
+**A way in on Android**, when there is an Android build. It needs its own OAuth client — Google pins a mobile one to the package name and the signing certificate, where a desktop one is anonymous and proves itself with PKCE alone — and its own redirect: `Redirect` in `drive.rs` runs a loopback web server, which a phone has neither the means nor the business to do. A custom URI scheme the OS routes back to the app is the shape. Both clients live in one Cloud project, so the consent screen, the quota and the user's approval are shared, and `DESKTOP_CLIENT_ID` gains a sibling rather than a replacement.
+
 ## The remote
 
 **Google Drive, via its HTTP API** — no desktop client involved, which is the point, since none exists on iOS. `drive.file` scope, which needs no OAuth verification and no security assessment: the app sees what it created, plus whatever the user hands it through the Google Picker. Own projects therefore need nothing; a project someone shared is added through the Picker once, and selecting a folder grants its contents recursively.

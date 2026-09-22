@@ -33,7 +33,7 @@ pub struct Account {
 
 /// Whether this build can sign in to Google.
 fn why_not() -> Option<String> {
-    drive::CLIENT_ID.is_empty().then(|| {
+    drive::DESKTOP_CLIENT_ID.is_empty().then(|| {
         "This build has no Google client id, so it cannot sign in to Drive. \
          See the README for how to make one."
             .to_owned()

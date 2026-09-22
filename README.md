@@ -50,7 +50,13 @@ Two devices adding entries never collide, because an entry folder is a UUID. Two
 
 **Syncing needs a Google OAuth client id, and this repository ships without one**, because a client id belongs to a Google Cloud project rather than to the source. Until one is set the app says so plainly and the Connect button is hidden; everything else works exactly as before.
 
-To make one: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**. Put the id in `CLIENT_ID` in [`src-tauri/src/drive.rs`](src-tauri/src/drive.rs). The app asks for the `drive.file` scope only, which needs no verification and no security assessment — it sees the files it made and nothing else of yours.
+To make one: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**. Put the id in `DESKTOP_CLIENT_ID` in [`src-tauri/src/drive.rs`](src-tauri/src/drive.rs).
+
+You make it once, for the app — not one per user. Every copy of Lazuli carries the same id; what belongs to each user is the token it gets back, which stays on their machine. Move the consent screen from **Testing** to **Production** or only accounts you list by hand can sign in, capped at a hundred.
+
+The app asks for the `drive.file` scope only, which is classed non-sensitive: no verification, no security assessment, and no "Google hasn't verified this app" screen in front of your users. That narrowness is the trade — it can see the files Lazuli made and nothing else of yours, which is also why a project somebody *else* shared has to be handed over through the Google Picker.
+
+**One id does not cover every platform.** An Android build needs its own OAuth client, pinned to its package name and signing certificate, and an iOS build a third. They go in the *same* Cloud project, so they share the consent screen, the quota and the user's approval — somebody who connected on their laptop is not asked again on their phone. The sign-in flow differs too: the loopback listener here is a desktop mechanism, and a phone receives the redirect through a custom URI scheme instead.
 
 **None of the code that talks to Google has ever run**, for want of that id. The parts that can be tested without it — reconstructing paths from Drive's parent lists, the token's expiry rule, the PKCE challenge, the redirect — are.
 

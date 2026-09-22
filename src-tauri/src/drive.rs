@@ -33,12 +33,20 @@ use std::time::{Duration, SystemTime};
 
 use crate::sync::{Backend, RemoteFile};
 
-/// Where the app identifies itself.
+/// How the app identifies itself to Google, **on desktop**.
 ///
 /// Empty until somebody creates an OAuth client for their own build: a client
 /// id belongs to a Google Cloud project, and there is no sensible default. The
 /// app says so plainly rather than failing at the redirect.
-pub const CLIENT_ID: &str = "";
+///
+/// Named for the platform because one id does not cover them all. Google ties a
+/// client to how the app is identified, and that differs: a desktop client is
+/// anonymous and proves itself with PKCE alone, where an Android one is pinned
+/// to a package name and the fingerprint of the certificate it is signed with.
+/// An Android build therefore needs its own, in the *same* Cloud project — same
+/// consent screen, same quota, and a user who approved on their laptop is not
+/// asked again on their phone.
+pub const DESKTOP_CLIENT_ID: &str = "";
 
 /// Asked for at sign-in. `drive.file` and nothing else — the narrowest scope
 /// that can do the job, and the one that keeps the app out of Google's
@@ -145,7 +153,7 @@ pub fn sign_in_url(pkce: &Pkce, redirect: &str) -> String {
     format!(
         "{AUTH_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}\
          &code_challenge={}&code_challenge_method=S256&access_type=offline&prompt=consent",
-        urlencode(CLIENT_ID),
+        urlencode(DESKTOP_CLIENT_ID),
         urlencode(redirect),
         urlencode(SCOPE),
         urlencode(&pkce.challenge),
@@ -518,7 +526,7 @@ fn json<T: serde::de::DeserializeOwned>(response: reqwest::blocking::Response) -
 
 /// Swap the code Google handed back for tokens.
 pub fn exchange(code: &str, pkce: &Pkce, redirect: &str) -> Result<Tokens> {
-    if CLIENT_ID.is_empty() {
+    if DESKTOP_CLIENT_ID.is_empty() {
         bail!(
             "This build has no Google client id, so it cannot sign in to Drive. \
              See the README for how to make one."
@@ -528,7 +536,7 @@ pub fn exchange(code: &str, pkce: &Pkce, redirect: &str) -> Result<Tokens> {
     let response = client
         .post(TOKEN_URL)
         .form(&[
-            ("client_id", CLIENT_ID),
+            ("client_id", DESKTOP_CLIENT_ID),
             ("code", code),
             ("code_verifier", &pkce.verifier),
             ("grant_type", "authorization_code"),
@@ -548,14 +556,14 @@ pub fn exchange(code: &str, pkce: &Pkce, redirect: &str) -> Result<Tokens> {
 
 /// Ask for a new access token with the refresh token.
 pub fn refresh(tokens: &Tokens) -> Result<Tokens> {
-    if CLIENT_ID.is_empty() {
+    if DESKTOP_CLIENT_ID.is_empty() {
         bail!("This build has no Google client id.");
     }
     let client = reqwest::blocking::Client::new();
     let response = client
         .post(TOKEN_URL)
         .form(&[
-            ("client_id", CLIENT_ID),
+            ("client_id", DESKTOP_CLIENT_ID),
             ("refresh_token", tokens.refresh_token.as_str()),
             ("grant_type", "refresh_token"),
         ])
@@ -748,6 +756,12 @@ const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 /// at a web server the app runs for the length of it. Port 0 so the OS picks a
 /// free one: a fixed port is one another program may already hold, and one the
 /// user would have to register in the Cloud console.
+///
+/// **Desktop only.** A phone has no loopback to redirect to and no business
+/// running a web server; a mobile sign-in comes back through a custom URI
+/// scheme or an app link the OS routes to the app. That is a second way in
+/// rather than a change to this one, and it is not built — see
+/// `ideas/syncing-projects.md`.
 pub struct Redirect {
     listener: std::net::TcpListener,
     pub url: String,
