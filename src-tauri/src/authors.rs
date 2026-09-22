@@ -33,13 +33,18 @@ const PROFILE_FILE: &str = "profile.yaml";
 
 /// What a project records about one author.
 ///
-/// Only a name so far. An avatar and the account ids that let a second device
-/// recognise its own author belong here too, and are left out until there is
-/// something that sets them — the file gains fields the way `lazuli.yaml` has,
-/// with `#[serde(default)]` keeping the older ones readable.
+/// The account ids that let a second device recognise its own author belong
+/// here too, and are left out until there is something to sync to — the file
+/// gains fields the way `lazuli.yaml` has, with `#[serde(default)]` keeping the
+/// older ones readable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
     pub name: String,
+    /// The picture's filename, beside this file. A *copy* of the one in the
+    /// user's settings, because a collaborator can reach the project folder and
+    /// nothing else of ours.
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 /// Every author a project knows, by id.
@@ -68,15 +73,37 @@ pub fn read_all(root: &Path) -> HashMap<String, Profile> {
 /// Failure is not an error worth stopping an edit for — a project someone
 /// shared read-only cannot be written to at all, and the edit that triggered
 /// this has already succeeded or failed on its own terms.
-pub fn publish(root: &Path, id: &str, profile: &Profile) {
+pub fn publish(root: &Path, id: &str, name: &str, avatar: Option<&Path>) {
     let folder = root.join(AUTHORS_DIR).join(id);
-    if read_profile(&folder).is_ok_and(|existing| &existing == profile) {
+    let profile = Profile {
+        name: name.to_owned(),
+        avatar: avatar
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .map(str::to_owned),
+    };
+
+    // The picture is checked separately from the record: the two are written in
+    // two steps, so a run that stopped between them leaves a record naming a
+    // file that is not there, and the next one has to finish the job.
+    let picture_is_here = profile
+        .avatar
+        .as_ref()
+        .is_none_or(|name| folder.join(name).is_file());
+    if picture_is_here && read_profile(&folder).is_ok_and(|existing| existing == profile) {
         return;
     }
+
     if fs::create_dir_all(&folder).is_err() {
         return;
     }
-    if let Ok(yaml) = serde_yaml::to_string(profile) {
+    if let (Some(source), Some(name)) = (avatar, &profile.avatar) {
+        let destination = folder.join(name);
+        if !destination.is_file() && fs::copy(source, &destination).is_err() {
+            return;
+        }
+    }
+    if let Ok(yaml) = serde_yaml::to_string(&profile) {
         let _ = atomic::write(&folder.join(PROFILE_FILE), yaml);
     }
 }
@@ -126,13 +153,14 @@ mod tests {
     fn profile(name: &str) -> Profile {
         Profile {
             name: name.to_owned(),
+            avatar: None,
         }
     }
 
     #[test]
     fn a_published_profile_reads_back() {
         let dir = TempDir::new("authors-publish");
-        publish(&dir.0, "author-1", &profile("Jules"));
+        publish(&dir.0, "author-1", "Jules", None);
         assert_eq!(read_all(&dir.0).get("author-1"), Some(&profile("Jules")));
     }
 
@@ -147,13 +175,13 @@ mod tests {
         // Every write is a filesystem event the watcher rescans for, and this
         // runs on every edit.
         let dir = TempDir::new("authors-idempotent");
-        publish(&dir.0, "author-1", &profile("Jules"));
+        publish(&dir.0, "author-1", "Jules", None);
         let path = dir.0.join(AUTHORS_DIR).join("author-1").join(PROFILE_FILE);
         let first = fs::metadata(&path)
             .and_then(|meta| meta.modified())
             .expect("should stat");
 
-        publish(&dir.0, "author-1", &profile("Jules"));
+        publish(&dir.0, "author-1", "Jules", None);
         let second = fs::metadata(&path)
             .and_then(|meta| meta.modified())
             .expect("should stat");
@@ -163,8 +191,8 @@ mod tests {
     #[test]
     fn a_changed_name_is_published_over_the_old_one() {
         let dir = TempDir::new("authors-rename");
-        publish(&dir.0, "author-1", &profile("Jules"));
-        publish(&dir.0, "author-1", &profile("Jules F"));
+        publish(&dir.0, "author-1", "Jules", None);
+        publish(&dir.0, "author-1", "Jules F", None);
         assert_eq!(read_all(&dir.0).get("author-1"), Some(&profile("Jules F")));
     }
 
@@ -173,11 +201,45 @@ mod tests {
         // Each person writes only their own folder, which is what keeps the
         // registry free of conflicts when two of them sync one project.
         let dir = TempDir::new("authors-several");
-        publish(&dir.0, "author-1", &profile("Jules"));
-        publish(&dir.0, "author-2", &profile("Manu"));
+        publish(&dir.0, "author-1", "Jules", None);
+        publish(&dir.0, "author-2", "Manu", None);
         let all = read_all(&dir.0);
         assert_eq!(all.len(), 2);
         assert_eq!(all.get("author-2"), Some(&profile("Manu")));
+    }
+
+    #[test]
+    fn a_picture_is_copied_in_beside_the_record() {
+        // A collaborator can reach the project folder and nothing else of ours,
+        // so a path into our settings would be a picture they never see.
+        let dir = TempDir::new("authors-avatar");
+        let source = dir.0.join("me.png");
+        fs::write(&source, b"pixels").expect("should write");
+
+        publish(&dir.0, "author-1", "Jules", Some(&source));
+
+        let folder = dir.0.join(AUTHORS_DIR).join("author-1");
+        assert_eq!(
+            read_all(&dir.0).get("author-1").and_then(|p| p.avatar.clone()),
+            Some("me.png".to_owned())
+        );
+        assert_eq!(fs::read(folder.join("me.png")).expect("should read"), b"pixels");
+    }
+
+    #[test]
+    fn a_record_naming_a_picture_that_is_not_there_is_finished_off() {
+        // The record and the picture are two writes, and a run that stopped in
+        // between must not leave a name pointing at nothing for good.
+        let dir = TempDir::new("authors-half");
+        let source = dir.0.join("me.png");
+        fs::write(&source, b"pixels").expect("should write");
+        publish(&dir.0, "author-1", "Jules", Some(&source));
+
+        let copied = dir.0.join(AUTHORS_DIR).join("author-1").join("me.png");
+        fs::remove_file(&copied).expect("should remove");
+
+        publish(&dir.0, "author-1", "Jules", Some(&source));
+        assert!(copied.is_file());
     }
 
     #[test]

@@ -55,7 +55,29 @@ export interface Entry {
 /** What a project records about one of its authors. */
 export interface AuthorProfile {
   name: string;
+  /** Picture filename, beside the record in `authors/<id>/`. */
+  avatar: string | null;
 }
+
+/** This user's own profile, as the avatar button and its dialog show it. */
+export interface MyProfile {
+  name: string;
+  /** A `data:` URL, or null when they have not chosen a picture. */
+  avatar: string | null;
+}
+
+export const myProfile = () => invoke<MyProfile>("my_profile");
+
+export const setMyName = (name: string) =>
+  invoke<MyProfile>("set_my_name", { name });
+
+export const setMyAvatar = (filename: string, bytes: Uint8Array) =>
+  invoke<MyProfile>("set_my_avatar", {
+    filename,
+    bytes: Array.from(bytes),
+  });
+
+export const clearMyAvatar = () => invoke<MyProfile>("clear_my_avatar");
 
 export interface Project {
   root: string;

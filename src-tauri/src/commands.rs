@@ -495,12 +495,13 @@ pub fn create_entry(
 ) -> CmdResult<String> {
     let date = date.unwrap_or_else(dates::today);
     let me = author(&app);
+    let avatar = avatar_path(&app);
     Ok(with_project(&app, &state, |open| {
         let root = root_of(open);
         // Writing to the project is what publishes the name, so that a project
         // only ever read does not gain a folder naming whoever looked at it.
-        if let Some((id, profile)) = &me {
-            authors::publish(&root, id, profile);
+        if let Some((id, name)) = &me {
+            authors::publish(&root, id, name, avatar.as_deref());
         }
         store::create_entry(
             &root,
@@ -1106,17 +1107,180 @@ struct Settings {
     /// machine mints its own for now and the two are reconciled then.
     author_id: Option<String>,
     /// The name published into the projects this user writes to. Defaulted from
-    /// the machine, and theirs to change once there is a screen to change it on.
+    /// the machine, and theirs to change.
     author_name: Option<String>,
+    /// The picture's filename, inside the app's own config folder. Kept there
+    /// rather than in any project, because it is the user's and not a
+    /// project's; each project gets a copy when they write in it.
+    author_avatar: Option<String>,
 }
 
-/// Who the user is, minting and storing an identity the first time it is asked
-/// for.
+/// The user's own profile, as the button and the dialog show it.
+#[derive(Debug, Serialize)]
+pub struct MyProfile {
+    pub name: String,
+    /// The picture as a `data:` URL, or `None` for the default drawing.
+    ///
+    /// Inlined rather than served as a file: the picture lives in the app's
+    /// config folder, which the webview has no access to, and opening that
+    /// folder to it to show one small image would be a wide door for a narrow
+    /// need.
+    pub avatar: Option<String>,
+}
+
+/// Where the user's own picture is kept, when they have one.
+fn avatar_path(app: &AppHandle) -> Option<PathBuf> {
+    let name = read_settings(app).author_avatar?;
+    let path = app.path().app_config_dir().ok()?.join(name);
+    path.is_file().then_some(path)
+}
+
+#[tauri::command]
+pub fn my_profile(app: AppHandle) -> MyProfile {
+    let settings = read_settings(&app);
+    MyProfile {
+        name: settings
+            .author_name
+            .unwrap_or_else(authors::name_from_the_machine),
+        avatar: avatar_path(&app).and_then(|path| data_url(&path)),
+    }
+}
+
+/// Read an image back as a `data:` URL, or `None` if it cannot be read.
+fn data_url(path: &Path) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    let media = match extension.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => "image/png",
+    };
+    Some(format!("data:{media};base64,{}", base64(&bytes)))
+}
+
+/// Base64, written out here rather than taken as a dependency for one use.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let bits = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |bits, (index, byte)| bits | (*byte as u32) << (16 - 8 * index));
+        for index in 0..=chunk.len() {
+            out.push(ALPHABET[(bits >> (18 - 6 * index) & 0b11_1111) as usize] as char);
+        }
+        for _ in chunk.len()..3 {
+            out.push('=');
+        }
+    }
+    out
+}
+
+/// Change the name published alongside this user's entries.
+///
+/// An empty name falls back to the machine's rather than being stored: a
+/// nameless author would show as a blank beside an entry.
+#[tauri::command]
+pub fn set_my_name(app: AppHandle, state: State<AppState>, name: String) -> MyProfile {
+    let name = name.trim();
+    let mut settings = read_settings(&app);
+    settings.author_name = Some(if name.is_empty() {
+        authors::name_from_the_machine()
+    } else {
+        name.to_owned()
+    });
+    write_settings(&app, &settings);
+    republish(&app, &state);
+    my_profile(app)
+}
+
+/// Set the user's picture from bytes the page read, returning the new profile.
+///
+/// Bytes rather than a path because the page has already loaded the image to
+/// show it, and because this is the one route that works for a pasted picture
+/// as well as a chosen file.
+#[tauri::command]
+pub fn set_my_avatar(
+    app: AppHandle,
+    state: State<AppState>,
+    filename: String,
+    bytes: Vec<u8>,
+) -> CmdResult<MyProfile> {
+    let directory = app
+        .path()
+        .app_config_dir()
+        .context("finding the app's config folder")?;
+    fs::create_dir_all(&directory)
+        .with_context(|| format!("creating {}", directory.display()))?;
+
+    // One fixed stem, so changing the picture replaces the old one instead of
+    // leaving a folder of every picture ever chosen. The extension follows the
+    // source, because it is what says how to decode it.
+    let extension = Path::new(&filename)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| is_image(&format!("x.{extension}")))
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    let name = format!("avatar.{extension}");
+    atomic::write(&directory.join(&name), &bytes)
+        .with_context(|| format!("writing {name}"))?;
+
+    let mut settings = read_settings(&app);
+    // An old picture with a different extension would otherwise sit there
+    // unreferenced for good.
+    if let Some(previous) = settings.author_avatar.filter(|previous| previous != &name) {
+        let _ = fs::remove_file(directory.join(previous));
+    }
+    settings.author_avatar = Some(name);
+    write_settings(&app, &settings);
+    republish(&app, &state);
+    Ok(my_profile(app))
+}
+
+#[tauri::command]
+pub fn clear_my_avatar(app: AppHandle, state: State<AppState>) -> MyProfile {
+    let mut settings = read_settings(&app);
+    if let (Some(name), Ok(directory)) = (settings.author_avatar.take(), app.path().app_config_dir())
+    {
+        let _ = fs::remove_file(directory.join(name));
+    }
+    write_settings(&app, &settings);
+    republish(&app, &state);
+    my_profile(app)
+}
+
+/// Push a changed profile into the project on screen, if there is one.
+///
+/// Without this a rename would only reach a project the next time the user
+/// wrote in it, so the name beside their own entries would stay the old one
+/// while they were looking at it. Projects they are not in catch up when they
+/// next write there.
+fn republish(app: &AppHandle, state: &State<AppState>) {
+    let Some((id, name)) = author(app) else {
+        return;
+    };
+    let avatar = avatar_path(app);
+    let _ = with_project(app, state, |open| {
+        authors::publish(&root_of(open), &id, &name, avatar.as_deref());
+        Ok(())
+    });
+}
+
+/// Who the user is — id and published name — minting and storing an identity
+/// the first time it is asked for.
 ///
 /// Returns `None` only when there is nowhere to store settings, in which case
 /// entries are written without an author rather than with one that would be
 /// different on every launch.
-fn author(app: &AppHandle) -> Option<(String, authors::Profile)> {
+fn author(app: &AppHandle) -> Option<(String, String)> {
     let mut settings = read_settings(app);
     let known = settings.author_id.is_some() && settings.author_name.is_some();
 
@@ -1140,7 +1304,7 @@ fn author(app: &AppHandle) -> Option<(String, authors::Profile)> {
             return None;
         }
     }
-    Some((id, authors::Profile { name }))
+    Some((id, name))
 }
 
 /// The stored appearance, for whoever is building the window.
@@ -1244,4 +1408,29 @@ fn remember_projects_dir(app: &AppHandle, root: &Path) {
 #[tauri::command]
 pub fn peek_project(path: PathBuf) -> CmdResult<ProjectMeta> {
     Ok(store::read_meta(&path)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hand-rolled, so checked against the vectors in RFC 4648 — including the
+    /// two padded lengths, which are what an off-by-one gets wrong.
+    #[test]
+    fn base64_matches_the_standard() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foob"), "Zm9vYg==");
+        assert_eq!(base64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn base64_covers_the_whole_byte_range() {
+        // The high bytes of a PNG are where a sign error would show up.
+        assert_eq!(base64(&[0xff, 0xfe, 0xfd]), "//79");
+        assert_eq!(base64(&[0x00, 0x00, 0x00]), "AAAA");
+    }
 }

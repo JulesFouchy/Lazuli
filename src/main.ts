@@ -68,6 +68,7 @@ import {
 } from "./md-input";
 import { closeModal, isModalOpen, onModalDismissed } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
+import { profileButton, startProfile } from "./profile";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
 import { openTrashDialog } from "./trash-view";
@@ -235,6 +236,7 @@ function launchView(): HTMLElement {
         text: "Appearance…",
         onclick: () => openHere({ kind: "appearance" }),
       }),
+      profileButton(),
     ),
   );
 
@@ -777,6 +779,7 @@ function timelineSection(project: Project): HTMLElement {
         title: "Reverse the timeline",
         onclick: () => toggleSortOrder(),
       }),
+      profileButton(),
     ),
     renderTimeline(
       project,
@@ -1722,6 +1725,10 @@ startTheme();
 // The window is built without decorations, so the bar that minimises, maximises
 // and closes it is one of ours.
 startTitlebar();
+
+// Your name and picture, for the round button in the corner. Not awaited: the
+// button draws the default figure until this lands, and then repaints itself.
+void startProfile().then(render);
 
 // Pick up where the last session left off. The first paint is only drawn here
 // when it is the launch screen; a project is drawn once it has loaded, rather

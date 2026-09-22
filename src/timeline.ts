@@ -12,6 +12,7 @@ import {
 import { openContextMenu } from "./context-menu";
 import { plainText, renderBlocks } from "./markdown";
 import { entryKey, isDeleting } from "./pending";
+import { authorAvatar } from "./profile";
 import { el } from "./ui";
 
 
@@ -113,10 +114,18 @@ function gapConnector(days: number): HTMLElement {
  */
 function authorLabel(project: Project, entry: Entry): HTMLElement | false {
   if (Object.keys(project.authors).length < 2) return false;
-  const name = entry.author && project.authors[entry.author]?.name;
-  return (
-    !!name &&
-    el("span", { class: "card__author", text: name, title: "Who wrote this" })
+  const who = entry.author ? project.authors[entry.author] : undefined;
+  if (!who) return false;
+  return el(
+    "span",
+    { class: "card__author", title: "Who wrote this" },
+    authorAvatar(
+      who.avatar &&
+        entry.author &&
+        assetUrl(project.root, "authors", entry.author, who.avatar),
+      who.name,
+    ),
+    el("span", { text: who.name }),
   );
 }
 
