@@ -8,6 +8,7 @@ pub mod atomic;
 pub mod authors;
 pub mod camera;
 pub mod commands;
+pub mod conflicts;
 pub mod dates;
 pub mod keys;
 pub mod library;
@@ -131,6 +132,7 @@ pub fn run() {
             commands::move_tab,
             commands::trash_project,
             commands::restore_project,
+            commands::resolve_conflict,
             commands::trash_contents,
             commands::restore_trashed,
             commands::my_profile,

@@ -50,7 +50,37 @@ export interface Entry {
    * project has more than one author, so a solo journal reads as it always has.
    */
   author: string | null;
+  /**
+   * Set when the entry arrived in more than one version and one has to be
+   * chosen. Null for every ordinary entry, which is nearly all of them.
+   */
+  conflict: Conflict | null;
 }
+
+/** One version of an entry that arrived in more than one. */
+export interface ConflictVersion {
+  /** Where this one came from, in words: "Yours", "Theirs", or a filename. */
+  label: string;
+  text: string;
+  /** The day it claims, or null when it does not parse on its own. */
+  date: string | null;
+  image: string | null;
+}
+
+export interface Conflict {
+  /** `markers` for a merge's leftovers, `sidecar` for a syncer's second file. */
+  kind: "markers" | "sidecar";
+  /** The versions to choose between, the file's own first. */
+  versions: ConflictVersion[];
+}
+
+/**
+ * Settle a conflicted entry by keeping the version at `version`.
+ *
+ * The losers go to the project's trash rather than being removed.
+ */
+export const resolveConflict = (id: string, version: number) =>
+  invoke<void>("resolve_conflict", { id, version });
 
 /** What a project records about one of its authors. */
 export interface AuthorProfile {

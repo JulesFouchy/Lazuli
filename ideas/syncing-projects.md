@@ -24,6 +24,7 @@ What is left to conflict is small: the body, `date:` and `image:` of one entry e
 - **Identity.** `id:` in `lazuli.yaml`, minted on open. `author:` on every new entry. A profile — author uuid, name and picture — in the app's own settings, edited from the round button in the corner and *published* into each project at `authors/<uuid>/` when the user writes there, picture and all, because a collaborator can read neither our settings nor our account. A card shows a name and picture only once a project has more than one author.
 - **Migration.** Every new field defaulted; `lazuli.yaml` gains a line and no `entry.md` is touched. An absent `author:` reads as the project's owner rather than being backfilled.
 - **Thumbnails**, in `.lazuli-thumbs/`, mirroring each picture's path with a `.jpg` name. They sync with the project rather than being rebuilt on each machine, which is what will make a shared project readable before its photographs have arrived, and a phone viable at all. Measured at 9% of the originals on a real project.
+- **Conflicts**, as a card offering both versions. Git's markers and the sidecars Syncthing and Dropbox leave are both recognised, so syncing by hand is already served. The engine's own conflicts will be a third shape through the same door.
 
 Each stands on its own, and each was a prerequisite.
 
@@ -34,8 +35,6 @@ Each stands on its own, and each was a prerequisite.
 No `id:` or `modified:` inside `entry.md`: the folder UUID is already the identity and nothing renames it, and a sync base beats last-writer-wins.
 
 **A sync base.** `.lazuli/sync-state.json`, per device and never synced, holding each file's hash as of the last sync. This is the common ancestor git would have given for free, and without it "they changed it" cannot be told from "I changed it".
-
-**Conflict as a state the model can hold**, drawn as a card with both versions and a choice. Recognise the engine's own conflicts, git's markers, and Syncthing's and Dropbox's sidecars, so syncing by hand is served too.
 
 ## The remote
 
@@ -57,7 +56,7 @@ Syncing is per project and opt-in; the setting is per device, in `.lazuli/sync.j
 
 ## Why not yet
 
-Because it is large, and because the pieces it rests on are worth having on their own. The trash, atomic writes, identity and thumbnails are in. The rest wants doing in order — conflicts, then the sync base, the engine and the backend — and each step is shippable before the next. The sync base in particular is deliberately last of the file-format work: nothing reads or writes it until there is an engine, and a format in the tree that nothing uses is the thing `video-export.md` says cost more than it saved.
+Because it is large, and because the pieces it rests on are worth having on their own. The trash, atomic writes, identity, thumbnails and the conflict card are in. What is left is the sync base, the engine and the backend, in that order. The sync base in particular is deliberately last of the file-format work: nothing reads or writes it until there is an engine, and a format in the tree that nothing uses is the thing `video-export.md` says cost more than it saved.
 
 ## A browser version, later
 

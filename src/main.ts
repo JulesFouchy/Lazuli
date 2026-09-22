@@ -25,6 +25,7 @@ import {
   openProject,
   projectTabs,
   renameTab,
+  resolveConflict,
   restoreListing,
   restoreProject,
   restoreTab,
@@ -796,6 +797,8 @@ function timelineSection(project: Project): HTMLElement {
         editEntry: (entry: Entry) => openHere({ kind: "entry", id: entry.id }),
         deleteEntry: (entry: Entry) =>
           deleteEntry(entry.id, editorContext),
+        resolveConflict: (entry: Entry, version: number) =>
+          settleConflict(entry, version),
       },
       state.newestFirst,
     ),
@@ -1000,6 +1003,21 @@ function deleteProject(project: ListedProject): void {
     ),
   );
   void deleted.then(() => stopHiding(key));
+}
+
+/**
+ * Keep one version of an entry that arrived in more than one.
+ *
+ * No optimism here, unlike a delete: the card is a question, and the honest
+ * thing is to leave it on screen until the answer has actually been written.
+ * The rescan that follows is what takes it away.
+ */
+function settleConflict(entry: Entry, version: number): void {
+  const label = entry.conflict?.versions[version]?.label ?? "that version";
+  void resolveConflict(entry.id, version).then(
+    () => toast(`Kept ${label}`),
+    (err) => toastError("Could not settle that entry", err),
+  );
 }
 
 /** Drop a project from the list, leaving the folder where it is. */

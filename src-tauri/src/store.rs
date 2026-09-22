@@ -14,6 +14,7 @@ use std::time::SystemTime;
 
 use crate::atomic;
 use crate::authors;
+use crate::conflicts;
 use crate::model::{
     is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta, SortOrder,
 };
@@ -87,14 +88,29 @@ impl ProjectStore {
                 .to_owned();
             let entry_file = entry_dir.join(ENTRY_FILE);
 
+            // Two versions of one entry, from a merge or from a folder two
+            // machines both wrote to. Read before the parse, because the
+            // commonest shape — conflict markers in the file — is precisely a
+            // file that does not parse, and this used to be where the entry
+            // silently left the timeline.
+            let conflict = fs::read_to_string(&entry_file)
+                .ok()
+                .and_then(|contents| conflicts::of_entry(&entry_dir, &contents));
+
             let (frontmatter, text) = match self.read_cached(&entry_file) {
                 Ok(parsed) => parsed,
-                // One malformed or half-written entry must not take the whole
-                // project down; skip it and keep going.
-                Err(err) => {
-                    eprintln!("lazuli: skipping {}: {err:#}", entry_file.display());
-                    continue;
-                }
+                // A conflicted file usually cannot be parsed at all. Stand in
+                // for it with the first version on offer, so the card is on the
+                // timeline, on its own day, asking to be settled.
+                Err(err) => match &conflict {
+                    Some(conflict) => stand_in(conflict, &entry_file),
+                    None => {
+                        // Genuinely malformed, or half-written by something
+                        // else. One entry must not take the project down.
+                        eprintln!("lazuli: skipping {}: {err:#}", entry_file.display());
+                        continue;
+                    }
+                },
             };
             seen.insert(entry_file);
 
@@ -103,10 +119,10 @@ impl ProjectStore {
             // has a day and no time as far as the rest of the app is concerned.
             let created = frontmatter.created;
             let images = list_images(&entry_dir)?;
-            entries.push((
-                created,
-                Project::make_entry(meta.start_date, id, frontmatter, text, images),
-            ));
+            let mut entry =
+                Project::make_entry(meta.start_date, id, frontmatter, text, images);
+            entry.conflict = conflict;
+            entries.push((created, entry));
         }
 
         // Drop cache entries for files that no longer exist, so a long session
@@ -159,6 +175,32 @@ impl ProjectStore {
         );
         Ok((frontmatter, text))
     }
+}
+
+/// Frontmatter to show a conflicted entry with until it is settled.
+///
+/// Takes the first version's day, so the card lands where the entry belongs
+/// rather than at the bottom of the timeline. `created` is whatever the file's
+/// modification time says, which is only used to order entries sharing a day
+/// and is replaced by the real one the moment a version is chosen.
+fn stand_in(
+    conflict: &conflicts::Conflict,
+    entry_file: &Path,
+) -> (EntryFrontmatter, String) {
+    let first = conflict.versions.first();
+    let created = fs::metadata(entry_file)
+        .and_then(|meta| meta.modified())
+        .map(|modified| DateTime::<chrono::Local>::from(modified).fixed_offset())
+        .unwrap_or_else(|_| chrono::Local::now().fixed_offset());
+    (
+        EntryFrontmatter {
+            date: first.and_then(|version| version.date),
+            created,
+            image: first.and_then(|version| version.image.clone()),
+            author: None,
+        },
+        first.map(|version| version.text.clone()).unwrap_or_default(),
+    )
 }
 
 /// Whether a folder looks like a lazuli project.
@@ -340,10 +382,18 @@ pub fn entry_dir(root: &Path, id: &str) -> PathBuf {
 pub fn read_entry_file(path: &Path) -> Result<(EntryFrontmatter, String)> {
     let contents =
         fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let (yaml, body) = split_frontmatter(&contents)
-        .with_context(|| format!("parsing frontmatter in {}", path.display()))?;
-    let frontmatter: EntryFrontmatter = serde_yaml::from_str(yaml)
-        .with_context(|| format!("parsing frontmatter in {}", path.display()))?;
+    parse_entry(&contents).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// An `entry.md`'s frontmatter and body, from its text.
+///
+/// Separate from [`read_entry_file`] so that one side of a conflict, which is a
+/// file's worth of text that is not a file, can be read the same way — see
+/// [`crate::conflicts`].
+pub fn parse_entry(contents: &str) -> Result<(EntryFrontmatter, String)> {
+    let (yaml, body) = split_frontmatter(contents).context("reading the frontmatter")?;
+    let frontmatter: EntryFrontmatter =
+        serde_yaml::from_str(yaml).context("reading the frontmatter")?;
     Ok((frontmatter, body.to_owned()))
 }
 
@@ -710,6 +760,140 @@ mod tests {
         let project = read_project(&dir.0).expect("should read");
         assert_eq!(project.entries[0].author.as_deref(), Some("author-1"));
         assert_eq!(project.entries[0].text, "Edited by someone else");
+    }
+
+    #[test]
+    fn an_entry_left_in_two_minds_by_a_merge_stays_on_the_timeline() {
+        // The bug this fixes: conflict markers make the file unparseable, the
+        // scan skipped it, and the entry left the timeline without a word.
+        let dir = TempDir::new("conflict-visible");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let entry = dir.0.join(ENTRIES_DIR).join("conflicted");
+        fs::create_dir_all(&entry).expect("should create");
+        fs::write(
+            entry.join(ENTRY_FILE),
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\n\
+             <<<<<<< HEAD\nThe roof went on.\n=======\nPut the roof on.\n>>>>>>> theirs\n",
+        )
+        .expect("should write");
+
+        let project = read_project(&dir.0).expect("should read");
+
+        assert_eq!(project.entries.len(), 1, "the entry is still there");
+        let conflict = project.entries[0]
+            .conflict
+            .as_ref()
+            .expect("it should be marked as conflicted");
+        assert_eq!(conflict.versions.len(), 2);
+        assert_eq!(conflict.versions[0].text, "The roof went on.");
+        assert_eq!(conflict.versions[1].text, "Put the roof on.");
+        // On its own day, rather than adrift at one end of the timeline.
+        assert_eq!(project.entries[0].journal_date, date(2026, 6, 10));
+    }
+
+    #[test]
+    fn a_second_copy_left_by_a_syncer_is_offered_beside_the_first() {
+        let dir = TempDir::new("conflict-sidecar");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let entry = dir.0.join(ENTRIES_DIR).join("two-copies");
+        fs::create_dir_all(&entry).expect("should create");
+        fs::write(
+            entry.join(ENTRY_FILE),
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\nMine.\n",
+        )
+        .expect("should write");
+        fs::write(
+            entry.join("entry.sync-conflict-20260610-090000-ABCDEFG.md"),
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\nTheirs.\n",
+        )
+        .expect("should write");
+
+        let project = read_project(&dir.0).expect("should read");
+
+        let conflict = project.entries[0]
+            .conflict
+            .as_ref()
+            .expect("should be conflicted");
+        assert_eq!(conflict.versions.len(), 2);
+        assert_eq!(conflict.versions[0].text, "Mine.");
+        assert_eq!(conflict.versions[1].text, "Theirs.");
+        // The entry itself still reads normally while it waits to be settled.
+        assert_eq!(project.entries[0].text, "Mine.");
+    }
+
+    #[test]
+    fn an_ordinary_entry_is_not_conflicted() {
+        let dir = TempDir::new("conflict-none");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        create_entry(&dir.0, date(2026, 6, 10), ts("2026-06-10T09:00:00+02:00"), None)
+            .expect("should add");
+        assert!(read_project(&dir.0).expect("should read").entries[0]
+            .conflict
+            .is_none());
+    }
+
+    #[test]
+    fn keeping_one_version_leaves_the_entry_settled_and_the_rest_in_the_trash() {
+        let dir = TempDir::new("conflict-resolve");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let entry = dir.0.join(ENTRIES_DIR).join("conflicted");
+        fs::create_dir_all(&entry).expect("should create");
+        fs::write(
+            entry.join(ENTRY_FILE),
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\n\
+             <<<<<<< HEAD\nMine.\n=======\nTheirs.\n>>>>>>> theirs\n",
+        )
+        .expect("should write");
+
+        let project = read_project(&dir.0).expect("should read");
+        let conflict = project.entries[0]
+            .conflict
+            .clone()
+            .expect("should be conflicted");
+        crate::conflicts::resolve(&dir.0, &entry, &conflict, 1, None).expect("should resolve");
+
+        let settled = read_project(&dir.0).expect("should read");
+        assert_eq!(settled.entries[0].text, "Theirs.");
+        assert!(settled.entries[0].conflict.is_none(), "no longer in two minds");
+        assert_eq!(settled.entries[0].journal_date, date(2026, 6, 10));
+        // The version that lost is recoverable, not gone.
+        assert_eq!(crate::trashcan::list(&dir.0).len(), 1);
+    }
+
+    #[test]
+    fn settling_a_conflict_keeps_the_entry_created_stamp() {
+        // It says when the entry was made, which choosing between two sentences
+        // does not change — and it is what orders entries sharing a day.
+        let dir = TempDir::new("conflict-created");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let entry = dir.0.join(ENTRIES_DIR).join("conflicted");
+        fs::create_dir_all(&entry).expect("should create");
+        fs::write(
+            entry.join(ENTRY_FILE),
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\nMine.\n",
+        )
+        .expect("should write");
+        fs::write(
+            entry.join("entry (Jules's conflicted copy 2026-06-11).md"),
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\nTheirs.\n",
+        )
+        .expect("should write");
+
+        let project = read_project(&dir.0).expect("should read");
+        let conflict = project.entries[0]
+            .conflict
+            .clone()
+            .expect("should be conflicted");
+        crate::conflicts::resolve(&dir.0, &entry, &conflict, 1, None).expect("should resolve");
+
+        let (frontmatter, _) =
+            read_entry_file(&entry.join(ENTRY_FILE)).expect("should read");
+        assert_eq!(
+            frontmatter.created.to_rfc3339(),
+            ts("2026-06-10T09:00:00+02:00").to_rfc3339()
+        );
+        // And the syncer's file is gone from beside it.
+        assert!(crate::conflicts::sidecars(&entry).is_empty());
     }
 
     #[test]

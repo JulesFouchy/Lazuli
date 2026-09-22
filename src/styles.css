@@ -999,6 +999,59 @@ body.dragging * {
   white-space: nowrap;
 }
 
+/* An entry that arrived twice. Outlined rather than tinted: it is a question
+   waiting for an answer, not a failure, and the timeline should still read as a
+   timeline while one sits in it. */
+.card--conflicted {
+  border-color: var(--accent-line);
+}
+
+.conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 16px;
+  cursor: default;
+}
+
+.conflict__why {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.conflict__version {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.conflict__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The sentence as it stands in that version, markers and all: this is the one
+   place the app shows what is in the file rather than what it renders to. */
+.conflict__text {
+  align-self: stretch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.conflict__text--empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 /* A picture of a person is round everywhere else, and round is also what tells
    this button apart from the square, labelled ones beside it. */
 .avatar {

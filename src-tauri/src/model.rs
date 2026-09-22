@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::authors;
+use crate::conflicts;
 use crate::dates;
 
 /// `lazuli.yaml` at the root of a project folder.
@@ -142,6 +143,9 @@ pub struct Entry {
     /// The UI shows it only when a project holds more than one author, so a
     /// solo journal reads exactly as it always has.
     pub author: Option<String>,
+    /// Set when the entry arrived in more than one version and one has to be
+    /// chosen. `None` for every ordinary entry, which is nearly all of them.
+    pub conflict: Option<conflicts::Conflict>,
 }
 
 /// A whole project, read from disk.
@@ -184,6 +188,9 @@ impl Project {
             journal_date,
             day_number: dates::day_number(start_date, journal_date),
             author: frontmatter.author,
+            // Filled in by the scan, which is what reads the folder around the
+            // entry and so is the only thing that can see a second version.
+            conflict: None,
         }
     }
 }

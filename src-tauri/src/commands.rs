@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::atomic;
 use crate::authors;
+use crate::conflicts;
 use crate::dates;
 use crate::library::{self, Slot};
 use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
@@ -1072,6 +1073,43 @@ pub async fn restore_project(
     let actual = path.with_file_name(restored_as);
     restore_listing(app, actual.clone(), slot);
     Ok(actual)
+}
+
+/// Settle a conflicted entry by keeping one of its versions.
+///
+/// The versions are the ones the last scan offered, in that order. Whatever was
+/// in `entry.md`, and any file a syncer left beside it, go to the project's
+/// trash rather than being removed: choosing between two versions of a sentence
+/// is exactly the kind of decision somebody wants back an hour later.
+#[tauri::command]
+pub fn resolve_conflict(
+    app: AppHandle,
+    state: State<AppState>,
+    id: String,
+    version: usize,
+) -> CmdResult<()> {
+    let me = author(&app);
+    with_project(&app, &state, |open| {
+        let root = root_of(open);
+        let entry = open
+            .snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .ok_or_else(|| anyhow!("no entry {id} in this project"))?;
+        let conflict = entry
+            .conflict
+            .as_ref()
+            .ok_or_else(|| anyhow!("that entry is not in two minds"))?;
+        conflicts::resolve(
+            &root,
+            &store::entry_dir(&root, &id),
+            conflict,
+            version,
+            me.as_ref().map(|(id, _)| id.as_str()),
+        )
+    })?;
+    Ok(())
 }
 
 /// Everything sitting in a project's trash, newest first.

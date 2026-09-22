@@ -22,6 +22,8 @@ export interface TimelineHandlers {
   /** A click anywhere else on the card. */
   editEntry: (entry: Entry) => void;
   deleteEntry: (entry: Entry) => void;
+  /** Settle an entry that arrived in more than one version. */
+  resolveConflict: (entry: Entry, version: number) => void;
 }
 
 /**
@@ -129,6 +131,55 @@ function authorLabel(project: Project, entry: Entry): HTMLElement | false {
   );
 }
 
+/**
+ * The choice an entry that arrived twice has to be settled with.
+ *
+ * Shown on the card rather than behind a dialog, because an unsettled entry is
+ * something to notice while reading the timeline, not something to go looking
+ * for. Prose is never merged for you — that is `wip.md`'s own rule — so both
+ * versions are here in full and one of them wins.
+ */
+function conflictChoice(entry: Entry, handlers: TimelineHandlers): HTMLElement {
+  const conflict = entry.conflict;
+  if (!conflict) return el("div");
+  return el(
+    "div",
+    {
+      class: "conflict",
+      // The card beneath opens the editor, which is not what any click in here
+      // means.
+      onclick: (event: Event) => event.stopPropagation(),
+    },
+    el("p", {
+      class: "conflict__why",
+      text:
+        conflict.kind === "markers"
+          ? "This entry came back from a merge in two versions. Keep one."
+          : "Two copies of this entry arrived. Keep one.",
+    }),
+    ...conflict.versions.map((version, index) =>
+      el(
+        "div",
+        { class: "conflict__version" },
+        el("div", { class: "conflict__label", text: version.label }),
+        el("div", {
+          class: version.text ? "conflict__text" : "conflict__text conflict__text--empty",
+          text: version.text || "No note",
+        }),
+        el("button", {
+          class: "button",
+          text: "Keep this one",
+          onclick: () => handlers.resolveConflict(entry, index),
+        }),
+      ),
+    ),
+    el("p", {
+      class: "hint",
+      text: "The one you do not keep goes to the project's trash, not away.",
+    }),
+  );
+}
+
 function entryCard(
   project: Project,
   entry: Entry,
@@ -137,7 +188,7 @@ function entryCard(
   const card = el(
     "article",
     {
-      class: "card",
+      class: entry.conflict ? "card card--conflicted" : "card",
       // So the viewer can put the page back on whichever card it ended on.
       "data-entry": entry.id,
       // The card edits, the picture views. Everything on a card other than the
@@ -167,11 +218,14 @@ function entryCard(
     // A `div` and not a `p`: the note can hold a heading or a list, and a
     // paragraph cannot legally contain either — the browser would close the
     // `p` before them and the card's own text would end up outside it.
-    el(
-      "div",
-      { class: entry.text ? "card__text" : "card__text card__text--empty" },
-      entry.text ? renderBlocks(entry.text) : "No note yet",
-    ),
+    !entry.conflict &&
+      el(
+        "div",
+        { class: entry.text ? "card__text" : "card__text card__text--empty" },
+        entry.text ? renderBlocks(entry.text) : "No note yet",
+      ),
+    // In place of the note, because the whole question is which note this is.
+    !!entry.conflict && conflictChoice(entry, handlers),
     // No picture, no frame for one: an entry that is only a sentence is a
     // small card, not a card with a hole in it.
     entry.image !== null &&
