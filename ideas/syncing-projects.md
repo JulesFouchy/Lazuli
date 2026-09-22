@@ -41,7 +41,7 @@ Each stands on its own, and each was a prerequisite.
 
 **Lazy materialisation**: text first so a project's timeline is complete within a round trip, then its pictures. Today a project syncs whole, which is right for a journal of a few hundred entries and wrong for one of several thousand.
 
-**A client id.** Nothing that talks to Google has ever run without one; see the README.
+**Everything here has now been run against a real Drive**, so what is left is features rather than doubt.
 
 **A way in on Android**, when there is an Android build. It needs its own OAuth client — Google pins a mobile one to the package name and the signing certificate, where a desktop one is anonymous and proves itself with PKCE alone — and its own redirect: `Redirect` in `drive.rs` runs a loopback web server, which a phone has neither the means nor the business to do. A custom URI scheme the OS routes back to the app is the shape. Both clients live in one Cloud project, so the consent screen, the quota and the user's approval are shared, and `DESKTOP_CLIENT_ID` gains a sibling rather than a replacement.
 

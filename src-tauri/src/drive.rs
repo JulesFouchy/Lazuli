@@ -18,15 +18,16 @@
 //! is listed in one paginated query, and each file's path is walked up its
 //! parents to the project's folder. [`paths_from`] is that, and is pure.
 //!
-//! # What is not verified
+//! # What has been run
 //!
-//! Google accepts the client id, the loopback redirect and the scope — that
-//! much has been tried. Everything past the sign-in — the token exchange, and
-//! every call in this file — is written against Google's documentation and
-//! **has not been run against a real account**. The path reconstruction, the
-//! token's expiry rule, the PKCE challenge and the redirect parser are covered
-//! by tests; the responses are not, and the first real sign-in should be
-//! expected to turn up small things.
+//! All of it, once, against a real account: sign-in, the token exchange,
+//! creating a project's folder, listing, uploading, downloading and trashing.
+//! Two folders were reconciled through a real Drive until they held the same
+//! bytes, including an entry deleted on one reaching the other's trash.
+//!
+//! What that first run cost, and is worth not re-learning: a `fields` parameter
+//! is a promise about what comes back, and asking for a subset means
+//! [`DriveFile`] cannot parse the answer — hence [`IdOnly`] and [`Written`].
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,20 @@ use crate::sync::{Backend, RemoteFile};
 /// asked again on their phone.
 pub const DESKTOP_CLIENT_ID: &str =
     "991113913988-hkpcvsdtq4vvvl1jovemgiiceh2o8p0d.apps.googleusercontent.com";
+
+/// The secret Google issues beside it, which is not a secret.
+///
+/// Google's own documentation says so of installed apps: it is compiled into
+/// every copy of the app and anyone may read it out, and it is the reason a
+/// desktop client's *security* rests entirely on PKCE, where the verifier never
+/// leaves the machine. What this is for is that Google's token endpoint
+/// **refuses a desktop exchange without it** — PKCE alone does not stand in for
+/// it, least of all when asking for the offline access that yields a refresh
+/// token, which is the whole point of connecting once.
+///
+/// It grants nothing on its own. A sign-in still needs a person to consent, and
+/// the tokens that come back belong to their machine.
+pub const DESKTOP_CLIENT_SECRET: &str = "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";
 
 /// Asked for at sign-in. `drive.file` and nothing else — the narrowest scope
 /// that can do the job, and the one that keeps the app out of Google's
@@ -221,6 +236,37 @@ impl DriveFile {
     }
 }
 
+/// Drive's answer when only the id was asked for.
+///
+/// A `fields` parameter is a promise about what comes back, and asking for less
+/// means [`DriveFile`] cannot parse it — its `name` is not optional, because a
+/// file in a *listing* without one would be a path we could not build.
+#[derive(Debug, Deserialize)]
+struct IdOnly {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct IdList {
+    #[serde(default)]
+    files: Vec<IdOnly>,
+}
+
+/// What an upload answers with: enough to know what it landed as.
+#[derive(Debug, Deserialize)]
+struct Written {
+    #[serde(rename = "md5Checksum", default)]
+    md5: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+}
+
+impl Written {
+    fn revision(self) -> String {
+        self.md5.or(self.version).unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct FileList {
     #[serde(default)]
@@ -356,17 +402,22 @@ impl Drive {
             )
             .send()
             .context("looking for a folder")?;
-        let list: FileList = json(response)?;
+        let list: IdList = json(response)?;
         if let Some(found) = list.files.first() {
             return Ok(found.id.clone());
         }
 
-        let created: DriveFile = json(
-            self.authorised(self.client.post(format!("{API}/files")).json(&serde_json::json!({
-                "name": name,
-                "mimeType": FOLDER,
-                "parents": [parent],
-            })))
+        let created: IdOnly = json(
+            self.authorised(
+                self.client
+                    .post(format!("{API}/files"))
+                    .query(&[("fields", "id")])
+                    .json(&serde_json::json!({
+                        "name": name,
+                        "mimeType": FOLDER,
+                        "parents": [parent],
+                    })),
+            )
             .send()
             .context("creating a folder")?,
         )?;
@@ -383,7 +434,7 @@ impl Drive {
     /// project the user drags somewhere tidier still works.
     pub fn make_project_folder(access_token: &str, name: &str) -> Result<String> {
         let client = reqwest::blocking::Client::new();
-        let created: DriveFile = json(
+        let created: IdOnly = json(
             client
                 .post(format!("{API}/files"))
                 .bearer_auth(access_token)
@@ -438,7 +489,7 @@ impl Backend for Drive {
             .get(path)
             .map(|file| file.id.clone());
 
-        let uploaded: DriveFile = match existing {
+        let uploaded: Written = match existing {
             // Replacing what is there: the contents alone, in one request.
             Some(id) => json(
                 self.authorised(
@@ -527,6 +578,16 @@ fn json<T: serde::de::DeserializeOwned>(response: reqwest::blocking::Response) -
 
 // --- signing in ------------------------------------------------------------
 
+/// Whether this build carries what Google needs to talk to it at all.
+fn check_configured() -> Result<()> {
+    if DESKTOP_CLIENT_ID.is_empty() || DESKTOP_CLIENT_SECRET.is_empty() {
+        bail!(
+            "This build has no Google client id and secret, so it cannot sign in              to Drive. See the README."
+        );
+    }
+    Ok(())
+}
+
 /// Swap the code Google handed back for tokens.
 pub fn exchange(code: &str, pkce: &Pkce, redirect: &str) -> Result<Tokens> {
     if DESKTOP_CLIENT_ID.is_empty() {
@@ -540,6 +601,7 @@ pub fn exchange(code: &str, pkce: &Pkce, redirect: &str) -> Result<Tokens> {
         .post(TOKEN_URL)
         .form(&[
             ("client_id", DESKTOP_CLIENT_ID),
+            ("client_secret", DESKTOP_CLIENT_SECRET),
             ("code", code),
             ("code_verifier", &pkce.verifier),
             ("grant_type", "authorization_code"),
@@ -559,14 +621,13 @@ pub fn exchange(code: &str, pkce: &Pkce, redirect: &str) -> Result<Tokens> {
 
 /// Ask for a new access token with the refresh token.
 pub fn refresh(tokens: &Tokens) -> Result<Tokens> {
-    if DESKTOP_CLIENT_ID.is_empty() {
-        bail!("This build has no Google client id.");
-    }
+    check_configured()?;
     let client = reqwest::blocking::Client::new();
     let response = client
         .post(TOKEN_URL)
         .form(&[
             ("client_id", DESKTOP_CLIENT_ID),
+            ("client_secret", DESKTOP_CLIENT_SECRET),
             ("refresh_token", tokens.refresh_token.as_str()),
             ("grant_type", "refresh_token"),
         ])

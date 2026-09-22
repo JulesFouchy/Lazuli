@@ -94,16 +94,37 @@ pub struct Agreed {
 /// account of what it has seen, and another machine's would be a lie here.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
+    /// Which remote this base describes.
+    ///
+    /// Load-bearing, and learned the hard way: a base is a record of a
+    /// conversation with *one* remote. Applied to a different one it reads every
+    /// file the new remote has not got — which is all of them — as something the
+    /// other side deleted, and deletes it locally. Kept here so that a base
+    /// belonging to another remote can be spotted and dropped instead.
+    #[serde(default)]
+    pub folder: String,
     #[serde(default)]
     pub files: BTreeMap<String, Agreed>,
 }
 
 impl State {
-    pub fn read(root: &Path) -> Self {
-        fs::read_to_string(root.join(STATE_DIR).join(STATE_FILE))
+    /// The base, but only if it is the base for `folder`.
+    ///
+    /// A base from another remote is discarded rather than trusted: with no
+    /// base the two sides are compared from scratch, which at worst costs a
+    /// download and a few conflicts, where the wrong base costs files.
+    pub fn read(root: &Path, folder: &str) -> Self {
+        let stored: Self = fs::read_to_string(root.join(STATE_DIR).join(STATE_FILE))
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if stored.folder == folder {
+            return stored;
+        }
+        Self {
+            folder: folder.to_owned(),
+            files: BTreeMap::new(),
+        }
     }
 
     pub fn write(&self, root: &Path) -> Result<()> {
@@ -222,6 +243,13 @@ pub struct Outcome {
     /// Both sides changed and the bytes really differ; the remote's copy is now
     /// beside ours for the user to choose from.
     pub conflicted: usize,
+    /// Files this pass could not carry, and what stopped the last of them.
+    ///
+    /// One file is not the pass: a photograph that timed out must not hold up
+    /// the sentence in the entry beside it, and the next pass will try it again
+    /// because the base still says it has not been agreed.
+    pub failed: usize,
+    pub problem: Option<String>,
 }
 
 impl Outcome {
@@ -232,7 +260,7 @@ impl Outcome {
 
 /// Bring the project and the remote into agreement, once.
 pub fn run(root: &Path, backend: &dyn Backend) -> Result<Outcome> {
-    let mut state = State::read(root);
+    let mut state = State::read(root, &Config::read(root).folder);
     let local = scan_local(root)?;
     let remote: BTreeMap<String, String> = backend
         .list()
@@ -243,7 +271,15 @@ pub fn run(root: &Path, backend: &dyn Backend) -> Result<Outcome> {
 
     let mut outcome = Outcome::default();
     for action in plan(&local, &remote, &state) {
-        apply(root, backend, &action, &mut state, &mut outcome)?;
+        if let Err(err) = apply(root, backend, &action, &mut state, &mut outcome) {
+            // Carried on from rather than given up at. The base is untouched
+            // for this path, so the next pass sees the same work to do and
+            // tries again — which is what makes a dropped connection cost a
+            // minute rather than a sync.
+            outcome.failed += 1;
+            outcome.problem = Some(format!("{}: {err:#}", action.path()));
+            continue;
+        }
         // Written after each file rather than at the end: a pass that stops
         // halfway — the network drops, the app is closed — must not have to
         // start over, and a base that is behind costs a comparison where a base
@@ -513,6 +549,7 @@ mod tests {
 
     fn base_of(pairs: &[(&str, &str, &str)]) -> State {
         State {
+            folder: String::new(),
             files: pairs
                 .iter()
                 .map(|(path, hash, revision)| {
@@ -679,6 +716,129 @@ mod tests {
 
         assert_eq!(outcome.downloaded, 2);
         assert_eq!(read(&dir.0, "entries/one/entry.md"), "first\n");
+    }
+
+    /// A remote that refuses to write one particular path.
+    struct Awkward {
+        inner: Memory,
+        refuse: String,
+    }
+
+    impl Backend for Awkward {
+        fn list(&self) -> Result<Vec<RemoteFile>> {
+            self.inner.list()
+        }
+        fn get(&self, path: &str) -> Result<Vec<u8>> {
+            self.inner.get(path)
+        }
+        fn put(&self, path: &str, bytes: &[u8], expected: Option<&str>) -> Result<String> {
+            if path == self.refuse {
+                anyhow::bail!("the network went away");
+            }
+            self.inner.put(path, bytes, expected)
+        }
+        fn delete(&self, path: &str) -> Result<()> {
+            self.inner.delete(path)
+        }
+    }
+
+    #[test]
+    fn one_file_failing_does_not_hold_up_the_rest() {
+        // A photograph that timed out must not keep the sentence in the entry
+        // beside it off the other machine.
+        let dir = TempDir::new("sync-partial");
+        write(&dir.0, "lazuli.yaml", "name: P
+");
+        write(&dir.0, "entries/one/entry.md", "a sentence
+");
+        write(&dir.0, "entries/one/photo.jpg", "pretend pixels
+");
+        let remote = Awkward {
+            inner: Memory::default(),
+            refuse: "entries/one/photo.jpg".into(),
+        };
+
+        let outcome = run(&dir.0, &remote).expect("the pass itself should not fail");
+
+        assert_eq!(outcome.uploaded, 2);
+        assert_eq!(outcome.failed, 1);
+        assert!(outcome.problem.as_ref().is_some_and(|p| p.contains("photo.jpg")));
+        assert!(remote.inner.files.borrow().contains_key("entries/one/entry.md"));
+    }
+
+    #[test]
+    fn the_file_that_failed_is_tried_again_next_time() {
+        let dir = TempDir::new("sync-retry");
+        write(&dir.0, "entries/one/photo.jpg", "pretend pixels
+");
+        let remote = Awkward {
+            inner: Memory::default(),
+            refuse: "entries/one/photo.jpg".into(),
+        };
+        assert_eq!(run(&dir.0, &remote).expect("should run").failed, 1);
+
+        // The obstacle goes away; nothing had to be told to retry.
+        let willing = Memory::default();
+        let outcome = run(&dir.0, &willing).expect("should run");
+        assert_eq!(outcome.uploaded, 1);
+        assert_eq!(outcome.failed, 0);
+    }
+
+    #[test]
+    fn a_base_belonging_to_another_remote_is_dropped_rather_than_trusted() {
+        // The bug this exists for: a base is a record of a conversation with one
+        // remote. Applied to a different one, every file the new remote has not
+        // got reads as something the other side deleted — and gets deleted here.
+        // Measured against real Drive, where it removed a `lazuli.yaml`.
+        let dir = TempDir::new("sync-rehomed");
+        State {
+            folder: "the-old-folder".into(),
+            files: [(
+                "lazuli.yaml".to_owned(),
+                Agreed {
+                    hash: "h".into(),
+                    revision: "r".into(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        }
+        .write(&dir.0)
+        .expect("should write");
+
+        assert!(
+            State::read(&dir.0, "a-different-folder").files.is_empty(),
+            "a base for another remote must not be believed"
+        );
+        assert_eq!(State::read(&dir.0, "the-old-folder").files.len(), 1);
+    }
+
+    #[test]
+    fn a_project_pointed_at_a_new_remote_uploads_rather_than_deletes() {
+        let dir = TempDir::new("sync-rehome-run");
+        write(&dir.0, "lazuli.yaml", "name: P
+");
+        let first = Memory::default();
+        Config {
+            folder: "first".into(),
+        }
+        .write(&dir.0)
+        .expect("should write");
+        run(&dir.0, &first).expect("should sync");
+        assert_eq!(first.files.borrow().len(), 1);
+
+        // Pointed somewhere else entirely, with the old base still on disk.
+        Config {
+            folder: "second".into(),
+        }
+        .write(&dir.0)
+        .expect("should write");
+        let second = Memory::default();
+        let outcome = run(&dir.0, &second).expect("should sync");
+
+        assert_eq!(outcome.deleted_here, 0, "nothing may be deleted locally");
+        assert_eq!(outcome.uploaded, 1);
+        assert!(local_path(&dir.0, "lazuli.yaml").exists());
     }
 
     #[test]
@@ -911,6 +1071,7 @@ mod config_tests {
         .write(&dir.0)
         .expect("should write");
         State {
+            folder: "f".into(),
             files: [(
                 "a".to_owned(),
                 Agreed {
@@ -927,7 +1088,7 @@ mod config_tests {
         turn_off(&dir.0).expect("should turn off");
 
         assert!(!Config::read(&dir.0).is_on());
-        assert!(State::read(&dir.0).files.is_empty());
+        assert!(State::read(&dir.0, "f").files.is_empty());
     }
 
     #[test]

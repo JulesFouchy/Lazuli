@@ -33,9 +33,9 @@ pub struct Account {
 
 /// Whether this build can sign in to Google.
 fn why_not() -> Option<String> {
-    drive::DESKTOP_CLIENT_ID.is_empty().then(|| {
-        "This build has no Google client id, so it cannot sign in to Drive. \
-         See the README for how to make one."
+    (drive::DESKTOP_CLIENT_ID.is_empty() || drive::DESKTOP_CLIENT_SECRET.is_empty()).then(|| {
+        "This build has no Google client id and secret, so it cannot sign in to \
+         Drive. See the README."
             .to_owned()
     })
 }
@@ -127,14 +127,27 @@ pub async fn start_syncing(
             bail!("{} is not a Lazuli project", path.display());
         }
         let access = token(&handle)?;
-        // Named after the project rather than its folder, so a person looking
-        // at their Drive can tell what it is.
-        let name = store::read_meta(&path)
-            .map(|meta| meta.name)
-            .unwrap_or_else(|_| "Lazuli project".to_owned());
-        let folder = drive::Drive::make_project_folder(&access, &name)?;
-        sync::Config { folder }.write(&path)?;
-        let backend = drive::Drive::new(access, sync::Config::read(&path).folder)?;
+        // A project that already has a folder keeps it. Making a second one
+        // would strand everything in the first, and — until the base learned to
+        // check which remote it belongs to — would have read the empty new
+        // folder as "the other side deleted everything".
+        let existing = sync::Config::read(&path);
+        let folder = if existing.is_on() {
+            existing.folder
+        } else {
+            // Named after the project rather than its folder, so a person
+            // looking at their Drive can tell what it is.
+            let name = store::read_meta(&path)
+                .map(|meta| meta.name)
+                .unwrap_or_else(|_| "Lazuli project".to_owned());
+            let folder = drive::Drive::make_project_folder(&access, &name)?;
+            sync::Config {
+                folder: folder.clone(),
+            }
+            .write(&path)?;
+            folder
+        };
+        let backend = drive::Drive::new(access, folder)?;
         sync::run(&path, &backend)
     })
     .await;
@@ -143,8 +156,24 @@ pub async fn start_syncing(
     // button that says otherwise is worse than the failure it is hiding.
     Ok(Status {
         on: sync::Config::read(&at).is_on(),
-        problem: outcome.err().map(|err| format!("{err:#}")),
+        problem: problem_in(outcome),
     })
+}
+
+/// What to tell the user, whether the pass failed outright or only in part.
+///
+/// A pass that carried nine files and dropped one is not a success, and saying
+/// nothing about it would leave a photograph quietly not on the other machine.
+fn problem_in(outcome: Result<sync::Outcome>) -> Option<String> {
+    match outcome {
+        Err(err) => Some(format!("{err:#}")),
+        Ok(outcome) if outcome.failed > 0 => Some(format!(
+            "{} of them did not go through — {}",
+            outcome.failed,
+            outcome.problem.unwrap_or_default()
+        )),
+        Ok(_) => None,
+    }
 }
 
 #[tauri::command]
@@ -172,7 +201,7 @@ pub async fn sync_now(
     let outcome = crate::commands::off_thread(move || once(&handle, &path)).await;
     Ok(Status {
         on: sync::Config::read(&at).is_on(),
-        problem: outcome.err().map(|err| format!("{err:#}")),
+        problem: problem_in(outcome),
     })
 }
 
@@ -194,8 +223,14 @@ impl Loop {
                 // Checked every time round rather than once: the user can turn
                 // it on while the project is open.
                 if sync::Config::read(&root).is_on() {
-                    if let Err(err) = once(&app, &root) {
-                        eprintln!("lazuli: sync failed: {err:#}");
+                    match once(&app, &root) {
+                        Err(err) => eprintln!("lazuli: sync failed: {err:#}"),
+                        Ok(outcome) if outcome.failed > 0 => eprintln!(
+                            "lazuli: {} file(s) did not sync: {}",
+                            outcome.failed,
+                            outcome.problem.unwrap_or_default()
+                        ),
+                        Ok(_) => {}
                     }
                 }
                 // In short naps, so closing the project does not wait a minute
