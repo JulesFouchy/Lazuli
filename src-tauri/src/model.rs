@@ -2,13 +2,28 @@
 
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::authors;
 use crate::dates;
 
 /// `lazuli.yaml` at the root of a project folder.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectMeta {
+    /// A UUID for the project itself, minted the first time it is opened.
+    ///
+    /// Everything identifies a project by its path today, and a path stops
+    /// being an identity the moment the folder exists in two places: without
+    /// this, renaming a project on one machine makes the other take the result
+    /// for a second project. Minted early rather than when it is first synced,
+    /// so that a folder copied or committed between machines before then still
+    /// arrives with the same id on both.
+    ///
+    /// Optional only for a `lazuli.yaml` written before the field existed; one
+    /// is written in as it is opened. See [`crate::store::adopt_id`].
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     /// Day 1. A journal date, so a project begun at 03:00 records the previous
     /// calendar day.
@@ -80,6 +95,19 @@ pub struct EntryFrontmatter {
     /// illustration.
     #[serde(default)]
     pub image: Option<String>,
+    /// Who wrote it: an author id, resolved through the project's `authors/`
+    /// folder. See [`crate::authors`].
+    ///
+    /// Written on every new entry from the day the field exists, because it is
+    /// the one thing that cannot be added afterwards — an entry written before
+    /// a project was shared still wants to be attributable when it is. It is
+    /// deliberately *not* backfilled into older entries: rewriting every
+    /// `entry.md` in a journal would touch hundreds of files and show up as a
+    /// diff across the whole thing in a project kept in a repository. An entry
+    /// without one reads as the project's owner, the way an entry without a
+    /// `date` reads through the 5am rule.
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 impl EntryFrontmatter {
@@ -109,6 +137,11 @@ pub struct Entry {
     pub images: Vec<String>,
     pub journal_date: NaiveDate,
     pub day_number: i64,
+    /// Who wrote it, or `None` for an entry from before authors were recorded.
+    ///
+    /// The UI shows it only when a project holds more than one author, so a
+    /// solo journal reads exactly as it always has.
+    pub author: Option<String>,
 }
 
 /// A whole project, read from disk.
@@ -120,6 +153,12 @@ pub struct Project {
     pub entries: Vec<Entry>,
     /// Every file in `cover/`, sorted.
     pub cover_images: Vec<String>,
+    /// Who has written in this project, by author id.
+    ///
+    /// Sent whole rather than a name per entry, because the UI's question is
+    /// "does this project have more than one author" before it is "who wrote
+    /// this one": a solo journal shows no names at all.
+    pub authors: HashMap<String, authors::Profile>,
 }
 
 impl Project {
@@ -144,6 +183,7 @@ impl Project {
             images,
             journal_date,
             day_number: dates::day_number(start_date, journal_date),
+            author: frontmatter.author,
         }
     }
 }
@@ -177,6 +217,7 @@ mod tests {
             created: DateTime::parse_from_rfc3339("2026-06-10T09:00:00+02:00")
                 .expect("valid test timestamp"),
             image: image.map(str::to_owned),
+            author: None,
         }
     }
 
@@ -230,6 +271,7 @@ mod tests {
             created: DateTime::parse_from_rfc3339("2026-06-10T01:00:00+02:00")
                 .expect("valid test timestamp"),
             image: None,
+            author: None,
         };
         assert_eq!(
             frontmatter.journal_date(),
@@ -246,6 +288,7 @@ mod tests {
             created: DateTime::parse_from_rfc3339("2026-06-10T01:00:00+02:00")
                 .expect("valid test timestamp"),
             image: None,
+            author: None,
         };
         assert_eq!(
             frontmatter.journal_date(),

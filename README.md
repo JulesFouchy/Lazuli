@@ -14,17 +14,21 @@ A project is a folder of plain files. No database, no app-owned store, nothing t
 
 ```
 <project>/
-  lazuli.yaml            name, start date, chosen cover
+  lazuli.yaml            id, name, start date, chosen cover
   cover/                    every cover image ever added
   entries/
     <uuid>/
       entry.md              YAML frontmatter + the sentence
       IMG_4821.jpg          every image tried for this entry
       IMG_4822.jpg
+  authors/
+    <uuid>/profile.yaml     a name for whoever has written here
   .lazuli-trash/            what you deleted, for thirty days
 ```
 
 Open the folder in an editor, a git repo, or Explorer and it still makes sense. Edit an `entry.md` by hand and the app picks the change up while you watch.
+
+An entry records who wrote it, and a card shows that name only once a project has more than one author — put a project somewhere two people can both write to and the timeline says who did what; keep it to yourself and nothing changes.
 
 Nothing is thrown away on your behalf: every image you tried for an entry stays in its folder, the app just records which one is chosen. Deleting is always something you did, and Ctrl+Z takes it back — what you delete moves into `.lazuli-trash/` inside the project, where it stays for thirty days before being passed on to the Recycle Bin. It is in the folder the whole time, so you can take it back by hand, and so can the other machines the folder reaches.
 

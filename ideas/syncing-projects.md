@@ -19,15 +19,18 @@ What is left to conflict is small: the body, `date:` and `image:` of one entry e
 
 ## Already built
 
-Deleting moves into `.lazuli-trash/` rather than the system bin, so a delete is a change that can travel and be undone anywhere, and every persisted write goes through `atomic::write`, so a second writer cannot observe half a file. Both were prerequisites; both stand on their own.
+- **The trash.** Deleting moves into `.lazuli-trash/` rather than the system bin, so a delete is a change that can travel and be undone anywhere.
+- **Atomic writes.** Every persisted write goes through `atomic::write`, so a second writer cannot observe half a file.
+- **Identity.** `id:` in `lazuli.yaml`, minted on open. `author:` on every new entry. A profile — author uuid and name — in the app's own settings, *published* into each project at `authors/<uuid>/profile.yaml` when the user writes there, because a collaborator can read neither our settings nor our account. A card shows a name only once a project has more than one author.
+- **Migration.** Every new field defaulted; `lazuli.yaml` gains a line and no `entry.md` is touched. An absent `author:` reads as the project's owner rather than being backfilled.
+
+Each stands on its own, and each was a prerequisite.
 
 ## Still to do
 
-**Identity.** An `id:` in `lazuli.yaml`, because a path stops being an identity once the folder exists twice. An `author:` on every new entry, written always and *shown* only once a project has more than one author. A profile — author uuid, name, avatar — set once in the app's own settings and *published* into each project at `authors/<uuid>/profile.yaml`, because a collaborator can read neither our settings nor our Google account. A per-project `display_name:` override, the Discord model.
+**The rest of identity**, once there is something to set it with and something to sync to: an avatar, the `accounts:` list that lets a second device recognise its own author, and the per-project `display_name:` override, the Discord model. They are left out until then rather than written and unreachable — the file gains fields the way `lazuli.yaml` has.
 
 No `id:` or `modified:` inside `entry.md`: the folder UUID is already the identity and nothing renames it, and a sync base beats last-writer-wins.
-
-**Migration.** Every new field defaulted, as `date:` already is. `id:` is minted and written on open; `author:` is *never* backfilled — rewriting it into every `entry.md` would touch hundreds of files and produce a diff across a whole journal in a tracked repository. An absent author reads as the project's owner.
 
 **A sync base.** `.lazuli/sync-state.json`, per device and never synced, holding each file's hash as of the last sync. This is the common ancestor git would have given for free, and without it "they changed it" cannot be told from "I changed it".
 
@@ -55,7 +58,7 @@ Syncing is per project and opt-in; the setting is per device, in `.lazuli/sync.j
 
 ## Why not yet
 
-Because it is large, and because the pieces it rests on are worth having on their own. The trash and atomic writes are in. The rest wants doing in order — identity and migration, then thumbnails, then conflicts, then the engine and the backend — and each step is shippable before the next.
+Because it is large, and because the pieces it rests on are worth having on their own. The trash, atomic writes and identity are in. The rest wants doing in order — thumbnails, then conflicts, then the sync base, the engine and the backend — and each step is shippable before the next. The sync base in particular is deliberately last of the file-format work: nothing reads or writes it until there is an engine, and a format in the tree that nothing uses is the thing `video-export.md` says cost more than it saved.
 
 ## A browser version, later
 

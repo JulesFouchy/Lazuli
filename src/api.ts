@@ -8,6 +8,8 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { plainText } from "./markdown";
 
 export interface ProjectMeta {
+  /** A UUID for the project, minted the first time it is opened. */
+  id: string | null;
   name: string;
   /** `YYYY-MM-DD`. A journal date: Day 1. */
   start_date: string;
@@ -41,6 +43,18 @@ export interface Entry {
    */
   journal_date: string;
   day_number: number;
+  /**
+   * Who wrote it, as an author id to look up in the project's `authors`.
+   *
+   * Null for an entry from before authors were recorded. Shown only when a
+   * project has more than one author, so a solo journal reads as it always has.
+   */
+  author: string | null;
+}
+
+/** What a project records about one of its authors. */
+export interface AuthorProfile {
+  name: string;
 }
 
 export interface Project {
@@ -49,6 +63,8 @@ export interface Project {
   /** Oldest first. */
   entries: Entry[];
   cover_images: string[];
+  /** Everyone who has written here, by author id. */
+  authors: Record<string, AuthorProfile>;
 }
 
 /** A project as the launch screen lists it, without opening it. */

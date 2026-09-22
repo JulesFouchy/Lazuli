@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::atomic;
+use crate::authors;
 use crate::model::{
     is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta, SortOrder,
 };
@@ -127,6 +128,7 @@ impl ProjectStore {
             meta,
             entries,
             cover_images,
+            authors: authors::read_all(&self.root),
         })
     }
 
@@ -267,6 +269,7 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
         .with_context(|| format!("creating {}", root.join(COVER_DIR).display()))?;
 
     let meta = ProjectMeta {
+        id: Some(uuid::Uuid::new_v4().to_string()),
         name: name.to_owned(),
         start_date,
         cover: None,
@@ -280,11 +283,14 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
 /// Create an entry folder with an empty `entry.md`, returning its id.
 ///
 /// `date` is the day the entry is about; `created` is the moment it was made,
-/// which is only ever used to order entries that share a day.
+/// which is only ever used to order entries that share a day. `author` is who
+/// is writing it, recorded now because it is the one thing that cannot be
+/// worked out afterwards.
 pub fn create_entry(
     root: &Path,
     date: NaiveDate,
     created: DateTime<FixedOffset>,
+    author: Option<&str>,
 ) -> Result<String> {
     let id = uuid::Uuid::new_v4().to_string();
     let dir = root.join(ENTRIES_DIR).join(&id);
@@ -295,9 +301,35 @@ pub fn create_entry(
             date: Some(date),
             created,
             image: None,
+            author: author.map(str::to_owned),
         },
         "",
     )?;
+    Ok(id)
+}
+
+/// Give a project an `id` if it has none, and say what it is.
+///
+/// Called as the project is opened, before the watcher exists, like
+/// [`migrate_meta`]. A project that cannot be written to — one shared
+/// read-only, or a folder on a read-only medium — keeps the id in memory for
+/// the session rather than refusing to open: the id matters for syncing, and
+/// not being able to sync is a smaller problem than not being able to read.
+pub fn adopt_id(root: &Path) -> Result<String> {
+    let mut meta = read_meta(root)?;
+    if let Some(id) = meta.id {
+        return Ok(id);
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    meta.id = Some(id.clone());
+    // A file the app wrote gains one line and keeps the rest byte for byte,
+    // because it is already in field order. One edited by hand into another
+    // order, or carrying comments, comes back in field order without them —
+    // once, and it is the same rewrite any other setting would have caused.
+    //
+    // Failure is deliberately not an error: a project shared read-only, or one
+    // on a read-only medium, keeps the id for the session and opens.
+    let _ = write_meta(root, &meta);
     Ok(id)
 }
 
@@ -481,7 +513,7 @@ mod tests {
         create_project(&dir.0, "Woodworking bench", date(2026, 6, 1))
             .expect("should create a project");
 
-        let id = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T21:00:00+02:00"))
+        let id = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T21:00:00+02:00"), None)
             .expect("should add entry");
         update_entry(
             &dir.0,
@@ -539,11 +571,11 @@ mod tests {
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
 
         // Added out of order, with two entries sharing Day 39.
-        let later = create_entry(&dir.0, date(2026, 7, 10), ts("2026-07-10T09:00:00+02:00"))
+        let later = create_entry(&dir.0, date(2026, 7, 10), ts("2026-07-10T09:00:00+02:00"), None)
             .expect("should add");
-        let second = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T22:00:00+02:00"))
+        let second = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T22:00:00+02:00"), None)
             .expect("should add");
-        let first = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T14:00:00+02:00"))
+        let first = create_entry(&dir.0, date(2026, 7, 9), ts("2026-07-09T14:00:00+02:00"), None)
             .expect("should add");
 
         let project = read_project(&dir.0).expect("should read");
@@ -560,7 +592,7 @@ mod tests {
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
         // Written at 01:00 but marked as the 10th: the file says which day it
         // is about, and nothing re-derives it from the clock.
-        create_entry(&dir.0, date(2026, 7, 10), ts("2026-07-10T01:00:00+02:00"))
+        create_entry(&dir.0, date(2026, 7, 10), ts("2026-07-10T01:00:00+02:00"), None)
             .expect("should add");
 
         let project = read_project(&dir.0).expect("should read");
@@ -587,11 +619,104 @@ mod tests {
         assert_eq!(project.entries[0].text, "Still up.");
     }
 
+    /// Exactly what the app wrote before projects and entries had identities.
+    fn write_a_project_from_before_identity(dir: &Path) {
+        fs::write(
+            dir.join(META_FILE),
+            "name: Old\nstart_date: 2026-06-01\ncover: null\ndate_format: real\nsort_order: newest\n",
+        )
+        .expect("should write the meta file");
+        let entry = dir.join(ENTRIES_DIR).join("legacy-id");
+        fs::create_dir_all(&entry).expect("should create");
+        fs::write(
+            entry.join(ENTRY_FILE),
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\nBefore any of this.\n",
+        )
+        .expect("should write");
+    }
+
+    #[test]
+    fn a_project_from_before_ids_reads_and_is_given_one() {
+        let dir = TempDir::new("adopt-id");
+        write_a_project_from_before_identity(&dir.0);
+
+        let id = adopt_id(&dir.0).expect("should adopt");
+        assert!(!id.is_empty());
+        assert_eq!(read_meta(&dir.0).expect("should read").id.as_deref(), Some(id.as_str()));
+    }
+
+    #[test]
+    fn a_project_that_already_has_an_id_keeps_it() {
+        // Minting a second one would make one project look like two.
+        let dir = TempDir::new("keep-id");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let first = adopt_id(&dir.0).expect("should adopt");
+        assert_eq!(adopt_id(&dir.0).expect("should adopt"), first);
+    }
+
+    #[test]
+    fn adopting_an_id_leaves_every_entry_file_alone() {
+        // The migration must not rewrite the journal: in a project kept in a
+        // repository that would be a diff across the whole of it.
+        let dir = TempDir::new("adopt-untouched");
+        write_a_project_from_before_identity(&dir.0);
+        let entry_file = dir.0.join(ENTRIES_DIR).join("legacy-id").join(ENTRY_FILE);
+        let before = fs::read(&entry_file).expect("should read");
+
+        adopt_id(&dir.0).expect("should adopt");
+
+        assert_eq!(fs::read(&entry_file).expect("should read"), before);
+    }
+
+    #[test]
+    fn an_entry_from_before_authors_reads_with_none() {
+        let dir = TempDir::new("legacy-author");
+        write_a_project_from_before_identity(&dir.0);
+
+        let project = read_project(&dir.0).expect("should read");
+        assert_eq!(project.entries[0].author, None);
+        // And everything it always showed is unchanged.
+        assert_eq!(project.entries[0].journal_date, date(2026, 6, 10));
+        assert_eq!(project.entries[0].text, "Before any of this.");
+    }
+
+    #[test]
+    fn a_new_entry_records_who_wrote_it() {
+        let dir = TempDir::new("entry-author");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let created = DateTime::parse_from_rfc3339("2026-06-10T09:00:00+02:00")
+            .expect("valid test timestamp");
+
+        create_entry(&dir.0, date(2026, 6, 10), created, Some("author-1"))
+            .expect("should create");
+
+        let project = read_project(&dir.0).expect("should read");
+        assert_eq!(project.entries[0].author.as_deref(), Some("author-1"));
+    }
+
+    #[test]
+    fn editing_an_entry_does_not_change_who_wrote_it() {
+        // Editing someone else's sentence does not make it yours.
+        let dir = TempDir::new("author-kept");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let created = DateTime::parse_from_rfc3339("2026-06-10T09:00:00+02:00")
+            .expect("valid test timestamp");
+        let id = create_entry(&dir.0, date(2026, 6, 10), created, Some("author-1"))
+            .expect("should create");
+
+        update_entry(&dir.0, &id, None, Some("Edited by someone else"), None)
+            .expect("should update");
+
+        let project = read_project(&dir.0).expect("should read");
+        assert_eq!(project.entries[0].author.as_deref(), Some("author-1"));
+        assert_eq!(project.entries[0].text, "Edited by someone else");
+    }
+
     #[test]
     fn a_malformed_entry_is_skipped_not_fatal() {
         let dir = TempDir::new("malformed");
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
-        let good = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"))
+        let good = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"), None)
             .expect("should add");
 
         let broken = dir.0.join(ENTRIES_DIR).join("not-a-uuid");
@@ -607,7 +732,7 @@ mod tests {
     fn the_cache_serves_unchanged_files_and_notices_edits() {
         let dir = TempDir::new("cache");
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
-        let id = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"))
+        let id = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"), None)
             .expect("should add");
 
         let mut store = ProjectStore::new(&dir.0);
@@ -708,6 +833,7 @@ mod tests {
     #[test]
     fn meta_round_trips_through_yaml() {
         let meta = ProjectMeta {
+            id: Some("project-uuid".into()),
             name: "Woodworking bench".into(),
             start_date: date(2026, 6, 1),
             cover: Some("sunset-take2.jpg".into()),

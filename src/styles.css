@@ -980,6 +980,15 @@ body.dragging * {
   flex: 1;
 }
 
+/* Who wrote an entry, on a project more than one person writes in. Quiet, and
+   pushed to the far end of the row: the date is what the eye runs down. */
+.card__author {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
 /* The photograph is inset and ringed rather than bled to the card's edges. A
    dark photo on the dark theme has no edge of its own, and without the ring it
    reads as a hole in the card instead of a picture in it. */

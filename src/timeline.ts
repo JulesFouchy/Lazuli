@@ -101,6 +101,25 @@ function gapConnector(days: number): HTMLElement {
   );
 }
 
+/**
+ * Who wrote this one, shown only when the project has more than one author.
+ *
+ * A journal one person keeps is not a list of who did what, and a name on every
+ * card of it would be noise the whole way down. The moment somebody else writes
+ * here it stops being noise and starts being the point.
+ *
+ * An entry with no author is one written before authors were recorded, and it
+ * is left unlabelled rather than guessed at.
+ */
+function authorLabel(project: Project, entry: Entry): HTMLElement | false {
+  if (Object.keys(project.authors).length < 2) return false;
+  const name = entry.author && project.authors[entry.author]?.name;
+  return (
+    !!name &&
+    el("span", { class: "card__author", text: name, title: "Who wrote this" })
+  );
+}
+
 function entryCard(
   project: Project,
   entry: Entry,
@@ -130,7 +149,12 @@ function entryCard(
     },
     // No pencil: the card itself is the edit button, so a second one beside the
     // date was a control that did what clicking next to it already did.
-    el("header", { class: "card__head" }, dateToggle(entry)),
+    el(
+      "header",
+      { class: "card__head" },
+      dateToggle(entry),
+      authorLabel(project, entry),
+    ),
     // A `div` and not a `p`: the note can hold a heading or a list, and a
     // paragraph cannot legally contain either — the browser would close the
     // `p` before them and the card's own text would end up outside it.

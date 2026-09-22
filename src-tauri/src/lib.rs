@@ -5,6 +5,7 @@
 //! how external edits get noticed.
 
 pub mod atomic;
+pub mod authors;
 pub mod camera;
 pub mod commands;
 pub mod dates;

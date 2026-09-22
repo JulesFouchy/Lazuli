@@ -9,6 +9,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::atomic;
+use crate::authors;
 use crate::dates;
 use crate::library::{self, Slot};
 use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
@@ -204,6 +205,11 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
     // it happen: a project written by a build from before the rename gets its
     // marker file renamed here, once.
     store::migrate_meta(&path)?;
+
+    // Before the watcher too, and once: a project made before the field existed
+    // is given an id here, so that a folder copied to a second machine after
+    // this point is recognisably the same project on both.
+    store::adopt_id(&path)?;
 
     // Also before the watcher: an expired deletion hands its contents on to the
     // system Recycle Bin here, which is a write the watcher would otherwise see
@@ -488,8 +494,20 @@ pub fn create_entry(
     date: Option<NaiveDate>,
 ) -> CmdResult<String> {
     let date = date.unwrap_or_else(dates::today);
+    let me = author(&app);
     Ok(with_project(&app, &state, |open| {
-        store::create_entry(&root_of(open), date, Local::now().fixed_offset())
+        let root = root_of(open);
+        // Writing to the project is what publishes the name, so that a project
+        // only ever read does not gain a folder naming whoever looked at it.
+        if let Some((id, profile)) = &me {
+            authors::publish(&root, id, profile);
+        }
+        store::create_entry(
+            &root,
+            date,
+            Local::now().fixed_offset(),
+            me.as_ref().map(|(id, _)| id.as_str()),
+        )
     })?)
 }
 
@@ -1078,6 +1096,51 @@ struct Settings {
     /// open dark says nothing about *which* dark the user picked.
     background_dark: Option<String>,
     background_light: Option<String>,
+    /// Who this user is, minted on first use and stable from then on.
+    ///
+    /// Global rather than per project, and per *person* rather than per
+    /// install: a second device is meant to end up with this same id, so that a
+    /// phone and a laptop are one author rather than two collaborators. Nothing
+    /// carries it across yet — that happens when a project can be synced, by
+    /// matching the account in a project's `authors/` folder — so a second
+    /// machine mints its own for now and the two are reconciled then.
+    author_id: Option<String>,
+    /// The name published into the projects this user writes to. Defaulted from
+    /// the machine, and theirs to change once there is a screen to change it on.
+    author_name: Option<String>,
+}
+
+/// Who the user is, minting and storing an identity the first time it is asked
+/// for.
+///
+/// Returns `None` only when there is nowhere to store settings, in which case
+/// entries are written without an author rather than with one that would be
+/// different on every launch.
+fn author(app: &AppHandle) -> Option<(String, authors::Profile)> {
+    let mut settings = read_settings(app);
+    let known = settings.author_id.is_some() && settings.author_name.is_some();
+
+    let id = settings
+        .author_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let name = settings
+        .author_name
+        .clone()
+        .unwrap_or_else(authors::name_from_the_machine);
+
+    if !known {
+        settings.author_id = Some(id.clone());
+        settings.author_name = Some(name.clone());
+        write_settings(app, &settings);
+        // Only an identity that was actually stored is one the next launch will
+        // agree with, and an author id that changes every launch is worse than
+        // no author id at all: it would make one person look like a crowd.
+        if read_settings(app).author_id.as_deref() != Some(id.as_str()) {
+            return None;
+        }
+    }
+    Some((id, authors::Profile { name }))
 }
 
 /// The stored appearance, for whoever is building the window.
