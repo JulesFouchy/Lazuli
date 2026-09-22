@@ -1,4 +1,11 @@
 ## Triage
+- when deleting an entry, the text should just say "delete"
+- we should also be able to use video instead of an image for an entry, and would call if i can record it directly from Lazuli : open record mode, go to your app, press a shortcut to start recording, do your thing, same shortcut to stop recording. This records fullscreen, simple. (or do the same rect selector as screen-to-gif ? With auto-fitting on a window ?)
+- callendar view, with the image as the background of the calendar square
+- drag to reorder entries within a single day
+
+- quick button to swithcch betwn light and dark thele
+- should always have the inital entry "Project started" on day 1 so we can see the gap between day 1 and first entry (or not, usually first entry is project creation, i only have the problme with projects i started before Lazuli) Or maybe a project should not have a start date, the first entry IS the start of the project, ,remove the "stared on xxx" sentence on the banner. And then also remove the entries count, and we don't have the readability problem anymore, no more small text on banner
 
 transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
 
