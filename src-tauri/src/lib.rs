@@ -4,6 +4,7 @@
 //! re-read from that folder; see [`store`] for the read path and [`watch`] for
 //! how external edits get noticed.
 
+pub mod atomic;
 pub mod camera;
 pub mod commands;
 pub mod dates;
@@ -13,6 +14,7 @@ pub mod model;
 pub mod paths;
 pub mod store;
 pub mod theme;
+pub mod trashcan;
 pub mod updates;
 pub mod watch;
 
@@ -127,6 +129,8 @@ pub fn run() {
             commands::move_tab,
             commands::trash_project,
             commands::restore_project,
+            commands::trash_contents,
+            commands::restore_trashed,
             commands::set_project_name,
             commands::set_start_date,
             commands::set_cover,

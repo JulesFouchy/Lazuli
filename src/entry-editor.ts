@@ -9,6 +9,7 @@
 import type { Entry, Project } from "./api";
 import { setCover, trashEntry, updateEntry } from "./api";
 import { stopCamera } from "./camera";
+import { formatRealWorld } from "./dates";
 import { renderImagePicker } from "./image-picker";
 import {
   markdownInput,
@@ -56,7 +57,7 @@ export interface EditorContext {
    * Offer an undo for something just deleted.
    *
    * `deleted` resolves to whether the delete actually happened: the toast goes
-   * up before the Recycle Bin has been asked.
+   * up before the move into the trash has been asked for.
    */
   noteDeletion: (what: string, deleted: Promise<boolean>) => void;
 }
@@ -231,7 +232,7 @@ function imagePicker(entry: Entry, context: EditorContext): HTMLElement {
 }
 
 /**
- * Move an entry and its images to the Recycle Bin.
+ * Move an entry and its images into the project's trash.
  *
  * Nothing is asked first: the toast offers Undo, and Ctrl+Z reaches the same
  * place, which is a better answer than a dialog in the way of every delete.
@@ -254,7 +255,9 @@ export function deleteEntry(id: string, context: EditorContext): void {
     },
   );
   // Offered at once, like the card disappearing at once.
-  context.noteDeletion(`the entry from ${entry.journal_date}`, deleted);
+  // Formatted, not the raw `2026-09-20`: every other date on screen reads as a
+  // date, and this one appeared beside them in the trash.
+  context.noteDeletion(`the entry from ${formatRealWorld(entry.journal_date)}`, deleted);
   void deleted.then(() => {
     unmarkDeleting(key);
     context.refresh();
@@ -308,7 +311,7 @@ export function announceDeletion(
   return toast(`Deleted ${what}`, {
     action: {
       label: "Undo",
-      // The toast goes up before the Recycle Bin has been asked, so the undo
+      // The toast goes up before the delete has been asked for, so the undo
       // waits for the answer -- and does nothing if the delete turned out to
       // fail, which would otherwise pop whatever was underneath it.
       run: () => void deleted.then((ok) => ok && undo()),

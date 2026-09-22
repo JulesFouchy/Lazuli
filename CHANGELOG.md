@@ -4,6 +4,11 @@ What changed in each release, for the person using Lazuli rather than the person
 
 Each version's section becomes the release notes verbatim, so write it before cutting the release — `scripts/release.mjs` refuses a version that has no section here, or one whose heading still says "unreleased". Headings are `## <version> — <date>`.
 
+## 0.5.0 — unreleased
+
+- **What you delete stays in the project, and Undo works on a Mac.** Deleting an entry, an image or a whole project used to hand it to the system Recycle Bin, which macOS will not let anything read back — so on a Mac the app could only tell you to go and find it in the Trash yourself. Deletions now move into a `.lazuli-trash/` folder instead: inside the project for an entry or an image, and beside your projects for a whole one. Undo works the same way on all three platforms, what you deleted is sitting in the folder where you can see it, and after thirty days it is passed on to the Recycle Bin — Lazuli still throws nothing away itself.
+- Deleting no longer fails because something else has the file open. The move is a rename now, which nothing can refuse the way the Recycle Bin could.
+
 ## 0.4.0 — 2026-09-22
 
 - **Take the picture with your camera, from inside the entry.** "Take a photo…" sits under the images in the entry editor and in the cover picker: press it and the preview takes the grid's place, press Take photo and the shot is saved into the entry and chosen. The preview is a mirror, like a mirror is, and the picture you keep is the one you saw. A machine with more than one camera gets a button to switch between them.

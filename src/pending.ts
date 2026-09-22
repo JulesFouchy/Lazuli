@@ -1,10 +1,10 @@
 // Things the user has asked to delete, that the filesystem has not caught up
 // on yet.
 //
-// Moving something to the Recycle Bin goes through the Windows shell and can
-// take a second or two, and a folder that something else still holds a handle
-// on takes longer still. Waiting for that before the row disappears makes the
-// click feel broken.
+// A delete is a move into the project's trash, which is a rename and so quick,
+// but it still takes a round trip through Rust and a rescan before the row it
+// removed is gone from the state. Waiting for that before the row disappears
+// makes the click feel broken.
 //
 // This does not make the app believe anything about the project: disk is still
 // the only authority, and `state.project` is still whatever the last scan

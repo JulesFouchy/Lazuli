@@ -112,7 +112,7 @@ async function deleteImage(
   filename: string,
   options: PickerOptions,
 ): Promise<void> {
-  // Gone from the grid at once; back again if the Recycle Bin refuses it.
+  // Gone from the grid at once; back again if the move into the trash fails.
   const key = imageKey(options.directory, filename);
   markDeleting(key);
   options.onChanged();

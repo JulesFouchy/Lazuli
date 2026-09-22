@@ -6,15 +6,16 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::atomic;
 use crate::dates;
 use crate::library::{self, Slot};
 use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
 use crate::theme;
+use crate::trashcan;
 use crate::watch::{self, ProjectWatcher};
 
 /// Emitted whenever a rescan finds the project has actually changed.
@@ -36,13 +37,30 @@ type CmdResult<T> = std::result::Result<T, CmdError>;
 /// One deleted thing, remembered so Ctrl+Z can put it back.
 #[derive(Debug, Clone)]
 struct Trashed {
-    /// Where the file or folder was, before it went to the Recycle Bin.
-    original_path: PathBuf,
+    /// The deletion's id in the project's own trash folder.
+    ///
+    /// An id rather than a path because the file is still in the project: this
+    /// session's stack is only a shortcut to the most recent deletions, and the
+    /// trash view can reach the same ones from any device.
+    id: String,
+    /// What it was, so the toast can say what came back.
+    what: Deleted,
     /// The entry whose `image:` field was cleared by the delete, if any, so
     /// undo restores the choice and not merely the file.
     cleared_choice_for: Option<String>,
     /// Set when the delete cleared the project's chosen cover.
     cleared_cover: bool,
+}
+
+/// What a deletion was, for the sentence the undo puts on screen.
+#[derive(Debug, Clone)]
+enum Deleted {
+    /// An entry folder. Named by a UUID, which is no use in a toast, and which
+    /// nothing can collide with — so it always comes back under its own name.
+    Entry,
+    /// An image, under the filename it had, so undo can say when it had to come
+    /// back under a different one.
+    File(String),
 }
 
 /// The currently open project.
@@ -186,6 +204,12 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
     // it happen: a project written by a build from before the rename gets its
     // marker file renamed here, once.
     store::migrate_meta(&path)?;
+
+    // Also before the watcher: an expired deletion hands its contents on to the
+    // system Recycle Bin here, which is a write the watcher would otherwise see
+    // and rescan for. Opening the project is the only moment the app reliably
+    // gets, and a sweep costs nothing when there is nothing to sweep.
+    trashcan::purge_expired(&path);
 
     // Without this the webview silently refuses to load any image in the
     // folder: `file://` is blocked, and `convertFileSrc` only works for paths
@@ -603,7 +627,7 @@ fn file_name_of(path: &Path) -> String {
 
 // --- deleting and undo ---------------------------------------------------
 
-/// Send one image to the Recycle Bin.
+/// Move one image into the project's trash.
 ///
 /// Deleting the chosen image clears the choice rather than promoting one of the
 /// remaining candidates: the app has no way to know which attempt was meant.
@@ -622,11 +646,8 @@ pub fn trash_image(
             bail!("{} is already gone", path.display());
         }
 
-        let mut record = Trashed {
-            original_path: path.clone(),
-            cleared_choice_for: None,
-            cleared_cover: false,
-        };
+        let mut cleared_choice_for = None;
+        let mut cleared_cover = false;
 
         match entry_id.as_deref() {
             Some(id) => {
@@ -634,7 +655,7 @@ pub fn trash_image(
                 let (frontmatter, _) = store::read_entry_file(&entry_file)?;
                 if frontmatter.image.as_deref() == Some(filename.as_str()) {
                     store::update_entry(&root, id, None, None, Some(None))?;
-                    record.cleared_choice_for = Some(id.to_owned());
+                    cleared_choice_for = Some(id.to_owned());
                 }
             }
             None => {
@@ -642,31 +663,41 @@ pub fn trash_image(
                 if meta.cover.as_deref() == Some(filename.as_str()) {
                     meta.cover = None;
                     store::write_meta(&root, &meta)?;
-                    record.cleared_cover = true;
+                    cleared_cover = true;
                 }
             }
         }
 
-        trash_with_retry(&path)?;
-        push_undo(open, record);
+        let deletion = trashcan::put(&root, &path, None)?;
+        push_undo(
+            open,
+            Trashed {
+                id: deletion,
+                what: Deleted::File(filename.clone()),
+                cleared_choice_for,
+                cleared_cover,
+            },
+        );
         Ok(())
     })?;
     Ok(())
 }
 
-/// Send a whole entry folder, images and all, to the Recycle Bin.
+/// Move a whole entry folder, images and all, into the project's trash.
 #[tauri::command]
 pub fn trash_entry(app: AppHandle, state: State<AppState>, id: String) -> CmdResult<()> {
     with_project(&app, &state, |open| {
-        let dir = store::entry_dir(&root_of(open), &id);
+        let root = root_of(open);
+        let dir = store::entry_dir(&root, &id);
         if !dir.is_dir() {
             bail!("no entry {id} in this project");
         }
-        trash_with_retry(&dir)?;
+        let deletion = trashcan::put(&root, &dir, None)?;
         push_undo(
             open,
             Trashed {
-                original_path: dir,
+                id: deletion,
+                what: Deleted::Entry,
                 cleared_choice_for: None,
                 cleared_cover: false,
             },
@@ -700,7 +731,7 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
             return Ok(None);
         };
         let root = root_of(open);
-        let message = match restore(&record.original_path) {
+        let message = match trashcan::restore(&root, &record.id) {
             Ok(restored_as) => {
                 // Re-point the entry or cover at the file, under whatever name
                 // it came back as: clearing the choice was part of the delete,
@@ -714,17 +745,19 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
                     store::write_meta(&root, &meta)?;
                 }
 
-                let original = file_name_of(&record.original_path);
-                if restored_as == original {
-                    format!("Restored {restored_as}")
-                } else {
+                match &record.what {
+                    Deleted::Entry => "Restored the entry".to_owned(),
+                    Deleted::File(name) if &restored_as == name => {
+                        format!("Restored {restored_as}")
+                    }
                     // The old name was taken in the meantime; say so rather
                     // than letting a file appear under a name nobody chose.
-                    format!("Restored as {restored_as}")
+                    Deleted::File(_) => format!("Restored as {restored_as}"),
                 }
             }
-            // The Recycle Bin was emptied, or the item is otherwise gone. The
-            // record is already popped, so a second Ctrl+Z moves further back.
+            // The trash was emptied by hand, or the deletion is old enough that
+            // its contents have gone on to the system Recycle Bin. The record is
+            // already popped, so a second Ctrl+Z moves further back.
             Err(err) => format!("Could not undo: {err:#}"),
         };
         Ok(Some(UndoOutcome {
@@ -733,15 +766,6 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
         }))
     })?)
 }
-
-/// How long a Recycle Bin move keeps retrying, and the gap between tries.
-///
-/// Long enough to ride out something letting go of the folder, short enough
-/// that a folder held for good reports it promptly: the row is already gone
-/// from the screen and comes back when this gives up, so a long window would
-/// mean a long silence before the row reappeared.
-const TRASH_RETRY_WINDOW: Duration = Duration::from_secs(2);
-const TRASH_RETRY_STEP: Duration = Duration::from_millis(150);
 
 /// Run blocking filesystem work away from the main thread.
 ///
@@ -756,122 +780,6 @@ async fn off_thread<T: Send + 'static>(
     tauri::async_runtime::spawn_blocking(work)
         .await
         .context("a filesystem task did not finish")?
-}
-
-/// Move a path to the Recycle Bin, retrying while something still holds it.
-///
-/// The shell will not move a folder anything has an open handle on, and reports
-/// that as "some operations were aborted" rather than as a lock, so the message
-/// says nothing useful on its own.
-///
-/// Our own watcher is not the holder: its handle is opened with delete sharing
-/// and a watched project moves fine. The holders are outside the app — editors,
-/// search indexers, file watchers in other tools (the Vite dev server was one,
-/// until `vite.config.ts` told it to ignore `projects/`) — and nothing here can
-/// make them let go. Some release within a moment, hence a window rather than
-/// a fixed number of tries; the rest get a message that says what to do.
-fn trash_with_retry(path: &Path) -> Result<()> {
-    let deadline = Instant::now() + TRASH_RETRY_WINDOW;
-    loop {
-        let Err(err) = trash::delete(path) else {
-            return Ok(());
-        };
-        if Instant::now() >= deadline {
-            return Err(anyhow!(err)).with_context(|| {
-                format!(
-                    "{} is still open in another program, so it cannot be moved \
-                     to the Recycle Bin. Close anything using it and try again.",
-                    path.display()
-                )
-            });
-        }
-        std::thread::sleep(TRASH_RETRY_STEP);
-    }
-}
-
-/// Pull one item back out of the Recycle Bin, returning the name it landed
-/// under.
-///
-/// `restore_all` can only restore to the original path, so when that path is
-/// occupied the occupant is moved aside, the restore happens, the *restored*
-/// file takes the ` (2)` suffix, and the occupant goes back to its own name.
-/// The suffix goes to the restored file deliberately: the occupant is the file
-/// the user just put there, may already be referenced as a chosen image, and
-/// should not change name under them.
-///
-/// Windows and Linux only. `trash::os_limited` — the half of the crate that can
-/// read the bin back — does not exist on macOS, because macOS offers no API for
-/// it: the Finder's own "Put Back" reads a private file nothing else may touch.
-/// See the macOS arm below for what happens there instead.
-#[cfg(not(target_os = "macos"))]
-fn restore(original_path: &Path) -> Result<String> {
-    let parent = original_path
-        .parent()
-        .ok_or_else(|| anyhow!("{} has no parent folder", original_path.display()))?;
-    let name = original_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow!("{} has no filename", original_path.display()))?;
-
-    let item = trash::os_limited::list()
-        .context("listing the Recycle Bin")?
-        .into_iter()
-        .filter(|item| item.original_parent == parent && item.name == name)
-        // Several deletions of the same name can be in the bin; the most
-        // recent is the one this undo refers to.
-        .max_by_key(|item| item.time_deleted)
-        .ok_or_else(|| anyhow!("{name} is no longer in the Recycle Bin"))?;
-
-    if !original_path.exists() {
-        trash::os_limited::restore_all([item]).context("restoring from the Recycle Bin")?;
-        return Ok(name.to_owned());
-    }
-
-    let stash = unique_path(parent, &format!("{name}.lazuli-restoring"));
-    fs::rename(original_path, &stash).with_context(|| {
-        format!(
-            "moving {} aside to make room for the restore",
-            original_path.display()
-        )
-    })?;
-
-    let outcome = (|| -> Result<String> {
-        trash::os_limited::restore_all([item]).context("restoring from the Recycle Bin")?;
-        let renamed = unique_path(parent, name);
-        fs::rename(original_path, &renamed).with_context(|| {
-            format!("renaming the restored file to {}", renamed.display())
-        })?;
-        Ok(file_name_of(&renamed))
-    })();
-
-    // Put the occupant back under its own name whether or not the restore
-    // worked; leaving it stashed would be worse than the failed undo.
-    fs::rename(&stash, original_path).with_context(|| {
-        format!("restoring {} to its own name", original_path.display())
-    })?;
-    outcome
-}
-
-/// What undoing a delete does on macOS, where it cannot be done.
-///
-/// Nothing is lost — the entry or image is in the Trash and Finder's "Put Back"
-/// will return it — but the app cannot do it, so the offer has to be withdrawn
-/// honestly rather than failing with something about a missing item. The toast
-/// that carries this is the same one that offered the undo.
-///
-/// The way out is not a macOS restore API; there is none. It is to stop using
-/// the system trash for this and keep a trash folder inside the project, which
-/// would behave the same on all three platforms — see
-/// `ideas/portable-undo-delete.md`.
-#[cfg(target_os = "macos")]
-fn restore(original_path: &Path) -> Result<String> {
-    let name = original_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("it");
-    bail!(
-        "Lazuli cannot take {name} back out of the Trash on macOS.          It is still there — open the Trash and use Put Back."
-    )
 }
 
 // --- misc ----------------------------------------------------------------
@@ -1065,22 +973,29 @@ pub fn move_tab(app: AppHandle, from: usize, to: usize) {
     library::update(&app, |library| library.move_tab(from, to));
 }
 
-/// Move a whole project folder to the Recycle Bin.
+/// Move a whole project folder into the projects directory's trash.
 ///
-/// Returns its slot in the list, so the undo can put both the folder and the
-/// listing back.
+/// One level up from the project's own `.lazuli-trash/`, because a folder
+/// cannot go inside itself. The projects directory is the app's own territory —
+/// it is where new projects are made — so a dotfolder there is unobjectionable,
+/// and for a project kept in it the move is a rename. A project kept elsewhere,
+/// such as a journal living in the repository it is about, may be on another
+/// drive, and [`trashcan::put`] copies rather than renames in that case.
+///
+/// Returns its slot in the list, together with the deletion's id so the undo
+/// can put both the folder and the listing back.
 #[tauri::command]
 pub async fn trash_project(
     app: AppHandle,
     state: State<'_, AppState>,
     path: PathBuf,
-) -> CmdResult<Option<Slot>> {
+) -> CmdResult<Option<TrashedProject>> {
     if !store::is_project(&path) {
         return Err(anyhow!("{} is not a Lazuli project", path.display()).into());
     }
 
-    // Closing first so no rescan runs against a folder that is on its way to
-    // the Recycle Bin. The watcher's own handle does not block the move.
+    // Closing first so no rescan runs against a folder that is on its way out.
+    // The watcher's own handle does not block the move.
     if state
         .open
         .lock()
@@ -1091,25 +1006,56 @@ pub async fn trash_project(
         close_open(&app);
     }
 
+    let trash_root = default_projects_dir(app.clone());
     let trashing = path.clone();
-    off_thread(move || trash_with_retry(&trashing)).await?;
-    Ok(forget_project(app, path))
+    let id = off_thread(move || trashcan::put(&trash_root, &trashing, None)).await?;
+    Ok(forget_project(app, path).map(|slot| TrashedProject { id, slot }))
 }
 
-/// Take a deleted project back out of the Recycle Bin and back into the list.
+/// A deleted project, as the undo needs to remember it.
+#[derive(Debug, Serialize, serde::Deserialize)]
+pub struct TrashedProject {
+    /// Its deletion in the projects directory's trash.
+    pub id: String,
+    /// Where it sat in the launch screen's list.
+    pub slot: Slot,
+}
+
+/// Take a deleted project back out of the trash and back into the list.
 #[tauri::command]
 pub async fn restore_project(
     app: AppHandle,
     path: PathBuf,
+    id: String,
     slot: Slot,
 ) -> CmdResult<PathBuf> {
-    let restoring = path.clone();
-    let restored_as = off_thread(move || restore(&restoring)).await?;
+    let trash_root = default_projects_dir(app.clone());
+    let restored_as = off_thread(move || trashcan::restore(&trash_root, &id)).await?;
     // The old name may have been taken in the meantime, in which case the
     // folder comes back under a different one and the list must follow it.
     let actual = path.with_file_name(restored_as);
     restore_listing(app, actual.clone(), slot);
     Ok(actual)
+}
+
+/// Everything sitting in a project's trash, newest first.
+#[tauri::command]
+pub fn trash_contents(state: State<AppState>) -> Vec<trashcan::TrashedItem> {
+    let open = state.open.lock().expect("project lock was poisoned");
+    open.as_ref()
+        .map(|open| trashcan::list(open.store.root()))
+        .unwrap_or_default()
+}
+
+/// Put one thing back from the trash view, rather than from the undo stack.
+///
+/// The undo stack only holds what this session did; this reaches anything in
+/// the folder, including a deletion that arrived from another device.
+#[tauri::command]
+pub fn restore_trashed(app: AppHandle, state: State<AppState>, id: String) -> CmdResult<String> {
+    Ok(with_project(&app, &state, |open| {
+        trashcan::restore(&root_of(open), &id)
+    })?)
 }
 
 const SETTINGS_FILE: &str = "settings.json";
@@ -1213,7 +1159,7 @@ fn write_settings(app: &AppHandle, settings: &Settings) {
         let _ = fs::create_dir_all(parent);
     }
     if let Ok(text) = serde_json::to_string_pretty(settings) {
-        let _ = fs::write(path, text);
+        let _ = atomic::write(&path, text);
     }
 }
 

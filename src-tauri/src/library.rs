@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::atomic;
+
 const LIBRARY_FILE: &str = "projects.json";
 
 /// The list as it was before tabs: a flat array of paths, most recently opened
@@ -213,7 +215,7 @@ fn write(app: &AppHandle, library: &Library) {
         let _ = fs::create_dir_all(parent);
     }
     if let Ok(text) = serde_json::to_string_pretty(library) {
-        let _ = fs::write(path, text);
+        let _ = atomic::write(&path, text);
     }
 }
 

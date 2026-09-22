@@ -153,13 +153,26 @@ export const forgetProject = (path: string) =>
 export const restoreListing = (path: string, slot: Slot) =>
   invoke<void>("restore_listing", { path, slot });
 
-/** Move a project folder to the Recycle Bin, returning the slot it held. */
+/** A project in the projects directory's trash, and where it sat in the list. */
+export type TrashedProject = {
+  /** The deletion's id, which is what puts it back. */
+  id: string;
+  slot: Slot;
+};
+
+/**
+ * Move a project folder into the projects directory's trash.
+ *
+ * Not the system Recycle Bin: a rename into a folder the app owns behaves the
+ * same on every platform, where reading the system bin back does not exist on
+ * macOS at all.
+ */
 export const trashProject = (path: string) =>
-  invoke<Slot | null>("trash_project", { path });
+  invoke<TrashedProject | null>("trash_project", { path });
 
 /** Take a deleted project back, returning the path it came back at. */
-export const restoreProject = (path: string, slot: Slot) =>
-  invoke<string>("restore_project", { path, slot });
+export const restoreProject = (path: string, id: string, slot: Slot) =>
+  invoke<string>("restore_project", { path, id, slot });
 
 /** Add a tab at the end of the strip, returning where it landed. */
 export const addTab = (name: string) => invoke<number>("add_tab", { name });
@@ -258,6 +271,48 @@ export const trashImage = (entryId: string | null, filename: string) =>
 export const trashEntry = (id: string) => invoke<void>("trash_entry", { id });
 
 export const undoDelete = () => invoke<UndoOutcome | null>("undo_delete");
+
+/**
+ * What a deleted thing is, named the way the user would name it.
+ *
+ * An entry's folder is a UUID and says nothing, so an entry carries the day and
+ * the sentence instead. The date arrives as the day itself, so the trash can
+ * show it the way the project reads its dates.
+ */
+export type TrashedWhat =
+  | { kind: "entry"; date: string; text: string }
+  | { kind: "file"; name: string };
+
+/** One thing in a project's `.lazuli-trash/`. */
+export type TrashedItem = {
+  /** The deletion's id, which is what puts it back. */
+  id: string;
+  what: TrashedWhat;
+  marker: {
+    /** Where it was, relative to the project folder. */
+    path: string;
+    /** When it was deleted, RFC 3339 with the offset it was deleted in. */
+    deleted: string;
+    /** Which author deleted it, once a project has more than one. */
+    by: string | null;
+    /** True once the contents have gone on to the system Recycle Bin. */
+    purged: boolean;
+  };
+  /** False once only the record is left and there is nothing to put back. */
+  restorable: boolean;
+};
+
+/** Everything in the open project's trash, most recently deleted first. */
+export const trashContents = () => invoke<TrashedItem[]>("trash_contents");
+
+/**
+ * Put one thing back from the trash, rather than from the undo stack.
+ *
+ * The undo stack only holds what this session did; this reaches anything still
+ * in the folder, including a deletion that arrived from another machine.
+ */
+export const restoreTrashed = (id: string) =>
+  invoke<string>("restore_trashed", { id });
 
 /**
  * Mirror the theme choice into the Rust settings file.

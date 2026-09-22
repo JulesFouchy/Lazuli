@@ -12,6 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::atomic;
 use crate::model::{
     is_image, DateFormat, Entry, EntryFrontmatter, Project, ProjectMeta, SortOrder,
 };
@@ -220,7 +221,7 @@ pub fn read_meta(root: &Path) -> Result<ProjectMeta> {
 pub fn write_meta(root: &Path, meta: &ProjectMeta) -> Result<()> {
     let path = root.join(META_FILE);
     let yaml = serde_yaml::to_string(meta).context("serialising project metadata")?;
-    fs::write(&path, yaml).with_context(|| format!("writing {}", path.display()))
+    atomic::write(&path, yaml).with_context(|| format!("writing {}", path.display()))
 }
 
 /// Why `root` cannot become a new project, phrased for the user, or `None`
@@ -319,7 +320,7 @@ pub fn write_entry_file(dir: &Path, frontmatter: &EntryFrontmatter, text: &str) 
     // `serde_yaml` already ends its output with a newline.
     let contents = format!("{FRONTMATTER_FENCE}\n{yaml}{FRONTMATTER_FENCE}\n\n{text}\n");
     let path = dir.join(ENTRY_FILE);
-    fs::write(&path, contents).with_context(|| format!("writing {}", path.display()))
+    atomic::write(&path, contents).with_context(|| format!("writing {}", path.display()))
 }
 
 /// Split `---\n...\n---\n` frontmatter from the body.

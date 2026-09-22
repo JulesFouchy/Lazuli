@@ -70,6 +70,7 @@ import { closeModal, isModalOpen, onModalDismissed } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
+import { openTrashDialog } from "./trash-view";
 import { displayedEntries, renderTimeline } from "./timeline";
 import { startTitlebar } from "./titlebar";
 import { clear, el, isEditing, toast, toastError } from "./ui";
@@ -566,7 +567,7 @@ function projectRow(
           },
           {
             label: "Delete",
-            hint: "Moves the whole project folder to the Recycle Bin.",
+            hint: "Moves the whole project folder into the trash, where it stays for thirty days.",
             danger: true,
             run: () => deleteProject(project),
           },
@@ -766,6 +767,12 @@ function timelineSection(project: Project): HTMLElement {
       }),
       el("button", {
         class: "button button--ghost",
+        text: "Trash…",
+        title: "What you deleted, for thirty days after you deleted it",
+        onclick: () => openHere({ kind: "trash" }),
+      }),
+      el("button", {
+        class: "button button--ghost",
         text: state.newestFirst ? "Newest first ↓" : "Oldest first ↑",
         title: "Reverse the timeline",
         onclick: () => toggleSortOrder(),
@@ -922,24 +929,24 @@ function offerUndo(message: string, undo: () => void): void {
  *
  * The mirror of `pending.ts`: that one hides rows the backend still has, this
  * one shows rows it does not have yet. Undo can be pressed before the delete it
- * undoes has even reached the Recycle Bin, and the row should be back the
+ * undoes has even reached the trash, and the row should be back the
  * moment it is pressed rather than after two round trips.
  */
 const reappearing = new Map<string, { at: Slot; project: ListedProject }>();
 
 /** Put a row back on screen at once, and do the real restore behind it. */
-function undoRemoval(
+function undoRemoval<Removed>(
   project: ListedProject,
   at: Slot,
   key: string,
-  removal: Promise<Slot | null>,
-  restore: (slot: Slot) => Promise<unknown>,
+  removal: Promise<Removed | null>,
+  restore: (removed: Removed) => Promise<unknown>,
 ): void {
   reappearing.set(project.path, { at, project });
   unmarkDeleting(key);
   render();
   void removal
-    .then((slot) => (slot === null ? null : restore(slot)))
+    .then((removed) => (removed === null ? null : restore(removed)))
     .catch((err) => toastError("Could not undo", err))
     // The row stays on screen throughout: it is held here until a list read
     // asked for *after* the restore finished has replaced the cache, so the
@@ -955,11 +962,11 @@ function undoRemoval(
 }
 
 /**
- * Move a project folder to the Recycle Bin, list entry and all.
+ * Move a project folder into the trash, list entry and all.
  *
  * Nothing is asked first: Undo is the answer to a mis-click, and it is a better
  * one than a dialog in front of every delete. The row goes immediately and
- * comes back if the shell refuses the folder.
+ * comes back if the move is refused.
  */
 function deleteProject(project: ListedProject): void {
   const key = projectKey(project.path);
@@ -968,17 +975,17 @@ function deleteProject(project: ListedProject): void {
   render();
 
   // Started, not awaited: the toast and the empty row both want to be there
-  // before the Recycle Bin has finished thinking about it.
+  // before the move has finished.
   const deleted = trashProject(project.path).then(
-    (slot) => slot ?? at,
+    (trashed) => trashed && { id: trashed.id, slot: trashed.slot ?? at },
     (err) => {
       toastError(`Could not delete ${plainText(project.name)}`, err);
       return null;
     },
   );
   offerUndo(`Deleted ${plainText(project.name)}`, () =>
-    undoRemoval(project, at, key, deleted, (slot) =>
-      restoreProject(project.path, slot),
+    undoRemoval(project, at, key, deleted, ({ id, slot }) =>
+      restoreProject(project.path, id, slot),
     ),
   );
   void deleted.then(() => stopHiding(key));
@@ -1072,7 +1079,8 @@ type Modal =
   | { kind: "cover" }
   | { kind: "start-date" }
   | { kind: "new-project" }
-  | { kind: "appearance" };
+  | { kind: "appearance" }
+  | { kind: "trash" };
 
 interface Place {
   /** Project folder, or null for the launch screen. */
@@ -1131,7 +1139,8 @@ function isPlace(value: unknown): value is Place {
     kind === "cover" ||
     kind === "start-date" ||
     kind === "new-project" ||
-    kind === "appearance"
+    kind === "appearance" ||
+    kind === "trash"
   );
 }
 
@@ -1411,6 +1420,9 @@ function showModal(modal: Modal): void {
       break;
     case "appearance":
       openAppearanceDialog();
+      break;
+    case "trash":
+      if (project) openTrashDialog();
       break;
   }
 }

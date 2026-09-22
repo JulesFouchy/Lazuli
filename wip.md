@@ -24,18 +24,15 @@ the button shouldn't say "Open folder..." but "Open project...", or "Import proj
 
 ctrl + scroll to zoom in/out when in project page to better see the whole timeline (and a popup you canc click to reset zoom to normal) Maybe it just scales down the image, and when too small we switch to the mode where there is the small square image to the left, and the sentence to the right, which is a nice view mode in and of itself
 
-- consider using this as the icon : "C:\Users\fouch\Downloads\ChatGPT Image Sep 15, 2026, 10_13_29 PM.png"
-
-
-
 - release version 1.0
 - setup store to sell for 1€
 
 add to global claude to always use american english spelling
 
-
+move all my projects off of the repo, and sync them with drive
 
 mobile version
+web version
 
 mcp, or at least a readme to explain the file/folder format so people can easily automate the creation of entries
 
