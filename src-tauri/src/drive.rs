@@ -20,11 +20,13 @@
 //!
 //! # What is not verified
 //!
-//! Every function here that touches the network is written against Google's
-//! documentation and **has never been run**: it needs an OAuth client id, which
-//! has to be created in a Google Cloud project belonging to whoever ships the
-//! app. See `README.md`. The path reconstruction, the token's expiry rule and
-//! the request shapes are covered by tests; the responses are not.
+//! Google accepts the client id, the loopback redirect and the scope — that
+//! much has been tried. Everything past the sign-in — the token exchange, and
+//! every call in this file — is written against Google's documentation and
+//! **has not been run against a real account**. The path reconstruction, the
+//! token's expiry rule, the PKCE challenge and the redirect parser are covered
+//! by tests; the responses are not, and the first real sign-in should be
+//! expected to turn up small things.
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -46,7 +48,8 @@ use crate::sync::{Backend, RemoteFile};
 /// An Android build therefore needs its own, in the *same* Cloud project — same
 /// consent screen, same quota, and a user who approved on their laptop is not
 /// asked again on their phone.
-pub const DESKTOP_CLIENT_ID: &str = "";
+pub const DESKTOP_CLIENT_ID: &str =
+    "991113913988-hkpcvsdtq4vvvl1jovemgiiceh2o8p0d.apps.googleusercontent.com";
 
 /// Asked for at sign-in. `drive.file` and nothing else — the narrowest scope
 /// that can do the job, and the one that keeps the app out of Google's
