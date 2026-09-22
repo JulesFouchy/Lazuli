@@ -10,11 +10,14 @@ pub mod camera;
 pub mod commands;
 pub mod conflicts;
 pub mod dates;
+pub mod drive;
 pub mod keys;
 pub mod library;
 pub mod model;
 pub mod paths;
 pub mod store;
+pub mod sync;
+pub mod syncing;
 pub mod theme;
 pub mod thumbs;
 pub mod trashcan;
@@ -156,6 +159,13 @@ pub fn run() {
             commands::startup_project,
             commands::default_projects_dir,
             commands::set_theme_preference,
+            syncing::drive_account,
+            syncing::connect_drive,
+            syncing::disconnect_drive,
+            syncing::start_syncing,
+            syncing::stop_syncing,
+            syncing::sync_status,
+            syncing::sync_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lazuli");

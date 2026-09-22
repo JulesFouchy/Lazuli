@@ -27,6 +27,7 @@ A project is a folder of plain files. No database, no app-owned store, nothing t
       face.jpg
   .lazuli-thumbs/           small copies of every picture, for the timeline
   .lazuli-trash/            what you deleted, for thirty days
+  .lazuli/                  what *this machine* knows about syncing it
 ```
 
 Open the folder in an editor, a git repo, or Explorer and it still makes sense. Edit an `entry.md` by hand and the app picks the change up while you watch.
@@ -34,6 +35,24 @@ Open the folder in an editor, a git repo, or Explorer and it still makes sense. 
 An entry that comes back from a merge in two versions says so on its card, with both versions and a button under each — nothing is merged for you, and the version you do not keep goes to the trash. An entry records who wrote it, and a card shows that name and picture only once a project has more than one author — put a project somewhere two people can both write to and the timeline says who did what; keep it to yourself and nothing changes. Your own name and picture are set on the round button in the corner, and are copied into each project you write in so that whoever opens it can see them.
 
 Nothing is thrown away on your behalf: every image you tried for an entry stays in its folder, the app just records which one is chosen. Deleting is always something you did, and Ctrl+Z takes it back — what you delete moves into `.lazuli-trash/` inside the project, where it stays for thirty days before being passed on to the Recycle Bin. It is in the folder the whole time, so you can take it back by hand, and so can the other machines the folder reaches.
+
+## Syncing, and sharing
+
+A project can be kept on your Google Drive, which is how it reaches your other devices and how somebody else gets to write in it. It is per project and off until you ask: **Sync…** in a project's toolbar, once an account is connected from the round button in the corner.
+
+Lazuli talks to Drive's HTTP API. There is no Drive client to install, which is the point — no such client exists on a phone, and relying on a folder something else keeps in step is what would rule that out. Editing works offline and reconciles when there is a connection again: the folder *is* the outbox, so there is no queue to fall out of step.
+
+Sharing is Drive's own: share the project's folder with somebody and they can read or write it, with Google doing the invitation and the permissions. There is no Lazuli account and no Lazuli server.
+
+Two devices adding entries never collide, because an entry folder is a UUID. Two people editing the same sentence is the one real conflict, and it is not merged for you — both versions land on the card and you keep one.
+
+### What the app needs, once
+
+**Syncing needs a Google OAuth client id, and this repository ships without one**, because a client id belongs to a Google Cloud project rather than to the source. Until one is set the app says so plainly and the Connect button is hidden; everything else works exactly as before.
+
+To make one: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**. Put the id in `CLIENT_ID` in [`src-tauri/src/drive.rs`](src-tauri/src/drive.rs). The app asks for the `drive.file` scope only, which needs no verification and no security assessment — it sees the files it made and nothing else of yours.
+
+**None of the code that talks to Google has ever run**, for want of that id. The parts that can be tested without it — reconstructing paths from Drive's parent lists, the token's expiry rule, the PKCE challenge, the redirect — are.
 
 ## The 5am rule
 

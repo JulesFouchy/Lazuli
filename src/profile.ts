@@ -4,8 +4,16 @@
 // into each project you write in, because whoever else opens that folder can
 // read the folder and nothing else of yours — see `authors.rs`.
 
-import type { MyProfile } from "./api";
-import { clearMyAvatar, myProfile, setMyAvatar, setMyName } from "./api";
+import type { Account, MyProfile } from "./api";
+import {
+  clearMyAvatar,
+  connectDrive,
+  disconnectDrive,
+  driveAccount,
+  myProfile,
+  setMyAvatar,
+  setMyName,
+} from "./api";
 import { openModal } from "./modal";
 import { el, toastError } from "./ui";
 
@@ -207,5 +215,68 @@ function dialogBody(): HTMLElement {
         "copied into each project you write in, so whoever else opens it can " +
         "see who wrote what — and a project only you write in shows neither.",
     }),
+    accountSection(),
   );
+}
+
+/**
+ * The Google account, which is where synced projects live.
+ *
+ * In this dialog because it is about *you* rather than about a project: one
+ * account, and each project then says for itself whether it uses it.
+ */
+function accountSection(): HTMLElement {
+  const state = el("p", { class: "hint", text: "…" });
+  const button = el("button", { class: "button", text: "Connect Google Drive" });
+  const section = el(
+    "div",
+    { class: "field" },
+    el("label", { text: "Syncing" }),
+    state,
+    button,
+  );
+
+  const paint = (account: Account) => {
+    if (account.unavailable) {
+      state.textContent = account.unavailable;
+      button.hidden = true;
+      return;
+    }
+    button.hidden = false;
+    state.textContent = account.connected
+      ? "Connected. Each project says for itself whether it syncs."
+      : "Not connected. Connect an account to sync projects between your devices, and to share one.";
+    button.textContent = account.connected ? "Disconnect" : "Connect Google Drive";
+  };
+
+  const act = async (call: Promise<Account>, whenItFails: string) => {
+    button.disabled = true;
+    try {
+      paint(await call);
+    } catch (err) {
+      toastError(whenItFails, err);
+    }
+    button.disabled = false;
+  };
+
+  let connected = false;
+  button.onclick = () =>
+    void act(
+      connected ? disconnectDrive() : connectDrive(),
+      connected ? "Could not disconnect" : "Could not connect to Google Drive",
+    ).then(() => void refreshAccount());
+
+  const refreshAccount = async () => {
+    try {
+      const account = await driveAccount();
+      connected = account.connected;
+      paint(account);
+    } catch {
+      state.textContent = "Could not read the account.";
+      button.hidden = true;
+    }
+  };
+  void refreshAccount();
+
+  return section;
 }

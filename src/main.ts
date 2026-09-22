@@ -32,7 +32,12 @@ import {
   setProjectName,
   setSortOrder,
   showSmall,
+  startSyncing,
   startupProject,
+  stopSyncing,
+  syncNow,
+  syncStatus,
+  type SyncStatus,
   trashProject,
   undoDelete,
 } from "./api";
@@ -67,7 +72,7 @@ import {
   placeCaret,
   type MarkdownInput,
 } from "./md-input";
-import { closeModal, isModalOpen, onModalDismissed } from "./modal";
+import { closeModal, isModalOpen, onModalDismissed, openModal } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { profileButton, startProfile } from "./profile";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
@@ -776,6 +781,7 @@ function timelineSection(project: Project): HTMLElement {
         text: "Appearance…",
         onclick: () => openHere({ kind: "appearance" }),
       }),
+      syncButton(project),
       el("button", {
         class: "button button--ghost",
         text: "Trash…",
@@ -1003,6 +1009,92 @@ function deleteProject(project: ListedProject): void {
     ),
   );
   void deleted.then(() => stopHiding(key));
+}
+
+/**
+ * Whether this project syncs, and the button that changes that.
+ *
+ * Per project and opt-in: a private journal stays on this machine until it is
+ * asked to leave. The state is read after the button is on screen, so the
+ * toolbar never waits for a round trip to paint.
+ */
+function syncButton(project: Project): HTMLElement {
+  const button = el("button", {
+    class: "button button--ghost",
+    text: "Sync…",
+    title: "Whether this project is kept on your Google Drive",
+    onclick: () => openSyncDialog(project),
+  });
+  void syncStatus(project.root)
+    .then((status) => {
+      button.textContent = status.on ? "Synced ✓" : "Sync…";
+    })
+    .catch(() => {});
+  return button;
+}
+
+function openSyncDialog(project: Project): void {
+  const state = el("p", { class: "hint", text: "…" });
+  const act = el("button", { class: "button" });
+  const now = el("button", { class: "button button--ghost", text: "Sync now" });
+
+  const paint = (status: SyncStatus) => {
+    act.textContent = status.on ? "Stop syncing this project" : "Sync this project";
+    now.hidden = !status.on;
+    state.textContent = status.problem
+      ? `Last try: ${status.problem}`
+      : status.on
+        ? "This project is kept on your Google Drive. Every device you sign in on gets it, and anyone you share the folder with can read or write it."
+        : "This project is on this machine only. Syncing it puts it on your Google Drive, where your other devices — and anyone you share the folder with — can reach it.";
+  };
+
+  const run = async (call: Promise<SyncStatus>, whenItFails: string) => {
+    act.disabled = true;
+    now.disabled = true;
+    state.textContent = "Working…";
+    try {
+      paint(await call);
+    } catch (err) {
+      toastError(whenItFails, err);
+      paint(await syncStatus(project.root).catch(() => ({ on: false, problem: null })));
+    }
+    act.disabled = false;
+    now.disabled = false;
+    render();
+  };
+
+  let on = false;
+  act.onclick = () =>
+    void run(
+      on ? stopSyncing(project.root) : startSyncing(project.root),
+      on ? "Could not stop syncing" : "Could not start syncing",
+    ).then(() => {
+      on = !on;
+    });
+  now.onclick = () => void run(syncNow(project.root), "Could not sync");
+
+  openModal({
+    title: "Syncing",
+    body: el(
+      "div",
+      { class: "modal__body-inner" },
+      state,
+      el("div", { class: "row" }, act, now),
+      el("p", {
+        class: "hint",
+        text: "Whether this machine syncs this project is this machine's own business — it is not carried to your other devices.",
+      }),
+    ),
+  });
+
+  void syncStatus(project.root)
+    .then((status) => {
+      on = status.on;
+      paint(status);
+    })
+    .catch(() => {
+      state.textContent = "Could not read whether this project syncs.";
+    });
 }
 
 /**

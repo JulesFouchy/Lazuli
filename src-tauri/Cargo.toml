@@ -27,6 +27,21 @@ thiserror = "2"
 notify = "7"
 notify-debouncer-full = "0.4"
 trash = "5"
+# Already in the tree through tauri. The content hash the sync base is kept in
+# terms of — see `sync.rs`.
+sha2 = "0.10"
+# Already in the tree through tauri's updater, rustls and all. The Google Drive
+# backend's HTTP — see `drive.rs`. `blocking` because the sync engine runs on a
+# thread of its own and reads the filesystem between requests anyway.
+reqwest = { version = "0.13", default-features = false, features = [
+    "blocking",
+    "json",
+    "multipart",
+    "query",
+    "form",
+    "rustls",
+    "system-proxy",
+] }
 # Already in the tree through tauri's `image-png`, which is PNG only; the extra
 # features are the formats a camera and a phone actually produce. Thumbnails
 # are decoded and re-encoded with it — see `thumbs.rs`.

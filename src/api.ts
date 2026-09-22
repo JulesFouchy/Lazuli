@@ -109,6 +109,31 @@ export const setMyAvatar = (filename: string, bytes: Uint8Array) =>
 
 export const clearMyAvatar = () => invoke<MyProfile>("clear_my_avatar");
 
+/** The Google account the app is signed in to, if any. */
+export interface Account {
+  connected: boolean;
+  /** Why signing in is impossible in this build, or null when it is possible. */
+  unavailable: string | null;
+}
+
+/** Whether a project syncs, and what went wrong last time it tried. */
+export interface SyncStatus {
+  on: boolean;
+  problem: string | null;
+}
+
+export const driveAccount = () => invoke<Account>("drive_account");
+export const connectDrive = () => invoke<Account>("connect_drive");
+export const disconnectDrive = () => invoke<Account>("disconnect_drive");
+
+export const syncStatus = (path: string) =>
+  invoke<SyncStatus>("sync_status", { path });
+export const startSyncing = (path: string) =>
+  invoke<SyncStatus>("start_syncing", { path });
+export const stopSyncing = (path: string) =>
+  invoke<SyncStatus>("stop_syncing", { path });
+export const syncNow = (path: string) => invoke<SyncStatus>("sync_now", { path });
+
 export interface Project {
   root: string;
   meta: ProjectMeta;

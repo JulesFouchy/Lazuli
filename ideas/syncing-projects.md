@@ -24,17 +24,24 @@ What is left to conflict is small: the body, `date:` and `image:` of one entry e
 - **Identity.** `id:` in `lazuli.yaml`, minted on open. `author:` on every new entry. A profile — author uuid, name and picture — in the app's own settings, edited from the round button in the corner and *published* into each project at `authors/<uuid>/` when the user writes there, picture and all, because a collaborator can read neither our settings nor our account. A card shows a name and picture only once a project has more than one author.
 - **Migration.** Every new field defaulted; `lazuli.yaml` gains a line and no `entry.md` is touched. An absent `author:` reads as the project's owner rather than being backfilled.
 - **Thumbnails**, in `.lazuli-thumbs/`, mirroring each picture's path with a `.jpg` name. They sync with the project rather than being rebuilt on each machine, which is what will make a shared project readable before its photographs have arrived, and a phone viable at all. Measured at 9% of the originals on a real project.
-- **Conflicts**, as a card offering both versions. Git's markers and the sidecars Syncthing and Dropbox leave are both recognised, so syncing by hand is already served. The engine's own conflicts will be a third shape through the same door.
+- **Conflicts**, as a card offering both versions. Git's markers and the sidecars Syncthing and Dropbox leave are both recognised — and the engine writes its own conflicts under the same name a folder syncer would, so it came through a door that was already open.
+- **The sync base**, `.lazuli/sync-state.json`, per device and never synced.
+- **The engine**, `sync.rs`: a `Backend` of four operations, and a decision table over local, remote and base. Tested against an in-memory remote, including two devices converging.
+- **The Google Drive backend**, `drive.rs`, and the commands and UI around it.
 
 Each stands on its own, and each was a prerequisite.
 
 ## Still to do
 
-**The rest of identity**, once there is something to sync to: the `accounts:` list that lets a second device recognise its own author, and the per-project `display_name:` override, the Discord model. They are left out until then rather than written and unreachable — the file gains fields the way `lazuli.yaml` has.
+**The rest of identity**, once there is a second device to try it on: the `accounts:` list that lets one recognise its own author, and the per-project `display_name:` override, the Discord model.
 
-No `id:` or `modified:` inside `entry.md`: the folder UUID is already the identity and nothing renames it, and a sync base beats last-writer-wins.
+**A members view**, listing who a shared project is shared with and inviting by email through `permissions.create`. Drive enforces reader, writer and owner server-side, so this is a screen over an API rather than an access-control system to build.
 
-**A sync base.** `.lazuli/sync-state.json`, per device and never synced, holding each file's hash as of the last sync. This is the common ancestor git would have given for free, and without it "they changed it" cannot be told from "I changed it".
+**The Picker**, for a project somebody else shared: `drive.file` cannot enumerate a Drive, so a shared folder is handed to the app once through Google's own chooser. Until then a shared project is added the way any folder is.
+
+**Lazy materialisation**: text first so a project's timeline is complete within a round trip, then its pictures. Today a project syncs whole, which is right for a journal of a few hundred entries and wrong for one of several thousand.
+
+**A client id.** Nothing that talks to Google has ever run without one; see the README.
 
 ## The remote
 
@@ -54,9 +61,9 @@ Syncing is per project and opt-in; the setting is per device, in `.lazuli/sync.j
 - **Enforcing "may edit only their own entries".** A dumb remote cannot enforce a rule about file *contents* — a modified Lazuli, or a text editor, writes what it likes. Reader, writer and owner are real because Drive enforces them; the fourth is a UI convention, and `author:` makes a breach visible afterwards. Signing would buy tamper-evidence, not prevention, since nothing but storage ACLs stops a writer deleting files. Only a server could, and that is the trade to revisit if it ever becomes a hard requirement.
 - **Reading and writing straight to the remote** instead of keeping a local folder. Remote-first is not local-first: unavailable offline, a fetch per card, and it breaks "disk is the source of truth" — the store, the watcher and the diff all assume a folder.
 
-## Why not yet
+## What is left, and why
 
-Because it is large, and because the pieces it rests on are worth having on their own. The trash, atomic writes, identity, thumbnails and the conflict card are in. What is left is the sync base, the engine and the backend, in that order. The sync base in particular is deliberately last of the file-format work: nothing reads or writes it until there is an engine, and a format in the tree that nothing uses is the thing `video-export.md` says cost more than it saved.
+Most of it now is. What is left is listed above, and the largest of it — the members view, the Picker, lazy materialisation — is better designed against a Drive that has actually been talked to than ahead of one. The sync base in particular is deliberately last of the file-format work: nothing reads or writes it until there is an engine, and a format in the tree that nothing uses is the thing `video-export.md` says cost more than it saved.
 
 ## A browser version, later
 

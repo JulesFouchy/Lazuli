@@ -16,6 +16,7 @@ use crate::library::{self, Slot};
 use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
+use crate::syncing;
 use crate::theme;
 use crate::thumbs;
 use crate::trashcan;
@@ -73,6 +74,9 @@ struct OpenProject {
     snapshot: Project,
     /// Held so the watcher stays alive. Taken and stopped by [`Self::close`].
     watcher: Option<ProjectWatcher>,
+    /// Reconciles this project with its remote while it is open, if it has one.
+    /// Stops when dropped, so closing the project ends it.
+    _syncing: syncing::Loop,
     undo: Vec<Trashed>,
 }
 
@@ -258,6 +262,9 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
             store,
             snapshot: snapshot.clone(),
             watcher: Some(watcher),
+            // Started whether or not this project syncs: it costs a sleeping
+            // thread, and the user can turn syncing on without reopening.
+            _syncing: syncing::Loop::start(app.clone(), path.clone()),
             undo: Vec::new(),
         });
     if let Some(open) = replaced {
@@ -811,7 +818,7 @@ pub fn undo_delete(app: AppHandle, state: State<AppState>) -> CmdResult<Option<U
 /// command behind it and freezes the page meanwhile. Deleting one project used
 /// to empty the whole launch list until the move finished, because the
 /// `recent_projects` call that redraws it was stuck in that queue.
-async fn off_thread<T: Send + 'static>(
+pub async fn off_thread<T: Send + 'static>(
     work: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<T> {
     tauri::async_runtime::spawn_blocking(work)
@@ -1168,6 +1175,26 @@ struct Settings {
     /// rather than in any project, because it is the user's and not a
     /// project's; each project gets a copy when they write in it.
     author_avatar: Option<String>,
+    /// The Google account the app is signed in to, when it is.
+    ///
+    /// In the app's own config folder rather than the OS keychain, which would
+    /// be a new dependency and three platform implementations. The scope is
+    /// `drive.file`, so what this reaches is the files Lazuli itself made — and
+    /// the folder it sits in is the user's own. Worth revisiting; see
+    /// `ideas/`.
+    drive_tokens: Option<crate::drive::Tokens>,
+}
+
+/// The signed-in Google account's tokens, if there are any.
+pub fn drive_tokens(app: &AppHandle) -> Option<crate::drive::Tokens> {
+    read_settings(app).drive_tokens
+}
+
+/// Remember, or forget, the signed-in account.
+pub fn set_drive_tokens(app: &AppHandle, tokens: Option<crate::drive::Tokens>) {
+    let mut settings = read_settings(app);
+    settings.drive_tokens = tokens;
+    write_settings(app, &settings);
 }
 
 /// The user's own profile, as the button and the dialog show it.
