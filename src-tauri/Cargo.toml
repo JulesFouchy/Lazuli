@@ -27,6 +27,17 @@ thiserror = "2"
 notify = "7"
 notify-debouncer-full = "0.4"
 trash = "5"
+# Already in the tree through tauri's `image-png`, which is PNG only; the extra
+# features are the formats a camera and a phone actually produce. Thumbnails
+# are decoded and re-encoded with it — see `thumbs.rs`.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+    "tiff",
+] }
 # Already in the tree through tauri. Compares a downloaded update's version
 # with the running one, at the launch that applies it.
 semver = "1"

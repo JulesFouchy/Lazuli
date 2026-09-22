@@ -214,6 +214,7 @@ function editorBody(
 
 function imagePicker(entry: Entry, context: EditorContext): HTMLElement {
   return renderImagePicker({
+    root: context.project().root,
     directory: `${context.project().root}/entries/${entry.id}`,
     filenames: entry.images,
     chosen: entry.image,
@@ -283,6 +284,7 @@ function coverBody(context: EditorContext): HTMLElement {
     "div",
     {},
     renderImagePicker({
+      root: project.root,
       directory: `${project.root}/cover`,
       filenames: project.cover_images,
       chosen: project.meta.cover,

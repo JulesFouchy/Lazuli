@@ -383,3 +383,46 @@ export const journalToday = () => invoke<string>("journal_today");
 export function assetUrl(...segments: string[]): string {
   return convertFileSrc(segments.join("/"));
 }
+
+/** Where a project keeps the downscaled copies of its images. */
+const THUMBS_DIR = ".lazuli-thumbs";
+
+/**
+ * The downscaled copy of an image, which mirrors its path with a `.jpg` name.
+ *
+ * Worked out here rather than asked for, because the rule is the whole of it —
+ * see `thumbs.rs`. There may be no such file: one is still being built, or the
+ * picture is in a format Rust cannot decode. Use [`showSmall`] rather than this
+ * directly, so that a card falls back to the picture itself.
+ */
+export function thumbUrl(root: string, ...segments: string[]): string {
+  const path = segments.join("/").replace(/\.[^./]*$/, "");
+  return assetUrl(root, THUMBS_DIR, `${path}.jpg`);
+}
+
+/**
+ * Point an `img` at an image's thumbnail, falling back to the picture itself.
+ *
+ * The fallback is the browser's own `error` event rather than anything asked of
+ * Rust: whether a thumbnail exists is a question with a one-line answer the
+ * `img` is already asking, and a command per picture would be a round trip per
+ * card.
+ */
+export function showSmall(
+  image: HTMLImageElement,
+  root: string,
+  ...segments: string[]
+): HTMLImageElement {
+  const full = assetUrl(root, ...segments);
+  image.addEventListener(
+    "error",
+    () => {
+      // Only once: if the original fails too, there is nothing further to try
+      // and a loop would be the worst way to find that out.
+      if (image.src !== full) image.src = full;
+    },
+    { once: true },
+  );
+  image.src = thumbUrl(root, ...segments);
+  return image;
+}

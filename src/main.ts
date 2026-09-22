@@ -16,7 +16,6 @@ import type {
 import {
   addProject as fileProject,
   addTab,
-  assetUrl,
   createEntry,
   defaultProjectsDir,
   deleteTab,
@@ -31,6 +30,7 @@ import {
   restoreTab,
   setProjectName,
   setSortOrder,
+  showSmall,
   startupProject,
   trashProject,
   undoDelete,
@@ -576,12 +576,16 @@ function projectRow(
         ]),
     },
     project.cover
-      ? el("img", {
-          class: "recent__image",
-          src: assetUrl(project.path, "cover", project.cover),
-          alt: "",
-          decoding: "async",
-        })
+      ? showSmall(
+          el("img", {
+            class: "recent__image",
+            alt: "",
+            decoding: "async",
+          }) as HTMLImageElement,
+          project.path,
+          "cover",
+          project.cover,
+        )
       : null,
     el(
       "div",
@@ -686,12 +690,16 @@ function banner(project: Project): HTMLElement {
       onclick: () => openHere({ kind: "cover" }),
     },
     cover
-      ? el("img", {
-          class: "banner__image",
-          src: assetUrl(project.root, "cover", cover),
-          alt: `${plainText(project.meta.name)} cover`,
-          decoding: "async",
-        })
+      ? showSmall(
+          el("img", {
+            class: "banner__image",
+            alt: `${plainText(project.meta.name)} cover`,
+            decoding: "async",
+          }) as HTMLImageElement,
+          project.root,
+          "cover",
+          cover,
+        )
       : null,
     el("div", { class: "banner__hint", text: "Click to change the cover" }),
     // No buttons over the cover: Escape and the mouse's Back button leave the

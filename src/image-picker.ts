@@ -4,7 +4,7 @@
 // Every image ever added is shown. One is marked as chosen; the rest are
 // attempts that were kept. Nothing is removed except by an explicit delete.
 
-import { assetUrl, importImageBytes, importImages, trashImage } from "./api";
+import { importImageBytes, importImages, showSmall, trashImage } from "./api";
 import { cameraAvailable, openCamera, stopCamera } from "./camera";
 import { openContextMenu } from "./context-menu";
 import { fileStamp } from "./dates";
@@ -12,6 +12,8 @@ import { imageKey, isDeleting, markDeleting, unmarkDeleting } from "./pending";
 import { el, toast, toastError } from "./ui";
 
 export interface PickerOptions {
+  /** The project folder, which is what a thumbnail's path is relative to. */
+  root: string;
   /** Absolute path of the folder the images live in. */
   directory: string;
   filenames: string[];
@@ -97,12 +99,18 @@ function thumbnail(filename: string, options: PickerOptions): HTMLElement {
           },
         ]),
     },
-    el("img", {
-      src: assetUrl(options.directory, filename),
-      alt: filename,
-      loading: "lazy",
-      decoding: "async",
-    }),
+    showSmall(
+      el("img", {
+        alt: filename,
+        loading: "lazy",
+        decoding: "async",
+      }) as HTMLImageElement,
+      options.root,
+      // A thumbnail mirrors where its picture sits in the project, so the
+      // picker has to say which of the two places this one is.
+      ...(options.entryId ? ["entries", options.entryId] : ["cover"]),
+      filename,
+    ),
     // No badge: the accent outline already says which one is chosen, and a
     // label over the corner of a small square hides part of the picture.
   );

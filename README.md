@@ -25,6 +25,7 @@ A project is a folder of plain files. No database, no app-owned store, nothing t
     <uuid>/
       profile.yaml          a name and picture for whoever has written here
       face.jpg
+  .lazuli-thumbs/           small copies of every picture, for the timeline
   .lazuli-trash/            what you deleted, for thirty days
 ```
 

@@ -16,6 +16,7 @@ use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
 use crate::theme;
+use crate::thumbs;
 use crate::trashcan;
 use crate::watch::{self, ProjectWatcher};
 
@@ -227,6 +228,18 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
     let mut store = ProjectStore::new(&path);
     let snapshot = store.scan()?;
     let watcher = watch::watch_project(app.clone(), &path)?;
+
+    // Behind the open rather than inside it: a project of real photographs that
+    // has never had thumbnails takes seconds to build them, and the timeline
+    // should be on screen for all of it. Cards fall back to the full-size
+    // picture until each one lands, which is what every card did until now.
+    let building = path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let made = thumbs::build_all(&building);
+        if made > 0 && cfg!(debug_assertions) {
+            eprintln!("lazuli: built {made} thumbnails in {}", building.display());
+        }
+    });
 
     // Listed if it is not already, and left exactly where it is if it is: the
     // order on the launch screen is the user's arrangement, and opening a
@@ -565,6 +578,9 @@ pub fn import_images(
             fs::copy(source, &destination).with_context(|| {
                 format!("copying {} to {}", source.display(), destination.display())
             })?;
+            // Built as the picture arrives, so the timeline never has to decode
+            // the full-size one to draw a card.
+            thumbs::build_one(&root_of(open), &destination);
             named.push(file_name_of(&destination));
         }
         if let Some(last) = named.last() {
@@ -614,8 +630,9 @@ pub fn import_image_bytes(
         fs::create_dir_all(&target)
             .with_context(|| format!("creating {}", target.display()))?;
         let destination = unique_path(&target, &filename);
-        fs::write(&destination, &bytes)
+        atomic::write(&destination, &bytes)
             .with_context(|| format!("writing {}", destination.display()))?;
+        thumbs::build_one(&root_of(open), &destination);
         let saved = file_name_of(&destination);
         choose_image(open, entry_id.as_deref(), &saved)?;
         Ok(saved)

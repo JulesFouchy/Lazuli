@@ -15,6 +15,7 @@ pub mod model;
 pub mod paths;
 pub mod store;
 pub mod theme;
+pub mod thumbs;
 pub mod trashcan;
 pub mod updates;
 pub mod watch;

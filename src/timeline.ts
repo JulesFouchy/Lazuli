@@ -1,7 +1,7 @@
 // The timeline: entry cards, and the gaps between them.
 
 import type { Entry, Project } from "./api";
-import { assetUrl } from "./api";
+import { assetUrl, showSmall } from "./api";
 import {
   daysBetween,
   formatDate,
@@ -178,23 +178,28 @@ function entryCard(
       el(
         "div",
         { class: "card__figure" },
-        el("img", {
-          class: "card__image",
-          src: assetUrl(project.root, "entries", entry.id, entry.image),
-          // The note without its markers: an `alt` is read aloud, and nobody
-          // wants to hear the asterisks.
-          alt: plainText(entry.text) || "Entry illustration",
-          // Thousands of full-resolution photos would otherwise all decode at
-          // once; the browser skips the offscreen ones.
-          loading: "lazy",
-          decoding: "async",
-          // The one part of a card that is to be looked at rather than
-          // changed, so it takes the click back off the card.
-          onclick: (event: Event) => {
-            event.stopPropagation();
-            handlers.viewEntry(entry);
-          },
-        }),
+        showSmall(
+          el("img", {
+            class: "card__image",
+            // The note without its markers: an `alt` is read aloud, and nobody
+            // wants to hear the asterisks.
+            alt: plainText(entry.text) || "Entry illustration",
+            // Thousands of photos would otherwise all decode at once; the
+            // browser skips the offscreen ones.
+            loading: "lazy",
+            decoding: "async",
+            // The one part of a card that is to be looked at rather than
+            // changed, so it takes the click back off the card.
+            onclick: (event: Event) => {
+              event.stopPropagation();
+              handlers.viewEntry(entry);
+            },
+          }) as HTMLImageElement,
+          project.root,
+          "entries",
+          entry.id,
+          entry.image,
+        ),
       ),
   );
 
