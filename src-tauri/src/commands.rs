@@ -1199,9 +1199,7 @@ pub fn drive_account_id(app: &AppHandle) -> Option<String> {
 }
 
 pub fn set_drive_account_id(app: &AppHandle, account: Option<String>) {
-    let mut settings = read_settings(app);
-    settings.drive_account = account;
-    write_settings(app, &settings);
+    save_settings(app, |settings| settings.drive_account = account);
 }
 
 /// The signed-in Google account's tokens, if there are any.
@@ -1211,9 +1209,7 @@ pub fn drive_tokens(app: &AppHandle) -> Option<crate::drive::Tokens> {
 
 /// Remember, or forget, the signed-in account.
 pub fn set_drive_tokens(app: &AppHandle, tokens: Option<crate::drive::Tokens>) {
-    let mut settings = read_settings(app);
-    settings.drive_tokens = tokens;
-    write_settings(app, &settings);
+    save_settings(app, |settings| settings.drive_tokens = tokens);
 }
 
 /// The user's own profile, as the button and the dialog show it.
@@ -1291,13 +1287,12 @@ fn base64(bytes: &[u8]) -> String {
 #[tauri::command]
 pub fn set_my_name(app: AppHandle, state: State<AppState>, name: String) -> MyProfile {
     let name = name.trim();
-    let mut settings = read_settings(&app);
-    settings.author_name = Some(if name.is_empty() {
+    let name = if name.is_empty() {
         authors::name_from_the_machine()
     } else {
         name.to_owned()
-    });
-    write_settings(&app, &settings);
+    };
+    save_settings(&app, |settings| settings.author_name = Some(name));
     republish(&app, &state);
     my_profile(app)
 }
@@ -1334,26 +1329,26 @@ pub fn set_my_avatar(
     atomic::write(&directory.join(&name), &bytes)
         .with_context(|| format!("writing {name}"))?;
 
-    let mut settings = read_settings(&app);
-    // An old picture with a different extension would otherwise sit there
-    // unreferenced for good.
-    if let Some(previous) = settings.author_avatar.filter(|previous| previous != &name) {
-        let _ = fs::remove_file(directory.join(previous));
-    }
-    settings.author_avatar = Some(name);
-    write_settings(&app, &settings);
+    update_settings(&app, |settings| {
+        // An old picture with a different extension would otherwise sit there
+        // unreferenced for good.
+        if let Some(previous) = settings.author_avatar.take().filter(|previous| previous != &name) {
+            let _ = fs::remove_file(directory.join(previous));
+        }
+        settings.author_avatar = Some(name);
+    })?;
     republish(&app, &state);
     Ok(my_profile(app))
 }
 
 #[tauri::command]
 pub fn clear_my_avatar(app: AppHandle, state: State<AppState>) -> MyProfile {
-    let mut settings = read_settings(&app);
-    if let (Some(name), Ok(directory)) = (settings.author_avatar.take(), app.path().app_config_dir())
-    {
-        let _ = fs::remove_file(directory.join(name));
-    }
-    write_settings(&app, &settings);
+    let directory = app.path().app_config_dir();
+    save_settings(&app, |settings| {
+        if let (Some(name), Ok(directory)) = (settings.author_avatar.take(), directory) {
+            let _ = fs::remove_file(directory.join(name));
+        }
+    });
     republish(&app, &state);
     my_profile(app)
 }
@@ -1371,9 +1366,8 @@ fn author_here(app: &AppHandle, root: &Path) -> Option<(String, String, Option<S
     if let Some(account) = &account {
         if let Some(theirs) = authors::id_for_account(root, account) {
             if theirs != id {
-                let mut settings = read_settings(app);
-                settings.author_id = Some(theirs.clone());
-                write_settings(app, &settings);
+                let adopted = theirs.clone();
+                save_settings(app, |settings| settings.author_id = Some(adopted));
                 id = theirs;
             }
         }
@@ -1426,12 +1420,18 @@ fn republish(app: &AppHandle, state: &State<AppState>) {
 /// Who the user is — id and published name — minting and storing an identity
 /// the first time it is asked for.
 ///
-/// Returns `None` only when there is nowhere to store settings, in which case
-/// entries are written without an author rather than with one that would be
-/// different on every launch.
+/// Returns `None` when the settings cannot be read or the identity cannot be
+/// stored, in which case entries are written without an author rather than
+/// with one that would be different on every launch. Minting is only ever
+/// done from settings that were actually read: settings that could not be are
+/// not "no identity yet", they are an identity this call cannot see, and a
+/// fresh one written over it made one person look like a crowd.
 fn author(app: &AppHandle) -> Option<(String, String)> {
-    let mut settings = read_settings(app);
-    let known = settings.author_id.is_some() && settings.author_name.is_some();
+    let _held = SETTINGS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = load_settings(app).ok()?;
+    if let (Some(id), Some(name)) = (&settings.author_id, &settings.author_name) {
+        return Some((id.clone(), name.clone()));
+    }
 
     let id = settings
         .author_id
@@ -1441,18 +1441,11 @@ fn author(app: &AppHandle) -> Option<(String, String)> {
         .author_name
         .clone()
         .unwrap_or_else(authors::name_from_the_machine);
-
-    if !known {
-        settings.author_id = Some(id.clone());
-        settings.author_name = Some(name.clone());
-        write_settings(app, &settings);
-        // Only an identity that was actually stored is one the next launch will
-        // agree with, and an author id that changes every launch is worse than
-        // no author id at all: it would make one person look like a crowd.
-        if read_settings(app).author_id.as_deref() != Some(id.as_str()) {
-            return None;
-        }
-    }
+    settings.author_id = Some(id.clone());
+    settings.author_name = Some(name.clone());
+    // Only an identity that was actually stored is one the next launch will
+    // agree with.
+    write_settings(app, &settings).ok()?;
     Some((id, name))
 }
 
@@ -1478,11 +1471,11 @@ pub fn set_theme_preference(
     background_dark: String,
     background_light: String,
 ) {
-    let mut settings = read_settings(&app);
-    settings.theme = Some(theme);
-    settings.background_dark = Some(background_dark);
-    settings.background_light = Some(background_light);
-    write_settings(&app, &settings);
+    save_settings(&app, |settings| {
+        settings.theme = Some(theme);
+        settings.background_dark = Some(background_dark);
+        settings.background_light = Some(background_light);
+    });
 }
 
 /// Where new projects go when nothing has said otherwise.
@@ -1520,23 +1513,85 @@ fn settings_file(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_config_dir().ok().map(|dir| dir.join(SETTINGS_FILE))
 }
 
-fn read_settings(app: &AppHandle) -> Settings {
-    settings_file(app)
-        .and_then(|path| fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+/// Held across every read-modify-write of the settings file.
+///
+/// The sync loop refreshes tokens on its own thread while the page saves a
+/// theme on the main one; two of those interleaved end with whichever wrote
+/// second having written from a copy that predates the first.
+static SETTINGS: Mutex<()> = Mutex::new(());
+
+/// The settings in `path`, or why they cannot be had.
+///
+/// A file that is not there is a fresh install and means empty settings. A
+/// file that is there and cannot be read or parsed is something else — a
+/// rename mid-flight, another instance's handle, a bad byte — and is **not**
+/// empty settings. Reading it as empty is what used to lose the Google
+/// sign-in, the name and the picture all at once: the next writer took the
+/// emptiness for the truth and persisted it, and `author` minted a new
+/// identity on top.
+fn settings_at(path: &Path) -> Result<Settings> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Settings::default());
+        }
+        Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
+    };
+    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
 }
 
-fn write_settings(app: &AppHandle, settings: &Settings) {
-    let Some(path) = settings_file(app) else {
-        return;
-    };
+/// The settings, retrying briefly: on Windows a file that is being renamed
+/// over is unopenable for the duration, and another instance of the app may
+/// be doing exactly that.
+fn load_settings(app: &AppHandle) -> Result<Settings> {
+    let path = settings_file(app).ok_or_else(|| anyhow!("the app has no config folder"))?;
+    let mut attempts = 0;
+    loop {
+        match settings_at(&path) {
+            Err(err) if attempts < 5 => {
+                attempts += 1;
+                eprintln!("lazuli: settings unreadable, retrying: {err:#}");
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            result => return result,
+        }
+    }
+}
+
+/// The settings for reading only. A failure reads as empty, which is harmless
+/// here because nothing reads them this way and then writes them back.
+fn read_settings(app: &AppHandle) -> Settings {
+    load_settings(app).unwrap_or_default()
+}
+
+/// Change the settings on disk, or say why they could not be.
+///
+/// The only way to write them. Nothing is written when they could not be read
+/// first, whatever the reason: a change the user asked for and lost is a
+/// change they make again, where a file written from nothing is everything
+/// else they had, gone.
+fn update_settings(app: &AppHandle, change: impl FnOnce(&mut Settings)) -> Result<()> {
+    let _held = SETTINGS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = load_settings(app)?;
+    change(&mut settings);
+    write_settings(app, &settings)
+}
+
+/// [`update_settings`] for the callers that have nowhere to send an error:
+/// it is logged, and the settings are left as they were.
+fn save_settings(app: &AppHandle, change: impl FnOnce(&mut Settings)) {
+    if let Err(err) = update_settings(app, change) {
+        eprintln!("lazuli: settings not saved: {err:#}");
+    }
+}
+
+fn write_settings(app: &AppHandle, settings: &Settings) -> Result<()> {
+    let path = settings_file(app).ok_or_else(|| anyhow!("the app has no config folder"))?;
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    if let Ok(text) = serde_json::to_string_pretty(settings) {
-        let _ = atomic::write(&path, text);
-    }
+    let text = serde_json::to_string_pretty(settings).context("serialising the settings")?;
+    atomic::write(&path, text)
 }
 
 /// Remember where a project was created, so the next one is offered the same
@@ -1546,11 +1601,8 @@ fn remember_projects_dir(app: &AppHandle, root: &Path) {
     let Some(parent) = root.parent() else {
         return;
     };
-    // Read-modify-write rather than writing a fresh `Settings`: the file holds
-    // more than this field, and building one here would silently drop the rest.
-    let mut settings = read_settings(app);
-    settings.projects_dir = Some(parent.to_path_buf());
-    write_settings(app, &settings);
+    let parent = parent.to_path_buf();
+    save_settings(app, |settings| settings.projects_dir = Some(parent));
 }
 
 /// A project's metadata without opening it, for the launch screen.
@@ -1581,5 +1633,46 @@ mod tests {
         // The high bytes of a PNG are where a sign error would show up.
         assert_eq!(base64(&[0xff, 0xfe, 0xfd]), "//79");
         assert_eq!(base64(&[0x00, 0x00, 0x00]), "AAAA");
+    }
+
+    fn scratch(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("lazuli-{label}-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("a temp dir");
+        dir
+    }
+
+    #[test]
+    fn no_settings_file_is_empty_settings() {
+        let dir = scratch("settings-missing");
+        let settings = settings_at(&dir.join("settings.json")).expect("a fresh install reads");
+        assert!(settings.drive_tokens.is_none());
+        assert!(settings.author_id.is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_settings_file_that_will_not_parse_is_not_empty_settings() {
+        // The bug this guards against: a file present but unreadable came back
+        // as defaults, the next writer persisted them, and the sign-in, the
+        // name and the picture were gone together. Broken must stay an error,
+        // so nothing downstream takes it for a blank slate.
+        let dir = scratch("settings-broken");
+        let path = dir.join("settings.json");
+        fs::write(&path, "{ \"drive_tokens\": { \"refresh_token\": ").unwrap();
+        assert!(settings_at(&path).is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_settings_file_from_an_older_build_still_parses() {
+        // Every field is optional, so a file that predates the newest of them
+        // is a fresh install for that field and nothing else.
+        let dir = scratch("settings-old");
+        let path = dir.join("settings.json");
+        fs::write(&path, "{ \"theme\": \"dark\" }").unwrap();
+        let settings = settings_at(&path).expect("an old file reads");
+        assert_eq!(settings.theme.as_deref(), Some("dark"));
+        assert!(settings.drive_tokens.is_none());
+        let _ = fs::remove_dir_all(dir);
     }
 }
