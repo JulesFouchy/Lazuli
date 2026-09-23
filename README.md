@@ -64,10 +64,10 @@ Projects Lazuli syncs are made inside a **`Lazuli` folder** at the top of your D
 
 Two things to get right in the Cloud console, both easy to forget:
 
-- **The consent screen has to be in Production.** Left in Testing it works only for accounts listed there by hand, capped at a hundred — which looks exactly like "sync is broken for everyone but me".
+- **The consent screen has to be in Production.** Left in Testing it works only for accounts listed there by hand, capped at a hundred — which looks exactly like "sync is broken for everyone but me". Worse, and less obvious: **Google expires a refresh token issued in Testing after seven days**, so a sign-in that worked stops working a week later with no warning and no change in the app. An account that keeps needing to be connected again, on a schedule, is this and not a bug.
 - **One id does not cover every platform.** An Android build needs its own OAuth client, pinned to its package name and signing certificate, and iOS a third. They belong in the *same* Cloud project, so they share the consent screen, the quota and the user's approval: somebody who connected on their laptop is not asked again on their phone. The sign-in differs too — the loopback listener here is a desktop mechanism, and a phone takes the redirect through a custom URI scheme instead.
 
-To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id and secret into `DESKTOP_CLIENT_ID` and `DESKTOP_CLIENT_SECRET`. That is all of it — the folder chooser rides on the same OAuth client and needs no API key of its own.
+To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), with **both the Google Drive API and the Google Picker API enabled**, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id and secret into `DESKTOP_CLIENT_ID` and `DESKTOP_CLIENT_SECRET`. That is all of it. The Picker API has to be on even though nothing here holds a Picker key — the chooser rides on the same OAuth client, and an **API key is not part of this flow at all**.
 
 ### The chooser is the sign-in, with two more parameters
 
