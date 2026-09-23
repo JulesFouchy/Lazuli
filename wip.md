@@ -9,6 +9,8 @@
 
 pouvoir recadrer une photo / choisir le mod de fit genre stretch, fit avec en background la photo blurée 
 
+- copy/cut/paste entries
+
 make the UI juicy
 
 - there shouldn't be two modes based on if you have one or several tabs, alwyas ame multi tab style, and + button should be aligned in Y
