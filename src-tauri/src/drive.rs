@@ -78,6 +78,21 @@ pub const DESKTOP_CLIENT_SECRET: &str = "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";
 /// copy of the app, which is where anyone wanting it would look.
 pub const PICKER_API_KEY: &str = "AIzaSyDr_ITmX6VKtbxUiURh-4ydyfGWwC5PV50";
 
+/// The Cloud project's number, which the Picker needs under `drive.file`.
+///
+/// Choosing a folder in the Picker is what *grants* the app access to it, and
+/// the grant is to a project, not to a key or a token: without this the
+/// chooser accepts the choice, tries to make the grant, fails, and hands the
+/// button back — which is precisely what happened to the first person a
+/// project was shared with. It is the leading digits of every client id in
+/// the project, so it is read off the desktop one rather than kept twice.
+pub fn project_number() -> &'static str {
+    DESKTOP_CLIENT_ID
+        .split('-')
+        .next()
+        .unwrap_or_default()
+}
+
 /// Asked for at sign-in. `drive.file` and nothing else — the narrowest scope
 /// that can do the job, and the one that keeps the app out of Google's
 /// restricted-scope review.
@@ -1076,6 +1091,15 @@ mod redirect_tests {
         // And an unsearched way through, in case the chooser's own search will
         // not let a folder be chosen from its results.
         assert!(page.contains(r#"folders("Everything shared with me", false, "")"#));
+        // Under `drive.file` the grant is to a project, and without its number
+        // the chooser accepts a choice and then quietly fails to hand it over.
+        assert!(page.contains(&format!(r#"const APP_ID = "{}";"#, project_number())));
+        assert!(page.contains(".setAppId(APP_ID)"));
+    }
+
+    #[test]
+    fn the_project_number_is_the_front_of_the_client_id() {
+        assert_eq!(project_number(), "991113913988");
     }
 
 
@@ -1376,6 +1400,7 @@ fn picker_page(origin: &str, access_token: &str, looking_for: &str) -> String {
   const TOKEN = "{token}";
   const KEY = "{key}";
   const ORIGIN = "{origin}";
+  const APP_ID = "{app_id}";
   const LOOKING_FOR = {looking_for};
   const say = (text) => {{ document.getElementById("say").textContent = text; }};
   function done(query) {{ location.href = "/picked" + query; }}
@@ -1411,6 +1436,7 @@ fn picker_page(origin: &str, access_token: &str, looking_for: &str) -> String {
       const builder = new google.picker.PickerBuilder()
         .setDeveloperKey(KEY)
         .setOAuthToken(TOKEN)
+        .setAppId(APP_ID)
         .setOrigin(ORIGIN)
         .setTitle("Choose the shared project's folder")
         .setCallback(function (data) {{
@@ -1447,6 +1473,7 @@ fn picker_page(origin: &str, access_token: &str, looking_for: &str) -> String {
         // this machine's own loopback.
         token = access_token,
         key = PICKER_API_KEY,
+        app_id = project_number(),
         origin = origin,
         // A name the user pasted, so it goes in as a JSON literal rather than
         // between quotes of ours: a quote or a backslash in a project's name

@@ -54,7 +54,7 @@ Two devices adding entries never collide, because an entry folder is a UUID. Two
 
 ### The Google client id
 
-Syncing identifies Lazuli to Google with an OAuth client id, which is in [`src-tauri/src/drive.rs`](src-tauri/src/drive.rs). A desktop client id is public by design: it is baked into every copy of the app, it says *which app is asking*, and it grants nothing on its own. What proves a sign-in genuine is the PKCE exchange, which is why a desktop app needs no client secret and this one uses none.
+Syncing identifies Lazuli to Google with an OAuth client id, which is in [`src-tauri/src/drive.rs`](src-tauri/src/drive.rs). A desktop client id is public by design: it is baked into every copy of the app, it says *which app is asking*, and it grants nothing on its own. What proves a sign-in genuine is the PKCE exchange. Google issues a "client secret" beside the id and its token endpoint refuses a desktop exchange without it, so one is baked in too — and Google's own documentation says it is not a secret in an installed app: anyone can read it out of the binary, it grants nothing on its own, and the security of a sign-in rests on PKCE alone.
 
 It is made once, for the app, not once per user. Every copy carries the same id; what belongs to each person is the token it gets back, which stays on their machine and never reaches us. Their Drive traffic does count against this project's quota, which is the one thing that is genuinely shared.
 
@@ -67,7 +67,7 @@ Two things to get right in the Cloud console, both easy to forget:
 - **The consent screen has to be in Production.** Left in Testing it works only for accounts listed there by hand, capped at a hundred — which looks exactly like "sync is broken for everyone but me".
 - **One id does not cover every platform.** An Android build needs its own OAuth client, pinned to its package name and signing certificate, and iOS a third. They belong in the *same* Cloud project, so they share the consent screen, the quota and the user's approval: somebody who connected on their laptop is not asked again on their phone. The sign-in differs too — the loopback listener here is a desktop mechanism, and a phone takes the redirect through a custom URI scheme instead.
 
-To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id into `DESKTOP_CLIENT_ID`.
+To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API and the Google Picker API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id and secret into `DESKTOP_CLIENT_ID` and `DESKTOP_CLIENT_SECRET`; an API key restricted to the Picker API into `PICKER_API_KEY`. The chooser also needs the project's *number*, which is the leading digits of every client id in the project and is read off `DESKTOP_CLIENT_ID` — under `drive.file` the choice of a folder is a grant to that project, and without the number the chooser accepts the choice and then quietly fails to make it.
 
 ## The 5am rule
 
