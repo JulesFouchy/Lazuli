@@ -319,6 +319,19 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
         sort_order: SortOrder::default(),
     };
     write_meta(root, &meta)?;
+
+    // For a project kept in a repository of its own, which is how a journal
+    // ends up living beside the code it is about. `.lazuli/` is this machine's
+    // account of syncing it, and a clone that inherited another machine's would
+    // read every file the remote has not got as something deleted. Written only
+    // for a new project: an existing one is never rewritten, and its owner can
+    // add the line themselves.
+    let _ = atomic::write(
+        &root.join(".gitignore"),
+        "# This machine's own account of syncing this project.
+.lazuli/
+",
+    );
     Ok(meta)
 }
 
@@ -683,6 +696,17 @@ mod tests {
             "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\n---\n\nBefore any of this.\n",
         )
         .expect("should write");
+    }
+
+    #[test]
+    fn a_new_project_keeps_its_sync_state_out_of_git() {
+        // A journal kept in the repository it is about would otherwise commit
+        // which remote *this* machine syncs it to, and what the two last
+        // agreed — which another clone would then act on.
+        let dir = TempDir::new("gitignore");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let ignored = fs::read_to_string(dir.0.join(".gitignore")).expect("should read");
+        assert!(ignored.contains(".lazuli/"));
     }
 
     #[test]

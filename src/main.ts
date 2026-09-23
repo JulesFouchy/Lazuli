@@ -15,6 +15,7 @@ import type {
 } from "./api";
 import {
   addProject as fileProject,
+  addSharedProject,
   addTab,
   createEntry,
   defaultProjectsDir,
@@ -236,6 +237,12 @@ function launchView(): HTMLElement {
         class: "button",
         text: "Add project…",
         onclick: () => void addProject(),
+      }),
+      el("button", {
+        class: "button",
+        text: "Add shared…",
+        title: "A project somebody shared with you on Google Drive",
+        onclick: () => void addShared(),
       }),
       el("span", { class: "launch__spacer" }),
       el("button", {
@@ -1039,6 +1046,9 @@ function openSyncDialog(project: Project): void {
   const act = el("button", { class: "button" });
   const now = el("button", { class: "button button--ghost", text: "Sync now" });
 
+  let on = false;
+  const people = membersSection(project.root, () => on);
+
   // The account belongs in the profile dialog, and it is here as well: somebody
   // who came to turn syncing on would otherwise meet a button that cannot work,
   // and nothing saying where to go instead.
@@ -1050,6 +1060,10 @@ function openSyncDialog(project: Project): void {
   });
 
   const paint = (status: SyncStatus) => {
+    on = status.on;
+    // Told rather than left to work it out: it is drawn before the first status
+    // lands, and again whenever syncing is turned on or off under it.
+    people.refresh();
     act.textContent = status.on ? "Stop syncing this project" : "Sync this project";
     // Nothing to sync to, so nothing to stop either.
     act.disabled = !connected && !status.on;
@@ -1076,14 +1090,14 @@ function openSyncDialog(project: Project): void {
     render();
   };
 
-  let on = false;
+  // No flipping of `on` here: `paint` sets it from the status that came back,
+  // which is the one that is true. Guessing it would disagree with the button
+  // the moment a start failed.
   act.onclick = () =>
     void run(
       on ? stopSyncing(project.root) : startSyncing(project.root),
       on ? "Could not stop syncing" : "Could not start syncing",
-    ).then(() => {
-      on = !on;
-    });
+    );
   now.onclick = () => void run(syncNow(project.root), "Could not sync");
 
   openModal({
@@ -1098,7 +1112,7 @@ function openSyncDialog(project: Project): void {
         class: "hint",
         text: "Whether this machine syncs this project is this machine's own business — it is not carried to your other devices.",
       }),
-      membersSection(project.root, () => on),
+      people.node,
     ),
   });
 
@@ -1125,6 +1139,26 @@ function settleConflict(entry: Entry, version: number): void {
     () => toast(`Kept ${label}`),
     (err) => toastError("Could not settle that entry", err),
   );
+}
+
+/**
+ * Take a project somebody shared on Drive.
+ *
+ * The chooser opens in the user's browser, so this waits on them being over
+ * there — hence the toast rather than a silent pause.
+ */
+async function addShared(): Promise<void> {
+  toast("Choose the shared folder in your browser.");
+  let path: string | null;
+  try {
+    path = await addSharedProject();
+  } catch (err) {
+    toastError("Could not add that project", err);
+    return;
+  }
+  if (!path) return;
+  await readTabs();
+  await openListed(path);
 }
 
 /** Drop a project from the list, leaving the folder where it is. */

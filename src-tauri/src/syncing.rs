@@ -354,3 +354,60 @@ pub fn set_my_name_here(
     crate::commands::set_display_name_here(&app, &state, name.as_deref())?;
     Ok(())
 }
+
+/// Take a project somebody shared, through Google's own file chooser.
+///
+/// The Picker is the only way in: `drive.file` cannot see a folder the app did
+/// not create, so the user hands this one over once and the grant sticks.
+///
+/// What comes back is a folder id, and the rest is the ordinary sync: a local
+/// folder is made for it, pointed at that remote, and filled by a pass. The
+/// text arrives before the photographs, so the timeline is readable at once.
+#[tauri::command]
+pub async fn add_shared_project(
+    app: AppHandle,
+) -> Result<Option<std::path::PathBuf>, crate::commands::CmdError> {
+    let handle = app.clone();
+    let picked = crate::commands::off_thread(move || {
+        let access = token(&handle)?;
+        drive::pick_folder(&access)
+    })
+    .await?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+
+    let parent = crate::commands::default_projects_dir(app.clone());
+    let handle = app.clone();
+    let path = crate::commands::off_thread(move || {
+        // Named after the Drive folder, and given a free name if that is taken:
+        // a project arriving from somebody else must not land on one of ours.
+        let path = crate::paths::unique_path(&parent, &crate::paths::folder_name_for(&picked.name));
+        std::fs::create_dir_all(&path)
+            .with_context(|| format!("creating {}", path.display()))?;
+        sync::Config {
+            folder: picked.id.clone(),
+        }
+        .write(&path)?;
+
+        let backend = drive::Drive::new(token(&handle)?, picked.id)?;
+        sync::run(&path, &backend)?;
+
+        // A folder that came down without a `lazuli.yaml` is not a project —
+        // the wrong folder was chosen, or it was shared empty. Say so rather
+        // than leaving an unopenable folder behind.
+        if !store::is_project(&path) {
+            let _ = std::fs::remove_dir_all(&path);
+            bail!(
+                "{} does not hold a Lazuli project. Choose the folder that has \
+                 a lazuli.yaml in it.",
+                picked.name
+            );
+        }
+        Ok(path)
+    })
+    .await?;
+
+    crate::commands::file_project_at_top(&app, path.clone());
+    Ok(Some(path))
+}

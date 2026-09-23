@@ -170,6 +170,7 @@ pub fn run() {
             syncing::share_project,
             syncing::unshare_project,
             syncing::set_my_name_here,
+            syncing::add_shared_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lazuli");

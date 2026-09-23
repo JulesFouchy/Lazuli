@@ -166,6 +166,16 @@ export const unshareProject = (path: string, permission: string) =>
 export const setMyNameHere = (name: string | null) =>
   invoke<void>("set_my_name_here", { name });
 
+/**
+ * Take a project somebody shared, through Google's own file chooser.
+ *
+ * Opens in the user's browser rather than in here: the chooser is Google's own
+ * page and this one's content policy has no room for it. Resolves with where
+ * the project landed, or null if they chose nothing.
+ */
+export const addSharedProject = () =>
+  invoke<string | null>("add_shared_project");
+
 export interface Project {
   root: string;
   meta: ProjectMeta;

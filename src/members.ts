@@ -34,7 +34,13 @@ function roleReads(role: string): string {
  * Only for a project that syncs: there is nobody to share a folder that does
  * not exist with, and saying so is better than an empty list.
  */
-export function membersSection(path: string, isOn: () => boolean): HTMLElement {
+export interface MembersSection {
+  node: HTMLElement;
+  /** Re-read whether the project syncs, and who is in it. */
+  refresh: () => void;
+}
+
+export function membersSection(path: string, isOn: () => boolean): MembersSection {
   const list = el("div", { class: "members" });
   const state = el("p", { class: "hint", text: "…" });
 
@@ -136,18 +142,27 @@ export function membersSection(path: string, isOn: () => boolean): HTMLElement {
     );
   });
 
-  if (!isOn()) {
-    state.textContent =
-      "Sync this project first. Sharing is the Drive folder's, so there has to be one.";
-    list.hidden = true;
-    section.querySelector(".row")?.setAttribute("hidden", "");
-  } else {
+  // Asked again rather than answered once: the dialog is built before its own
+  // status has come back, and the user can turn syncing on while looking at it.
+  // Deciding at construction meant it always said "sync this first", however
+  // long the project had been syncing.
+  const refresh = () => {
+    const on = isOn();
+    list.hidden = !on;
+    invite.parentElement?.toggleAttribute("hidden", !on);
+    nameHere.parentElement?.toggleAttribute("hidden", !on);
+    if (!on) {
+      state.textContent =
+        "Sync this project first. Sharing is the Drive folder's, so there has to be one.";
+      return;
+    }
     void projectMembers(path)
       .then(paint)
       .catch(() => {
         state.textContent = "Could not read who this is shared with.";
       });
-  }
+  };
+  refresh();
 
-  return section;
+  return { node: section, refresh };
 }

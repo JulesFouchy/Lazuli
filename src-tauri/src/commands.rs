@@ -1381,6 +1381,14 @@ fn author_here(app: &AppHandle, root: &Path) -> Option<(String, String, Option<S
     Some((id, name, account))
 }
 
+/// Put a project at the top of the first tab, as an arrival rather than a
+/// rearrangement.
+pub fn file_project_at_top(app: &AppHandle, path: PathBuf) {
+    library::update(app, |library| {
+        library.insert(path, Slot { tab: 0, index: 0 })
+    });
+}
+
 /// Change what this user is called in the open project alone.
 ///
 /// The record is theirs to write, which is what keeps the registry free of

@@ -1,26 +1,19 @@
 ## Triage
-- when deleting an entry, the text should just say "delete"
+- when deleting an entry or image, the text should just say "delete"
 - we should also be able to use video instead of an image for an entry, and would call if i can record it directly from Lazuli : open record mode, go to your app, press a shortcut to start recording, do your thing, same shortcut to stop recording. This records fullscreen, simple. (or do the same rect selector as screen-to-gif ? With auto-fitting on a window ?)
 - callendar view, with the image as the background of the calendar square
 - drag to reorder entries within a single day
 
-- quick button to swithcch betwn light and dark thele
+- quick button to swithcch betwn light and dark theme
 - should always have the inital entry "Project started" on day 1 so we can see the gap between day 1 and first entry (or not, usually first entry is project creation, i only have the problme with projects i started before Lazuli) Or maybe a project should not have a start date, the first entry IS the start of the project, ,remove the "stared on xxx" sentence on the banner. And then also remove the entries count, and we don't have the readability problem anymore, no more small text on banner
-
-transparent images background, eg the transition isf demo in coollab timeline, in the viewer you see the timeline below it as it is not 100% opaque
 
 pouvoir recadrer une photo / choisir le mod de fit genre stretch, fit avec en background la photo blurée 
 
-timeline partagéé, version décentralisée sans serveur où juste on s'envoie des messages pour se mettre à jour : reconciliation algo : if the image was edited, keep both images in the list of images of the entry, and ask user to choose what the current one should be. For text just ask the user to choose, or edit manually to write the new text. Changing project name is a bit tricky
-
 make the UI juicy
-
 
 tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"
 
 we should see the current date at the top
-
-the button shouldn't say "Open folder..." but "Open project...", or "Import project..."? (and on hover we explain that each project is just a plain local folder)
 
 ctrl + scroll to zoom in/out when in project page to better see the whole timeline (and a popup you canc click to reset zoom to normal) Maybe it just scales down the image, and when too small we switch to the mode where there is the small square image to the left, and the sentence to the right, which is a nice view mode in and of itself
 
@@ -29,6 +22,8 @@ ctrl + scroll to zoom in/out when in project page to better see the whole timeli
 
 add to global claude to always use american english spelling
 
+error popups like "Not connected to a google account" should auto-disappear when the error gets resolved eg i connect my google account
+
 move all my projects off of the repo, and sync them with drive
 
 mobile version
@@ -36,7 +31,7 @@ web version
 
 mcp, or at least a readme to explain the file/folder format so people can easily automate the creation of entries
 
-
+Dark Continent: experiment with Grapple and Rope Physics. And worldgen for the first circle.
 
 ## Import initial projects
 

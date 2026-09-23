@@ -66,6 +66,18 @@ pub const DESKTOP_CLIENT_ID: &str =
 /// the tokens that come back belong to their machine.
 pub const DESKTOP_CLIENT_SECRET: &str = "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";
 
+/// The key the Google Picker is built with, which is also not a secret.
+///
+/// An API key names the *project* for quota and attribution; it authorises
+/// nothing. What reaches a person's Drive is their own access token, given by
+/// their consent and kept on their machine. Restricted to the Picker API, so
+/// the worst a reader of this binary can do with it is spend this project's
+/// Picker quota.
+///
+/// Keeping it out of the repository would buy nothing: it ships inside every
+/// copy of the app, which is where anyone wanting it would look.
+pub const PICKER_API_KEY: &str = "AIzaSyDr_ITmX6VKtbxUiURh-4ydyfGWwC5PV50";
+
 /// Asked for at sign-in. `drive.file` and nothing else — the narrowest scope
 /// that can do the job, and the one that keeps the app out of Google's
 /// restricted-scope review.
@@ -962,6 +974,46 @@ mod redirect_tests {
     }
 
     #[test]
+    fn the_chosen_folder_is_read_out_of_the_request() {
+        assert_eq!(
+            picked_in("/picked?id=1AbC&name=A%20Shared%20Journal"),
+            Some(Picked {
+                id: "1AbC".into(),
+                name: "A Shared Journal".into()
+            })
+        );
+    }
+
+    #[test]
+    fn choosing_nothing_is_not_a_folder() {
+        assert_eq!(picked_in("/picked?cancelled=1"), None);
+        assert_eq!(picked_in("/picked?id="), None);
+        // The page itself, which is the request before any choice.
+        assert_eq!(picked_in("/"), None);
+    }
+
+    #[test]
+    fn a_folder_with_no_name_still_counts() {
+        // Drive always sends one, but a project that arrived nameless should be
+        // openable rather than refused.
+        assert_eq!(
+            picked_in("/picked?id=1AbC").map(|picked| picked.name),
+            Some("Shared project".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_picker_page_carries_the_key_the_token_and_the_origin() {
+        // All three are checked by Google, and a page missing one fails with a
+        // message about the others.
+        let page = picker_page("http://127.0.0.1:1234", "an-access-token");
+        assert!(page.contains(PICKER_API_KEY));
+        assert!(page.contains("an-access-token"));
+        assert!(page.contains("http://127.0.0.1:1234"));
+        assert!(page.contains("setSelectFolderEnabled(true)"));
+    }
+
+    #[test]
     fn a_redirect_names_a_port_that_is_actually_open() {
         let redirect = Redirect::new().expect("should open a port");
         assert!(redirect.url.starts_with("http://127.0.0.1:"));
@@ -1019,9 +1071,12 @@ pub struct Member {
     pub id: String,
     /// `owner`, `writer`, `commenter` or `reader`, as Drive enforces them.
     pub role: String,
-    #[serde(rename = "emailAddress", default)]
+    /// Renamed on the way *in* only. A plain `rename` applies both ways, so the
+    /// struct would go out to the page under Google's names rather than its
+    /// own — which it did, and the members list showed "undefined".
+    #[serde(rename(deserialize = "emailAddress"), default)]
     pub email: String,
-    #[serde(rename = "displayName", default)]
+    #[serde(rename(deserialize = "displayName"), default)]
     pub name: String,
 }
 
@@ -1091,4 +1146,154 @@ pub fn unshare(access_token: &str, folder: &str, permission: &str) -> Result<()>
             .context("removing someone from the project")?,
     )?;
     Ok(())
+}
+
+// --- picking a folder somebody else shared ---------------------------------
+
+/// What the user chose in the Picker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Picked {
+    pub id: String,
+    pub name: String,
+}
+
+/// Ask the user to hand over a folder, through Google's own chooser.
+///
+/// `drive.file` deliberately cannot see a folder the app did not create — a
+/// `sharedWithMe` listing comes back empty — so this is the only way into a
+/// project somebody shared. The Picker is what grants the app access to the one
+/// folder chosen, and the grant sticks: entries added to it later need no
+/// second visit.
+///
+/// **Served to the user's own browser, not to Lazuli's webview.** The page runs
+/// Google's script, and the app's own page is not the place for that: its
+/// content policy is `default-src 'self'` with no frames, and widening it for
+/// this would be a permanent hole for an occasional dialog. The loopback server
+/// is the same one a sign-in comes back to.
+pub fn pick_folder(access_token: &str) -> Result<Option<Picked>> {
+    use std::io::{BufRead, BufReader, Write};
+
+    check_configured()?;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .context("opening a port for the Google Picker")?;
+    let port = listener.local_addr().context("reading the port")?.port();
+    let origin = format!("http://127.0.0.1:{port}");
+
+    tauri_plugin_opener::open_url(&origin, None::<&str>)
+        .context("opening the Google Picker")?;
+
+    let deadline = SystemTime::now() + SIGN_IN_TIMEOUT;
+    for stream in listener.incoming() {
+        if SystemTime::now() > deadline {
+            bail!("the Google Picker was not finished in time");
+        }
+        let mut stream = stream.context("accepting the browser's request")?;
+        let mut line = String::new();
+        BufReader::new(&stream)
+            .read_line(&mut line)
+            .context("reading the browser's request")?;
+
+        let target = line.split_whitespace().nth(1).unwrap_or("/");
+        let answer = picked_in(target);
+
+        let body = match &answer {
+            // Still the first request: hand over the page itself.
+            None if !target.starts_with("/picked") => picker_page(&origin, access_token),
+            Some(_) => "<h1>Added</h1><p>You can close this tab and go back to Lazuli.</p>"
+                .to_owned(),
+            None => "<h1>Nothing chosen</h1><p>You can close this tab.</p>".to_owned(),
+        };
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.flush();
+
+        if target.starts_with("/picked") {
+            return Ok(answer);
+        }
+    }
+    bail!("the browser never came back")
+}
+
+/// The folder in a `/picked?id=…&name=…` request, if there is one.
+pub fn picked_in(target: &str) -> Option<Picked> {
+    if !target.starts_with("/picked") {
+        return None;
+    }
+    let query = target.split_once('?')?.1;
+    let mut id = None;
+    let mut name = None;
+    for pair in query.split('&') {
+        match pair.split_once('=') {
+            Some(("id", value)) => id = Some(urldecode(value)),
+            Some(("name", value)) => name = Some(urldecode(value)),
+            _ => {}
+        }
+    }
+    let id = id.filter(|id| !id.is_empty())?;
+    Some(Picked {
+        name: name.filter(|name| !name.is_empty()).unwrap_or_else(|| "Shared project".to_owned()),
+        id,
+    })
+}
+
+/// The page the browser is sent to: Google's chooser, and nothing else.
+fn picker_page(origin: &str, access_token: &str) -> String {
+    format!(
+        r#"<!doctype html>
+<html><head><meta charset="utf-8"><title>Choose a Lazuli project</title>
+<style>
+ body {{ font: 15px system-ui, sans-serif; margin: 0; display: grid; place-items: center;
+        height: 100vh; background: #0b1020; color: #f2f4fb; }}
+ p {{ opacity: .7 }}
+</style></head>
+<body>
+<p id="say">Opening Google's file chooser…</p>
+<script src="https://apis.google.com/js/api.js"></script>
+<script>
+  const TOKEN = "{token}";
+  const KEY = "{key}";
+  const ORIGIN = "{origin}";
+  function done(query) {{ location.href = "/picked" + query; }}
+  gapi.load("picker", function () {{
+    try {{
+      const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true);
+      new google.picker.PickerBuilder()
+        .setDeveloperKey(KEY)
+        .setOAuthToken(TOKEN)
+        .setOrigin(ORIGIN)
+        .addView(view)
+        .setTitle("Choose the shared project's folder")
+        .setCallback(function (data) {{
+          if (data.action === google.picker.Action.PICKED) {{
+            const doc = data.docs[0];
+            done("?id=" + encodeURIComponent(doc.id) +
+                 "&name=" + encodeURIComponent(doc.name || ""));
+          }} else if (data.action === google.picker.Action.CANCEL) {{
+            done("?cancelled=1");
+          }}
+        }})
+        .build()
+        .setVisible(true);
+      document.getElementById("say").textContent =
+        "Choose the folder of the project that was shared with you.";
+    }} catch (err) {{
+      document.getElementById("say").textContent = "The chooser would not open: " + err;
+    }}
+  }});
+</script>
+</body></html>"#,
+        // The token is handed to the page rather than the page asking for
+        // one: the app is already signed in, and a second consent for the same
+        // scope would be a question with no purpose. It goes no further than
+        // this machine's own loopback.
+        token = access_token,
+        key = PICKER_API_KEY,
+        origin = origin,
+    )
 }
