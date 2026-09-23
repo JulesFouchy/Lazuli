@@ -14,6 +14,7 @@ pouvoir recadrer une photo / choisir le mod de fit genre stretch, fit avec en ba
 make the UI juicy
 
 - there shouldn't be two modes based on if you have one or several tabs, alwyas ame multi tab style, and + button should be aligned in Y
+- Double click on tab name to rename it
 
 
 tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"
