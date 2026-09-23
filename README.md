@@ -46,9 +46,9 @@ Sharing is Drive's own: the Syncing dialog lists who a project is shared with, i
 
 You can be called something different in one project, the way you can on one Discord server: set it in the Syncing dialog and it is used there alone. And your devices know each other — an author record carries the accounts it signs in with, so an entry written on a phone is by the same person as one written on a laptop.
 
-**Receiving** a shared project takes one step, once: **Add shared…** on the launch screen opens Google's own folder chooser in your browser, and choosing the folder is what grants Lazuli access to it. `drive.file` cannot see a folder it did not create, so the chooser *is* the grant rather than a browser over it — which is also why a pasted link could not stand in for one. After that it is an ordinary project, and entries collaborators add later need no second visit.
+**Receiving a shared project does not work yet, and cannot on the current scope.** `drive.file` grants an app access per *file*, per *user*: what this user's Lazuli created, plus what this user hands it through Google's chooser. Handing over a folder grants the folder object and **nothing inside it** — measured, not assumed: Drive reports `canListChildren: true` on the picked folder and then returns zero children to every query, because every file inside fails the per-file check. Files another person's Lazuli created are invisible to yours for the same reason, however thoroughly the folder is shared. So **Add shared…** opens Google's chooser, the choice comes back, and the folder arrives empty. Reading somebody else's project needs a scope that sees more than the app's own files, and every such scope is one Google classes *restricted*; see [ideas/syncing-projects.md](ideas/syncing-projects.md) for the decision that is waiting on that.
 
-A project's folder is called `Lazuli | <project>`, and the Syncing dialog hands the owner that name to pass on, because the chooser lists everything anyone has ever shared with you and the name is what tells them apart.
+A project's folder is called `Lazuli | <project>`, inside a `Lazuli` folder, so that it can be told apart in a Drive.
 
 Two devices adding entries never collide, because an entry folder is a UUID. Two people editing the same sentence is the one real conflict, and it is not merged for you — both versions land on the card and you keep one.
 
@@ -69,11 +69,13 @@ Two things to get right in the Cloud console, both easy to forget:
 
 To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), with **both the Google Drive API and the Google Picker API enabled**, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id and secret into `DESKTOP_CLIENT_ID` and `DESKTOP_CLIENT_SECRET`. That is all of it. The Picker API has to be on even though nothing here holds a Picker key — the chooser rides on the same OAuth client, and an **API key is not part of this flow at all**.
 
-### The chooser is the sign-in, with two more parameters
+### The chooser is the sign-in, with two more parameters — and it is not enough
 
 Google's Picker has two flows, and the difference is worth knowing before anyone reaches for the better-documented one. The **web** flow is a JavaScript widget the app embeds in a page of its own; it wants an API key, a fixed origin and the Cloud project's number, and it renders in a frame from `docs.google.com` that needs the browser's Google cookies. Behind a signed-out browser, strict cookie settings or a webview's tracking prevention it fails — and it fails by accepting the choice, spinning, and handing the button back, with nothing in any console the app can read. All of that was built here and then taken out.
 
 The **desktop** flow is [`pick_url`](src-tauri/src/drive.rs): the ordinary sign-in redirect plus `trigger_onepick=true` and `allow_folder_selection=true`. Google shows the chooser on its own consent screen and redirects back to the loopback with `picked_file_ids` appended. No key, no origin, no frame, no cookies — and the redirect is the one the app already runs for signing in, because "the Google Picker imposes no additional restrictions" on it.
+
+It works, and it is not sufficient: a picked folder is granted as one object, its contents are not, and Google's documentation says nothing about that either way. It stays because the mechanism is right and would carry a per-file grant if one were ever wanted; what receiving a project needs is a wider scope, not a better chooser.
 
 ## The 5am rule
 
