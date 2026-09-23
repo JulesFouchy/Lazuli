@@ -11,6 +11,9 @@ pouvoir recadrer une photo / choisir le mod de fit genre stretch, fit avec en ba
 
 make the UI juicy
 
+- there shouldn't be two modes based on if you have one or several tabs, alwyas ame multi tab style, and + button should be aligned in Y
+
+
 tagline ideas : "tell your story/journey through pictures"? "Let pictures tell your journey"? "Pictures that tell your journey". "Hop là hop là, avec Lapis on se motive à avancer sur ses projets !" => c'est bien, le pitch de Lapis c'est que tu te motive à avancer et tu vois ton progrès. "Keep motivation to work on your projects, one day at a time"
 
 we should see the current date at the top
@@ -34,7 +37,8 @@ mcp, or at least a readme to explain the file/folder format so people can easily
 - button to clear from trash now
 - show image in trash, not just its name
 - the Synced button shouldn't flickr on ui refresh, and should say Syncing with a spinner while its not up to date with drive (either uploading or downloading new stuff)
-- the first google sign in sends you back to account selection page and you have to accept a second time before you get properly connected
+- the first google sign in sends you back to account selection page instead of telling you its okay, even though you properly signed in and it works already
+
 
 ## Import initial projects
 
