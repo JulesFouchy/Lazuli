@@ -376,6 +376,11 @@ impl Drive {
                 .query(&[
                     ("q", "trashed = false"),
                     ("pageSize", "1000"),
+                    // Without these a listing silently leaves out anything in a
+                    // shared drive, which is where a project shared inside an
+                    // organisation is most likely to sit.
+                    ("supportsAllDrives", "true"),
+                    ("includeItemsFromAllDrives", "true"),
                     (
                         "fields",
                         "nextPageToken, files(id, name, parents, mimeType, md5Checksum, version)",

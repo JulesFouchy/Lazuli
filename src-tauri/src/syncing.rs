@@ -413,15 +413,30 @@ pub async fn add_shared_project(
         let backend = drive::Drive::new(token(&handle)?, picked.id)?;
         sync::run(&path, &backend)?;
 
-        // A folder that came down without a `lazuli.yaml` is not a project —
-        // the wrong folder was chosen, or it was shared empty. Say so rather
-        // than leaving an unopenable folder behind.
+        // A folder that came down without a `lazuli.yaml` is not openable, and
+        // there are two very different reasons for that. Ask the remote what it
+        // could see before blaming the choice: a folder Google handed over
+        // *empty* is a grant that did not reach the contents, and telling
+        // somebody to choose a different folder in that case sends them round a
+        // loop they cannot win.
         if !store::is_project(&path) {
+            let seen = sync::Backend::list(&backend).unwrap_or_default();
             let _ = std::fs::remove_dir_all(&path);
+            if seen.is_empty() {
+                bail!(
+                    "Google handed over the folder \"{}\" but nothing inside it, \
+                     so there is no project to open. This is a limit of what \
+                     Google grants, not a wrong choice.",
+                    picked.name
+                );
+            }
+            let names: Vec<&str> = seen.iter().take(5).map(|file| file.path.as_str()).collect();
             bail!(
-                "{} does not hold a Lazuli project. Choose the folder that has \
-                 a lazuli.yaml in it.",
-                picked.name
+                "\"{}\" holds no lazuli.yaml, so it is not a Lazuli project. \
+                 What is in it: {}{}",
+                picked.name,
+                names.join(", "),
+                if seen.len() > names.len() { ", …" } else { "" }
             );
         }
         Ok(path)
