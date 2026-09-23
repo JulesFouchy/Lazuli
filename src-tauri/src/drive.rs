@@ -970,3 +970,125 @@ mod redirect_tests {
         std::net::TcpStream::connect(address).expect("should connect");
     }
 }
+
+// --- who is signed in ------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+struct About {
+    user: AboutUser,
+}
+
+#[derive(Debug, Deserialize)]
+struct AboutUser {
+    #[serde(rename = "permissionId", default)]
+    permission_id: String,
+    #[serde(rename = "emailAddress", default)]
+    email: String,
+    #[serde(rename = "displayName", default)]
+    name: String,
+}
+
+/// Who a token belongs to: the account id, and what to call them.
+///
+/// The id is Drive's `permissionId`, which is stable for an account and is also
+/// what a permission on a shared folder is keyed by — so the same value both
+/// recognises this user's own author record and matches them against the people
+/// a project is shared with.
+pub fn who_am_i(access_token: &str) -> Result<(String, String, String)> {
+    let client = reqwest::blocking::Client::new();
+    let about: About = json(
+        client
+            .get(format!("{API}/about"))
+            .bearer_auth(access_token)
+            .query(&[("fields", "user(permissionId, emailAddress, displayName)")])
+            .send()
+            .context("asking Google who is signed in")?,
+    )?;
+    Ok((
+        format!("google:{}", about.user.permission_id),
+        about.user.name,
+        about.user.email,
+    ))
+}
+
+// --- who a project is shared with ------------------------------------------
+
+/// One person a project's folder is shared with.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct Member {
+    pub id: String,
+    /// `owner`, `writer`, `commenter` or `reader`, as Drive enforces them.
+    pub role: String,
+    #[serde(rename = "emailAddress", default)]
+    pub email: String,
+    #[serde(rename = "displayName", default)]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Permissions {
+    #[serde(default)]
+    permissions: Vec<Member>,
+}
+
+/// Everyone the project's folder is shared with, owner included.
+///
+/// The roles are Drive's and are enforced by Drive, which is the whole reason
+/// there is no access control of our own to write: reader, writer and owner are
+/// real because Google says no, not because the app declines to draw a button.
+pub fn members(access_token: &str, folder: &str) -> Result<Vec<Member>> {
+    let client = reqwest::blocking::Client::new();
+    let listed: Permissions = json(
+        client
+            .get(format!("{API}/files/{folder}/permissions"))
+            .bearer_auth(access_token)
+            .query(&[(
+                "fields",
+                "permissions(id, role, emailAddress, displayName)",
+            )])
+            .send()
+            .context("listing who this project is shared with")?,
+    )?;
+    Ok(listed.permissions)
+}
+
+/// Share the project's folder with somebody, as a reader or a writer.
+///
+/// Google sends the invitation and enforces the outcome, so this is the whole
+/// of "sharing" — there is no Lazuli account for them to make and no server of
+/// ours for them to reach.
+pub fn share_with(access_token: &str, folder: &str, email: &str, role: &str) -> Result<Member> {
+    if !matches!(role, "reader" | "writer") {
+        bail!("{role} is not a role this offers");
+    }
+    let client = reqwest::blocking::Client::new();
+    json(
+        client
+            .post(format!("{API}/files/{folder}/permissions"))
+            .bearer_auth(access_token)
+            .query(&[
+                ("sendNotificationEmail", "true"),
+                ("fields", "id, role, emailAddress, displayName"),
+            ])
+            .json(&serde_json::json!({
+                "type": "user",
+                "role": role,
+                "emailAddress": email,
+            }))
+            .send()
+            .context("sharing the project")?,
+    )
+}
+
+/// Stop sharing with somebody.
+pub fn unshare(access_token: &str, folder: &str, permission: &str) -> Result<()> {
+    let client = reqwest::blocking::Client::new();
+    check(
+        client
+            .delete(format!("{API}/files/{folder}/permissions/{permission}"))
+            .bearer_auth(access_token)
+            .send()
+            .context("removing someone from the project")?,
+    )?;
+    Ok(())
+}

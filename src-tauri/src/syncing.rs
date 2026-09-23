@@ -70,13 +70,20 @@ pub async fn connect_drive(app: AppHandle) -> Result<Account, crate::commands::C
         drive::exchange(&code, &pkce, &url)
     })
     .await?;
-    crate::commands::set_drive_tokens(&app, Some(tokens));
+    crate::commands::set_drive_tokens(&app, Some(tokens.clone()));
+
+    // Asked once, here, because it is what a second device looks itself up by
+    // in a project's `authors/` — and a round trip to Google before every entry
+    // would be absurd. A failure is not worth undoing a good sign-in for; the
+    // next thing needing a token asks again.
+    remember_account(&app, &tokens.access_token);
     Ok(drive_account(app))
 }
 
 #[tauri::command]
 pub fn disconnect_drive(app: AppHandle) -> Account {
     crate::commands::set_drive_tokens(&app, None);
+    crate::commands::set_drive_account_id(&app, None);
     Account {
         connected: false,
         unavailable: why_not(),
@@ -95,13 +102,32 @@ pub struct Status {
 fn token(app: &AppHandle) -> Result<String> {
     let tokens = crate::commands::drive_tokens(app)
         .ok_or_else(|| anyhow!("no Google account is connected"))?;
-    if tokens.is_fresh(std::time::SystemTime::now()) {
-        return Ok(tokens.access_token);
-    }
-    let refreshed = drive::refresh(&tokens)?;
-    let access = refreshed.access_token.clone();
-    crate::commands::set_drive_tokens(app, Some(refreshed));
+    let access = if tokens.is_fresh(std::time::SystemTime::now()) {
+        tokens.access_token
+    } else {
+        let refreshed = drive::refresh(&tokens)?;
+        let access = refreshed.access_token.clone();
+        crate::commands::set_drive_tokens(app, Some(refreshed));
+        access
+    };
+    remember_account(app, &access);
     Ok(access)
+}
+
+/// Learn which account these tokens belong to, if that is not already known.
+///
+/// Connecting records it, but an account connected by a build from before that
+/// existed has tokens and no account — and without one a second device cannot
+/// recognise its own author record and writes as a stranger. Asked here because
+/// this is the one place with a token in hand and a network to use it on, and
+/// it costs a single request, once, ever.
+fn remember_account(app: &AppHandle, access: &str) {
+    if crate::commands::drive_account_id(app).is_some() {
+        return;
+    }
+    if let Ok((account, _, _)) = drive::who_am_i(access) {
+        crate::commands::set_drive_account_id(app, Some(account));
+    }
 }
 
 /// Reconcile one project with its remote, once.
@@ -255,4 +281,76 @@ impl Drop for Loop {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+// --- sharing ----------------------------------------------------------------
+
+/// Everyone a synced project is shared with.
+///
+/// Empty for a project that syncs nowhere: there is nobody to share a folder
+/// that does not exist with.
+#[tauri::command]
+pub async fn project_members(
+    app: AppHandle,
+    path: std::path::PathBuf,
+) -> Result<Vec<drive::Member>, crate::commands::CmdError> {
+    let handle = app.clone();
+    Ok(crate::commands::off_thread(move || {
+        let config = sync::Config::read(&path);
+        if !config.is_on() {
+            return Ok(Vec::new());
+        }
+        drive::members(&token(&handle)?, &config.folder)
+    })
+    .await?)
+}
+
+#[tauri::command]
+pub async fn share_project(
+    app: AppHandle,
+    path: std::path::PathBuf,
+    email: String,
+    role: String,
+) -> Result<Vec<drive::Member>, crate::commands::CmdError> {
+    let handle = app.clone();
+    let at = path.clone();
+    crate::commands::off_thread(move || {
+        let config = sync::Config::read(&path);
+        if !config.is_on() {
+            bail!("this project has to be synced before it can be shared");
+        }
+        drive::share_with(&token(&handle)?, &config.folder, email.trim(), &role)
+    })
+    .await?;
+    project_members(app, at).await
+}
+
+#[tauri::command]
+pub async fn unshare_project(
+    app: AppHandle,
+    path: std::path::PathBuf,
+    permission: String,
+) -> Result<Vec<drive::Member>, crate::commands::CmdError> {
+    let handle = app.clone();
+    let at = path.clone();
+    crate::commands::off_thread(move || {
+        let config = sync::Config::read(&path);
+        if !config.is_on() {
+            bail!("this project is not shared with anyone");
+        }
+        drive::unshare(&token(&handle)?, &config.folder, &permission)
+    })
+    .await?;
+    project_members(app, at).await
+}
+
+/// Set, or clear, what this user is called in one project alone.
+#[tauri::command]
+pub fn set_my_name_here(
+    app: AppHandle,
+    state: tauri::State<crate::commands::AppState>,
+    name: Option<String>,
+) -> Result<(), crate::commands::CmdError> {
+    crate::commands::set_display_name_here(&app, &state, name.as_deref())?;
+    Ok(())
 }

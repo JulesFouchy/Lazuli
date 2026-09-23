@@ -87,6 +87,10 @@ export interface AuthorProfile {
   name: string;
   /** Picture filename, beside the record in `authors/<id>/`. */
   avatar: string | null;
+  /** Accounts this author signs in with, as `<backend>:<id>`. */
+  accounts: string[];
+  /** What to call them in this project, when that differs from `name`. */
+  display_name: string | null;
 }
 
 /** This user's own profile, as the avatar button and its dialog show it. */
@@ -133,6 +137,34 @@ export const startSyncing = (path: string) =>
 export const stopSyncing = (path: string) =>
   invoke<SyncStatus>("stop_syncing", { path });
 export const syncNow = (path: string) => invoke<SyncStatus>("sync_now", { path });
+
+/** One person a synced project's Drive folder is shared with. */
+export interface Member {
+  /** The Drive permission, which is what removing them needs. */
+  id: string;
+  /** `owner`, `writer`, `commenter` or `reader` — Drive's own, and enforced by it. */
+  role: string;
+  email: string;
+  name: string;
+}
+
+export const projectMembers = (path: string) =>
+  invoke<Member[]>("project_members", { path });
+
+export const shareProject = (path: string, email: string, role: string) =>
+  invoke<Member[]>("share_project", { path, email, role });
+
+export const unshareProject = (path: string, permission: string) =>
+  invoke<Member[]>("unshare_project", { path, permission });
+
+/**
+ * Set, or clear, what you are called in this project alone.
+ *
+ * The Discord model: your name is yours everywhere until you decide it is not,
+ * and then only here.
+ */
+export const setMyNameHere = (name: string | null) =>
+  invoke<void>("set_my_name_here", { name });
 
 export interface Project {
   root: string;

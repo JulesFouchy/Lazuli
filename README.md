@@ -42,7 +42,11 @@ A project can be kept on your Google Drive, which is how it reaches your other d
 
 Lazuli talks to Drive's HTTP API. There is no Drive client to install, which is the point — no such client exists on a phone, and relying on a folder something else keeps in step is what would rule that out. Editing works offline and reconciles when there is a connection again: the folder *is* the outbox, so there is no queue to fall out of step.
 
-Sharing is Drive's own: share the project's folder with somebody and they can read or write it, with Google doing the invitation and the permissions. There is no Lazuli account and no Lazuli server.
+Sharing is Drive's own: the Syncing dialog lists who a project is shared with, invites somebody by email as a reader or a writer, and removes them again — Google sends the invitation and enforces the roles. There is no Lazuli account and no Lazuli server.
+
+You can be called something different in one project, the way you can on one Discord server: set it in the Syncing dialog and it is used there alone. And your devices know each other — an author record carries the accounts it signs in with, so an entry written on a phone is by the same person as one written on a laptop.
+
+**Receiving** a shared project does not work yet. The `drive.file` scope cannot see a folder it did not create, so the person you share with has to be handed it through Google's own file chooser, which is not built — see [ideas/syncing-projects.md](ideas/syncing-projects.md).
 
 Two devices adding entries never collide, because an entry folder is a UUID. Two people editing the same sentence is the one real conflict, and it is not merged for you — both versions land on the card and you keep one.
 

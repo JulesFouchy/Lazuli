@@ -72,6 +72,7 @@ import {
   placeCaret,
   type MarkdownInput,
 } from "./md-input";
+import { membersSection } from "./members";
 import { closeModal, isModalOpen, onModalDismissed, openModal } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import { accountControl, profileButton, startProfile } from "./profile";
@@ -1097,6 +1098,7 @@ function openSyncDialog(project: Project): void {
         class: "hint",
         text: "Whether this machine syncs this project is this machine's own business — it is not carried to your other devices.",
       }),
+      membersSection(project.root, () => on),
     ),
   });
 

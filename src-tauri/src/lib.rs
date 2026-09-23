@@ -166,6 +166,10 @@ pub fn run() {
             syncing::stop_syncing,
             syncing::sync_status,
             syncing::sync_now,
+            syncing::project_members,
+            syncing::share_project,
+            syncing::unshare_project,
+            syncing::set_my_name_here,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lazuli");

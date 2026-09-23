@@ -42,6 +42,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::atomic;
+use crate::thumbs::THUMBS_DIR;
 
 /// The per-device folder: what this machine knows, which no other machine wants.
 pub const STATE_DIR: &str = ".lazuli";
@@ -230,7 +231,30 @@ pub fn plan(
         };
         actions.push(action);
     }
+    // Words before pictures. A project's text is kilobytes and its photographs
+    // are all of the megabytes, so this is what puts a whole timeline on screen
+    // within a round trip rather than after the download — the cards are drawn
+    // and their pictures fill in behind them, which is what a card already does
+    // for a thumbnail that is not there yet.
+    actions.sort_by_key(|action| (weight(action.path()), action.path().to_owned()));
     actions
+}
+
+/// What a path costs to carry, in the order it should be carried.
+///
+/// Three bands rather than a size, because the size is not known for a file
+/// that is only on the remote, and because the *kind* is what matters: a
+/// sentence is worth having before the picture beside it whatever either
+/// weighs.
+fn weight(path: &str) -> u8 {
+    if path.starts_with(THUMBS_DIR) {
+        // Small, and the thing that stands in for a photograph until it lands.
+        return 1;
+    }
+    match path.rsplit_once('.') {
+        Some((_, "md" | "yaml" | "json")) => 0,
+        _ => 2,
+    }
 }
 
 /// What a pass did, for the status line and for the tests.
@@ -782,6 +806,32 @@ mod tests {
         let outcome = run(&dir.0, &willing).expect("should run");
         assert_eq!(outcome.uploaded, 1);
         assert_eq!(outcome.failed, 0);
+    }
+
+    #[test]
+    fn words_come_before_pictures() {
+        // A project's text is kilobytes and its photographs are all of the
+        // megabytes: carrying the text first is what puts a whole timeline on
+        // screen within a round trip rather than after the download.
+        let local = map(&[
+            ("entries/one/photo.jpg", "h"),
+            ("lazuli.yaml", "h"),
+            (".lazuli-thumbs/entries/one/photo.jpg", "h"),
+            ("entries/one/entry.md", "h"),
+        ]);
+        let order: Vec<String> = plan(&local, &map(&[]), &State::default())
+            .iter()
+            .map(|action| action.path().to_owned())
+            .collect();
+        assert_eq!(
+            order,
+            [
+                "entries/one/entry.md",
+                "lazuli.yaml",
+                ".lazuli-thumbs/entries/one/photo.jpg",
+                "entries/one/photo.jpg",
+            ]
+        );
     }
 
     #[test]

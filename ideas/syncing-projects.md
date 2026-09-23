@@ -27,23 +27,22 @@ What is left to conflict is small: the body, `date:` and `image:` of one entry e
 - **Conflicts**, as a card offering both versions. Git's markers and the sidecars Syncthing and Dropbox leave are both recognised — and the engine writes its own conflicts under the same name a folder syncer would, so it came through a door that was already open.
 - **The sync base**, `.lazuli/sync-state.json`, per device and never synced.
 - **The engine**, `sync.rs`: a `Backend` of four operations, and a decision table over local, remote and base. Tested against an in-memory remote, including two devices converging.
-- **The Google Drive backend**, `drive.rs`, and the commands and UI around it.
+- **The Google Drive backend**, `drive.rs`, and the commands and UI around it. Run against a real account: sign-in, folders, listing, uploading, downloading, trashing, and two folders reconciling until they held the same bytes.
+- **Identity across devices.** An author record carries the accounts its owner signs in with, so a second device looks itself up and joins the author it already is rather than minting a rival. Per-project `display_name`, the Discord model: your own name everywhere until you decide otherwise, and then only there.
+- **Sharing**, as a members view over Drive's own permissions — invite by email, see who has what, take it away. The roles are real because Google enforces them, which is why there is no access control here to write.
+- **Words before pictures.** A pass carries text first, so a timeline is complete within a round trip and the photographs fill in behind it.
 
 Each stands on its own, and each was a prerequisite.
 
 ## Still to do
 
-**The rest of identity**, once there is a second device to try it on: the `accounts:` list that lets one recognise its own author, and the per-project `display_name:` override, the Discord model.
+**The Picker**, which is the one thing standing between this and somebody else's project. `drive.file` cannot see a folder it did not create — `sharedWithMe` comes back empty, by design — so a shared project has to be handed to the app once through Google's own chooser. That needs three things it does not have: a Google **API key** from the same Cloud project, the Picker API enabled on it, and a CSP that lets `apis.google.com` run script in the webview and `docs.google.com` open a frame. The last is a real widening of what may run in the app, and worth deciding on rather than doing quietly. Until then a project is shared *out* fine, and the person receiving it cannot open it in Lazuli.
 
-**A members view**, listing who a shared project is shared with and inviting by email through `permissions.create`. Drive enforces reader, writer and owner server-side, so this is a screen over an API rather than an access-control system to build.
+The alternative is the `drive` scope, which sees everything — and is restricted, so it costs OAuth verification plus a third-party security assessment, annually. That was turned down once already and the reasoning has not changed.
 
-**The Picker**, for a project somebody else shared: `drive.file` cannot enumerate a Drive, so a shared folder is handed to the app once through Google's own chooser. Until then a shared project is added the way any folder is.
+**A way in on Android**, when there is an Android build. Its own OAuth client, pinned to the package name and signing certificate, and its own redirect: `Redirect` in `drive.rs` runs a loopback web server, which a phone has neither the means nor the business to do. A custom URI scheme the OS routes back to the app is the shape. Both clients live in one Cloud project, so the consent screen, the quota and the user's approval are shared, and `DESKTOP_CLIENT_ID` gains a sibling rather than a replacement.
 
-**Lazy materialisation**: text first so a project's timeline is complete within a round trip, then its pictures. Today a project syncs whole, which is right for a journal of a few hundred entries and wrong for one of several thousand.
-
-**Everything here has now been run against a real Drive**, so what is left is features rather than doubt.
-
-**A way in on Android**, when there is an Android build. It needs its own OAuth client — Google pins a mobile one to the package name and the signing certificate, where a desktop one is anonymous and proves itself with PKCE alone — and its own redirect: `Redirect` in `drive.rs` runs a loopback web server, which a phone has neither the means nor the business to do. A custom URI scheme the OS routes back to the app is the shape. Both clients live in one Cloud project, so the consent screen, the quota and the user's approval are shared, and `DESKTOP_CLIENT_ID` gains a sibling rather than a replacement.
+**Dropbox**, behind the same trait, if a second backend is ever wanted.
 
 ## The remote
 

@@ -515,20 +515,22 @@ pub fn create_entry(
     date: Option<NaiveDate>,
 ) -> CmdResult<String> {
     let date = date.unwrap_or_else(dates::today);
-    let me = author(&app);
     let avatar = avatar_path(&app);
     Ok(with_project(&app, &state, |open| {
         let root = root_of(open);
+        // Resolved against this project, so a second device writes as the author
+        // it already is rather than as a new one.
+        let me = author_here(&app, &root);
         // Writing to the project is what publishes the name, so that a project
         // only ever read does not gain a folder naming whoever looked at it.
-        if let Some((id, name)) = &me {
-            authors::publish(&root, id, name, avatar.as_deref());
+        if let Some((id, name, account)) = &me {
+            authors::publish(&root, id, name, avatar.as_deref(), account.as_deref());
         }
         store::create_entry(
             &root,
             date,
             Local::now().fixed_offset(),
-            me.as_ref().map(|(id, _)| id.as_str()),
+            me.as_ref().map(|(id, _, _)| id.as_str()),
         )
     })?)
 }
@@ -1183,6 +1185,23 @@ struct Settings {
     /// the folder it sits in is the user's own. Worth revisiting; see
     /// `ideas/`.
     drive_tokens: Option<crate::drive::Tokens>,
+    /// Which Google account those tokens belong to, as `google:<permissionId>`.
+    ///
+    /// Asked for once, when connecting, rather than per write: it is what a
+    /// second device looks itself up by in a project's `authors/`, and a round
+    /// trip to Google before every entry would be absurd.
+    drive_account: Option<String>,
+}
+
+/// The connected account's id, or `None` when none is.
+pub fn drive_account_id(app: &AppHandle) -> Option<String> {
+    read_settings(app).drive_account
+}
+
+pub fn set_drive_account_id(app: &AppHandle, account: Option<String>) {
+    let mut settings = read_settings(app);
+    settings.drive_account = account;
+    write_settings(app, &settings);
 }
 
 /// The signed-in Google account's tokens, if there are any.
@@ -1339,6 +1358,46 @@ pub fn clear_my_avatar(app: AppHandle, state: State<AppState>) -> MyProfile {
     my_profile(app)
 }
 
+/// Who the user is *in this project*, adopting the author they already are.
+///
+/// An author id is per machine, because the settings that hold it are. What
+/// crosses is the account: a record in the project's `authors/` that lists this
+/// user's Google account **is** this user, written from their other device, and
+/// joining it is the difference between one person and a crowd of one-per-
+/// machine. The adoption is remembered, so it happens once.
+fn author_here(app: &AppHandle, root: &Path) -> Option<(String, String, Option<String>)> {
+    let (mut id, name) = author(app)?;
+    let account = drive_account_id(app);
+    if let Some(account) = &account {
+        if let Some(theirs) = authors::id_for_account(root, account) {
+            if theirs != id {
+                let mut settings = read_settings(app);
+                settings.author_id = Some(theirs.clone());
+                write_settings(app, &settings);
+                id = theirs;
+            }
+        }
+    }
+    Some((id, name, account))
+}
+
+/// Change what this user is called in the open project alone.
+///
+/// The record is theirs to write, which is what keeps the registry free of
+/// conflicts, so this only ever touches their own folder.
+pub fn set_display_name_here(
+    app: &AppHandle,
+    state: &State<AppState>,
+    name: Option<&str>,
+) -> Result<()> {
+    with_project(app, state, |open| {
+        let root = root_of(open);
+        let (id, _, _) =
+            author_here(app, &root).ok_or_else(|| anyhow!("there is no profile to rename"))?;
+        authors::set_display_name(&root, &id, name)
+    })
+}
+
 /// Push a changed profile into the project on screen, if there is one.
 ///
 /// Without this a rename would only reach a project the next time the user
@@ -1346,12 +1405,12 @@ pub fn clear_my_avatar(app: AppHandle, state: State<AppState>) -> MyProfile {
 /// while they were looking at it. Projects they are not in catch up when they
 /// next write there.
 fn republish(app: &AppHandle, state: &State<AppState>) {
-    let Some((id, name)) = author(app) else {
-        return;
-    };
     let avatar = avatar_path(app);
     let _ = with_project(app, state, |open| {
-        authors::publish(&root_of(open), &id, &name, avatar.as_deref());
+        let root = root_of(open);
+        if let Some((id, name, account)) = author_here(app, &root) {
+            authors::publish(&root, &id, &name, avatar.as_deref(), account.as_deref());
+        }
         Ok(())
     });
 }

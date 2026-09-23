@@ -127,7 +127,9 @@ function authorLabel(project: Project, entry: Entry): HTMLElement | false {
         assetUrl(project.root, "authors", entry.author, who.avatar),
       who.name,
     ),
-    el("span", { text: who.name }),
+    // The name they chose for this project when they chose one, and their own
+    // otherwise — see `authors.rs`.
+    el("span", { text: who.display_name ?? who.name }),
   );
 }
 
