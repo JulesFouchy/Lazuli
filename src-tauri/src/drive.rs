@@ -66,32 +66,6 @@ pub const DESKTOP_CLIENT_ID: &str =
 /// the tokens that come back belong to their machine.
 pub const DESKTOP_CLIENT_SECRET: &str = "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";
 
-/// The key the Google Picker is built with, which is also not a secret.
-///
-/// An API key names the *project* for quota and attribution; it authorises
-/// nothing. What reaches a person's Drive is their own access token, given by
-/// their consent and kept on their machine. Restricted to the Picker API, so
-/// the worst a reader of this binary can do with it is spend this project's
-/// Picker quota.
-///
-/// Keeping it out of the repository would buy nothing: it ships inside every
-/// copy of the app, which is where anyone wanting it would look.
-pub const PICKER_API_KEY: &str = "AIzaSyDr_ITmX6VKtbxUiURh-4ydyfGWwC5PV50";
-
-/// The Cloud project's number, which the Picker needs under `drive.file`.
-///
-/// Choosing a folder in the Picker is what *grants* the app access to it, and
-/// the grant is to a project, not to a key or a token: without this the
-/// chooser accepts the choice, tries to make the grant, fails, and hands the
-/// button back — which is precisely what happened to the first person a
-/// project was shared with. It is the leading digits of every client id in
-/// the project, so it is read off the desktop one rather than kept twice.
-pub fn project_number() -> &'static str {
-    DESKTOP_CLIENT_ID
-        .split('-')
-        .next()
-        .unwrap_or_default()
-}
 
 /// Asked for at sign-in. `drive.file` and nothing else — the narrowest scope
 /// that can do the job, and the one that keeps the app out of Google's
@@ -473,8 +447,7 @@ impl Drive {
     /// Tidiness only, and it is not what lets somebody else's project be
     /// found: a folder shared with you stays in the sharer's Drive and shows
     /// under "Shared with me", which is a view and not a place, so no folder
-    /// of yours can hold it. Hence [`picker_page`] opening on that view.
-    ///
+        ///
     /// Under `drive.file` this search sees only folders Lazuli itself made,
     /// which is the behaviour wanted — a `Lazuli` folder the user happens to
     /// have for something else is invisible here and is left alone. A project
@@ -973,6 +946,56 @@ impl Redirect {
         }
         bail!("the browser never came back")
     }
+
+    /// Wait for Google's folder chooser, and hand over the code and the folder.
+    ///
+    /// `None` when the user chose nothing: the chooser comes back with an
+    /// `error` — that is how it reports a cancellation — and cancelling is not
+    /// a failure to report to anyone.
+    pub fn wait_for_pick(self) -> Result<Option<(String, String)>> {
+        use std::io::{BufRead, BufReader, Write};
+
+        self.listener
+            .set_nonblocking(false)
+            .context("waiting for the browser")?;
+        let deadline = SystemTime::now() + SIGN_IN_TIMEOUT;
+
+        for stream in self.listener.incoming() {
+            if SystemTime::now() > deadline {
+                bail!("the folder was not chosen in time");
+            }
+            let mut stream = stream.context("accepting the browser's request")?;
+            let mut line = String::new();
+            BufReader::new(&stream)
+                .read_line(&mut line)
+                .context("reading the browser's request")?;
+
+            let picked = code_in(&line).zip(picked_in(&line));
+            let cancelled = line.contains("error=") || (line.contains("code=") && picked.is_none());
+            let body = match (&picked, cancelled) {
+                (Some(_), _) => "<h1>Added</h1><p>You can close this tab and go back to Lazuli.</p>",
+                (None, true) => "<h1>Nothing chosen</h1><p>You can close this tab.</p>",
+                _ => "<h1>That did not work</h1><p>Go back to Lazuli and try again.</p>",
+            };
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.flush();
+
+            // A browser asks for a favicon too; only a request carrying an
+            // answer ends the wait.
+            if picked.is_some() {
+                return Ok(picked);
+            }
+            if cancelled {
+                return Ok(None);
+            }
+        }
+        bail!("the browser never came back")
+    }
 }
 
 /// The `code` out of a request line like `GET /?code=abc&scope=… HTTP/1.1`.
@@ -1048,71 +1071,53 @@ mod redirect_tests {
 
     #[test]
     fn the_chosen_folder_is_read_out_of_the_request() {
+        // What Google's chooser appends to the redirect it comes back to.
         assert_eq!(
-            picked_in("/picked?id=1AbC&name=A%20Shared%20Journal"),
-            Some(Picked {
-                id: "1AbC".into(),
-                name: "A Shared Journal".into()
-            })
+            picked_in("GET /?code=4%2F0AbCd&picked_file_ids=1AbC HTTP/1.1"),
+            Some("1AbC".to_owned())
+        );
+    }
+
+    #[test]
+    fn only_the_first_of_several_folders_is_taken() {
+        // A project is one folder. The parameter is a list because the chooser
+        // can be asked for several, and this one never is.
+        assert_eq!(
+            picked_in("GET /?picked_file_ids=1AbC,2DeF HTTP/1.1"),
+            Some("1AbC".to_owned())
         );
     }
 
     #[test]
     fn choosing_nothing_is_not_a_folder() {
-        assert_eq!(picked_in("/picked?cancelled=1"), None);
-        assert_eq!(picked_in("/picked?id="), None);
-        // The page itself, which is the request before any choice.
-        assert_eq!(picked_in("/"), None);
+        // Cancelling comes back as an error and no ids at all, and a browser
+        // asking for a favicon on the same connection carries neither.
+        assert_eq!(picked_in("GET /?error=access_denied HTTP/1.1"), None);
+        assert_eq!(picked_in("GET /?picked_file_ids= HTTP/1.1"), None);
+        assert_eq!(picked_in("GET /favicon.ico HTTP/1.1"), None);
     }
 
     #[test]
-    fn a_folder_with_no_name_still_counts() {
-        // Drive always sends one, but a project that arrived nameless should be
-        // openable rather than refused.
-        assert_eq!(
-            picked_in("/picked?id=1AbC").map(|picked| picked.name),
-            Some("Shared project".to_owned())
-        );
+    fn the_chooser_url_asks_for_the_chooser_and_for_folders() {
+        // Both parameters are what turns a plain sign-in into the chooser; a
+        // URL missing either signs the user in again and picks nothing.
+        let url = pick_url(&Pkce::new(), "http://127.0.0.1:1234");
+        assert!(url.contains("trigger_onepick=true"));
+        assert!(url.contains("allow_folder_selection=true"));
+        // Required by the flow: the chooser appears on the consent screen.
+        assert!(url.contains("prompt=consent"));
+        assert!(url.contains("code_challenge_method=S256"));
+        assert!(url.contains(&urlencode("http://127.0.0.1:1234")));
+        assert!(url.contains(&urlencode(SCOPE)));
     }
 
     #[test]
-    fn the_picker_page_carries_the_key_the_token_and_the_origin() {
-        // All three are checked by Google, and a page missing one fails with a
-        // message about the others.
-        let page = picker_page("http://127.0.0.1:1234", "an-access-token", "Lazuli | Coollab");
-        assert!(page.contains(PICKER_API_KEY));
-        assert!(page.contains("an-access-token"));
-        assert!(page.contains("http://127.0.0.1:1234"));
-        assert!(page.contains("setSelectFolderEnabled(true)"));
-        // Opens on what was shared with them rather than on their own Drive,
-        // searched for the name they were sent.
-        assert!(page.contains(r#"folders("Shared with me", false, LOOKING_FOR)"#));
-        assert!(page.contains(r#""Lazuli | Coollab""#));
-        // And an unsearched way through, in case the chooser's own search will
-        // not let a folder be chosen from its results.
-        assert!(page.contains(r#"folders("Everything shared with me", false, "")"#));
-        // Under `drive.file` the grant is to a project, and without its number
-        // the chooser accepts a choice and then quietly fails to hand it over.
-        assert!(page.contains(&format!(r#"const APP_ID = "{}";"#, project_number())));
-        assert!(page.contains(".setAppId(APP_ID)"));
-    }
-
-    #[test]
-    fn the_project_number_is_the_front_of_the_client_id() {
-        assert_eq!(project_number(), "991113913988");
-    }
-
-
-    #[test]
-    fn a_project_name_cannot_break_out_of_the_picker_page() {
-        // The name is pasted by the user, and it lands inside a `<script>` in a
-        // page assembled by hand. A quote would end the string; `</script>`
-        // would end the tag however well the string itself were escaped.
-        let page = picker_page("o", "t", r#"a " and a \ and </script><img src=x>"#);
-        assert!(!page.contains("</script><img"));
-        assert!(page.contains(r#"a \" and a \\ and \u003c/script>\u003cimg src=x>"#));
-        // Still one script of Google's and one of ours, and nothing else.
-        assert_eq!(page.matches("</script>").count(), 2);
+    fn signing_in_does_not_open_the_chooser() {
+        // The two URLs differ by exactly those parameters, and a sign-in that
+        // asked for a folder would demand one before the app could sync at all.
+        let url = sign_in_url(&Pkce::new(), "http://127.0.0.1:1234");
+        assert!(!url.contains("trigger_onepick"));
+        assert!(!url.contains("allow_folder_selection"));
     }
 
     #[test]
@@ -1281,207 +1286,86 @@ pub fn unshare(access_token: &str, folder: &str, permission: &str) -> Result<()>
 
 // --- picking a folder somebody else shared ---------------------------------
 
-/// What the user chose in the Picker.
-#[derive(Debug, Clone, PartialEq)]
+/// The URL that asks Google to show its own folder chooser.
+///
+/// The Picker has two flows and this is the one meant for an app like this
+/// one. The other is a JavaScript widget the app embeds in a page of its own,
+/// and it wants an API key, a fixed origin and a developer-supplied `appId`;
+/// worse, it runs in a cross-origin frame that needs the browser's Google
+/// cookies, so it fails behind a signed-out browser or strict cookie settings
+/// and says nothing about it in a console the app can read. It was tried, and
+/// it accepted a choice and then quietly failed to hand it over.
+///
+/// This flow is the sign-in redirect the app already does, with two extra
+/// parameters: Google shows the chooser as part of granting consent and
+/// redirects back to the loopback with the ids appended. Google's own words on
+/// the redirect are "select a `redirect_uri` that works with your application
+/// type and OAuth setup. The Google Picker imposes no additional restrictions",
+/// so the loopback is as good here as it is for signing in.
+///
+/// `prompt=consent` is required by the flow, not a choice: it is the screen the
+/// chooser appears on.
+pub fn pick_url(pkce: &Pkce, redirect: &str) -> String {
+    format!(
+        "{AUTH_URL}?client_id={}&redirect_uri={}&response_type=code&scope={}\
+         &code_challenge={}&code_challenge_method=S256&access_type=offline\
+         &prompt=consent&trigger_onepick=true&allow_folder_selection=true",
+        urlencode(DESKTOP_CLIENT_ID),
+        urlencode(redirect),
+        urlencode(SCOPE),
+        urlencode(&pkce.challenge),
+    )
+}
+
+/// The first id in a `picked_file_ids` the chooser came back with.
+///
+/// One folder is all a project needs, and the chooser is not asked for more.
+pub fn picked_in(request_line: &str) -> Option<String> {
+    let target = request_line.split_whitespace().nth(1)?;
+    let query = target.split_once('?')?.1;
+    let ids = query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == "picked_file_ids").then(|| urldecode(value))
+    })?;
+    ids.split(',')
+        .map(str::trim)
+        .find(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
+/// What the chooser handed back: a folder, and the tokens that can reach it.
+#[derive(Debug, Clone)]
 pub struct Picked {
     pub id: String,
     pub name: String,
+    /// The consent the choice was made under. The grant belongs to the account
+    /// that granted it, so syncing the folder uses these and not whatever was
+    /// connected before — which may be a different person entirely.
+    pub tokens: Tokens,
 }
 
-/// Ask the user to hand over a folder, through Google's own chooser.
+/// Show Google's folder chooser and wait for a folder to come back.
 ///
-/// `drive.file` deliberately cannot see a folder the app did not create — a
-/// `sharedWithMe` listing comes back empty — so this is the only way into a
-/// project somebody shared. The Picker is what grants the app access to the one
-/// folder chosen, and the grant sticks: entries added to it later need no
-/// second visit.
-///
-/// **Served to the user's own browser, not to Lazuli's webview.** The page runs
-/// Google's script, and the app's own page is not the place for that: its
-/// content policy is `default-src 'self'` with no frames, and widening it for
-/// this would be a permanent hole for an occasional dialog. The loopback server
-/// is the same one a sign-in comes back to.
-pub fn pick_folder(access_token: &str, looking_for: &str) -> Result<Option<Picked>> {
-    use std::io::{BufRead, BufReader, Write};
-
+/// Blocks for as long as the user is over in their browser, so it belongs off
+/// the main thread. `None` means they chose nothing.
+pub fn pick_folder() -> Result<Option<Picked>> {
     check_configured()?;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .context("opening a port for the Google Picker")?;
-    let port = listener.local_addr().context("reading the port")?.port();
-    let origin = format!("http://127.0.0.1:{port}");
+    let pkce = Pkce::new();
+    let redirect = Redirect::new()?;
+    let url = redirect.url.clone();
+    tauri_plugin_opener::open_url(pick_url(&pkce, &url), None::<&str>)
+        .context("opening Google's folder chooser")?;
 
-    tauri_plugin_opener::open_url(&origin, None::<&str>)
-        .context("opening the Google Picker")?;
+    let Some((code, id)) = redirect.wait_for_pick()? else {
+        return Ok(None);
+    };
+    let tokens = exchange(&code, &pkce, &url)?;
 
-    let deadline = SystemTime::now() + SIGN_IN_TIMEOUT;
-    for stream in listener.incoming() {
-        if SystemTime::now() > deadline {
-            bail!("the Google Picker was not finished in time");
-        }
-        let mut stream = stream.context("accepting the browser's request")?;
-        let mut line = String::new();
-        BufReader::new(&stream)
-            .read_line(&mut line)
-            .context("reading the browser's request")?;
-
-        let target = line.split_whitespace().nth(1).unwrap_or("/");
-        let answer = picked_in(target);
-
-        let body = match &answer {
-            // Still the first request: hand over the page itself.
-            None if !target.starts_with("/picked") => {
-                picker_page(&origin, access_token, looking_for)
-            }
-            Some(_) => "<h1>Added</h1><p>You can close this tab and go back to Lazuli.</p>"
-                .to_owned(),
-            None => "<h1>Nothing chosen</h1><p>You can close this tab.</p>".to_owned(),
-        };
-        let _ = write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
-             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        let _ = stream.flush();
-
-        if target.starts_with("/picked") {
-            return Ok(answer);
-        }
-    }
-    bail!("the browser never came back")
-}
-
-/// The folder in a `/picked?id=…&name=…` request, if there is one.
-pub fn picked_in(target: &str) -> Option<Picked> {
-    if !target.starts_with("/picked") {
-        return None;
-    }
-    let query = target.split_once('?')?.1;
-    let mut id = None;
-    let mut name = None;
-    for pair in query.split('&') {
-        match pair.split_once('=') {
-            Some(("id", value)) => id = Some(urldecode(value)),
-            Some(("name", value)) => name = Some(urldecode(value)),
-            _ => {}
-        }
-    }
-    let id = id.filter(|id| !id.is_empty())?;
-    Some(Picked {
-        name: name.filter(|name| !name.is_empty()).unwrap_or_else(|| "Shared project".to_owned()),
-        id,
-    })
-}
-
-/// The page the browser is sent to: Google's chooser, and nothing else.
-fn picker_page(origin: &str, access_token: &str, looking_for: &str) -> String {
-    format!(
-        r#"<!doctype html>
-<html><head><meta charset="utf-8"><title>Choose a Lazuli project</title>
-<style>
- body {{ font: 15px system-ui, sans-serif; margin: 0; display: grid; place-items: center;
-        height: 100vh; background: #0b1020; color: #f2f4fb; text-align: center; }}
- .sheet {{ max-width: 34rem; padding: 0 1.5rem; }}
- p {{ opacity: .75; line-height: 1.5 }}
- #say {{ opacity: 1; font-size: 1.05rem }}
- code {{ background: #1b2440; padding: .1em .4em; border-radius: .3em }}
-</style></head>
-<body>
-<div class="sheet">
-<p id="say">Opening Google's file chooser…</p>
-<p id="how" hidden>
-  Clicking a folder <em>opens</em> it. To choose it, select it and press
-  <strong>Select</strong> at the bottom of the chooser — pressing
-  <strong>Select</strong> while inside the folder works too.
-</p>
-</div>
-<script src="https://apis.google.com/js/api.js"></script>
-<script>
-  const TOKEN = "{token}";
-  const KEY = "{key}";
-  const ORIGIN = "{origin}";
-  const APP_ID = "{app_id}";
-  const LOOKING_FOR = {looking_for};
-  const say = (text) => {{ document.getElementById("say").textContent = text; }};
-  function done(query) {{ location.href = "/picked" + query; }}
-
-  function folders(label, ownedByMe, query) {{
-    const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-      .setIncludeFolders(true)
-      .setSelectFolderEnabled(true)
-      .setOwnedByMe(ownedByMe)
-      .setLabel(label);
-    // Only when there is one: an empty query is not "match everything" to
-    // every version of the chooser, and a tab that silently shows nothing is
-    // worse than one that shows too much.
-    if (query) view.setQuery(query);
-    return view;
-  }}
-
-  gapi.load("picker", function () {{
-    try {{
-      // Shared with you first: a project somebody sent you is by definition not
-      // one of yours. A name is the only thing the chooser can be narrowed by —
-      // it cannot look inside a folder to see whether it holds a lazuli.yaml.
-      //
-      // The unsearched tab is there on purpose and is not a duplicate. The
-      // chooser's search is Google's, it has misbehaved on folder views before,
-      // and a tab that lists plainly is the path that cannot be taken away by
-      // one — so there is always a way through even if the search goes wrong.
-      const views = [];
-      views.push(folders("Shared with me", false, LOOKING_FOR));
-      if (LOOKING_FOR) views.push(folders("Everything shared with me", false, ""));
-      views.push(folders("My Drive", true, LOOKING_FOR));
-
-      const builder = new google.picker.PickerBuilder()
-        .setDeveloperKey(KEY)
-        .setOAuthToken(TOKEN)
-        .setAppId(APP_ID)
-        .setOrigin(ORIGIN)
-        .setTitle("Choose the shared project's folder")
-        .setCallback(function (data) {{
-          if (data.action === google.picker.Action.PICKED) {{
-            const doc = (data.docs || [])[0];
-            // Said before leaving, so that a choice that was made but never
-            // arrived is distinguishable from one that was never made. Without
-            // it a failed hand-back looks exactly like a chooser ignoring you.
-            if (!doc || !doc.id) {{
-              say("The chooser returned nothing to open. Tell Lazuli what you saw.");
-              return;
-            }}
-            say("Chose " + (doc.name || doc.id) + ". Handing it to Lazuli…");
-            done("?id=" + encodeURIComponent(doc.id) +
-                 "&name=" + encodeURIComponent(doc.name || ""));
-          }} else if (data.action === google.picker.Action.CANCEL) {{
-            done("?cancelled=1");
-          }}
-        }});
-      views.forEach((view) => builder.addView(view));
-      builder.build().setVisible(true);
-
-      say("Choose the folder of the project that was shared with you.");
-      document.getElementById("how").hidden = false;
-    }} catch (err) {{
-      say("The chooser would not open: " + err);
-    }}
-  }});
-</script>
-</body></html>"#,
-        // The token is handed to the page rather than the page asking for
-        // one: the app is already signed in, and a second consent for the same
-        // scope would be a question with no purpose. It goes no further than
-        // this machine's own loopback.
-        token = access_token,
-        key = PICKER_API_KEY,
-        app_id = project_number(),
-        origin = origin,
-        // A name the user pasted, so it goes in as a JSON literal rather than
-        // between quotes of ours: a quote or a backslash in a project's name
-        // would otherwise end the string and leave a page that does not parse.
-        // `<` is escaped on top of that, because `</script>` inside a JS string
-        // still closes the tag as far as the HTML parser is concerned.
-        looking_for = serde_json::to_string(looking_for)
-            .unwrap_or_else(|_| "\"\"".to_owned())
-            .replace('<', "\\u003c"),
-    )
+    // Asked for straight away, which both names the project and proves the
+    // grant landed: under `drive.file` a folder that was not really handed over
+    // answers this with a 404 rather than with a name, and finding that out now
+    // is the difference between a clear failure and an empty project folder.
+    let name = folder_name(&tokens.access_token, &id)
+        .context("Google did not hand that folder over. Choose it again.")?;
+    Ok(Some(Picked { id, name, tokens }))
 }

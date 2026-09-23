@@ -58,9 +58,10 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
 
   const invite = el("button", { class: "button", text: "Invite" });
 
-  // What the people invited have to be told, because Google's invitation mail
-  // says nothing about Lazuli and their chooser cannot look inside a folder to
-  // recognise one. Read-only rather than disabled, so it can still be selected.
+  // What the people invited have to be told: Google's invitation mail says
+  // nothing about Lazuli, and its chooser lists everything ever shared with
+  // them by name alone. Read-only rather than disabled, so it can still be
+  // selected and copied.
   const folderName = el("input", { class: "input", type: "text" }) as HTMLInputElement;
   folderName.readOnly = true;
   const copy = el("button", {
@@ -80,7 +81,7 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
     el("div", { class: "row" }, folderName, copy),
     el("p", {
       class: "hint",
-      text: "They paste this into Add shared… and Google's chooser opens on that one folder.",
+      text: "The folder's name on Drive, so they know which to choose in Add shared….",
     }),
   );
 

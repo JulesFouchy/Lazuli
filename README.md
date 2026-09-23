@@ -46,9 +46,9 @@ Sharing is Drive's own: the Syncing dialog lists who a project is shared with, i
 
 You can be called something different in one project, the way you can on one Discord server: set it in the Syncing dialog and it is used there alone. And your devices know each other — an author record carries the accounts it signs in with, so an entry written on a phone is by the same person as one written on a laptop.
 
-**Receiving** a shared project takes one step, once. The person who shared it sends you the folder's name, which their Syncing dialog gives them to copy; you paste it into **Add shared…** on the launch screen, and Google's own file chooser opens on that one folder. Picking it is what grants Lazuli access — `drive.file` cannot see a folder it did not create, so the chooser is the grant rather than a browser, and a pasted *link* could not stand in for it. After that it is an ordinary project, and entries collaborators add later need no second visit.
+**Receiving** a shared project takes one step, once: **Add shared…** on the launch screen opens Google's own folder chooser in your browser, and choosing the folder is what grants Lazuli access to it. `drive.file` cannot see a folder it did not create, so the chooser *is* the grant rather than a browser over it — which is also why a pasted link could not stand in for one. After that it is an ordinary project, and entries collaborators add later need no second visit.
 
-The name is what makes that findable. A folder somebody shares with you stays in *their* Drive and reaches you through Drive's "Shared with me", which is a view rather than a place — so no folder of yours can hold it, and the chooser cannot look inside a folder to tell a Lazuli project from anything else. The name is the only thing left to narrow by, which is why a project's folder is called `Lazuli | <project>`.
+A project's folder is called `Lazuli | <project>`, and the Syncing dialog hands the owner that name to pass on, because the chooser lists everything anyone has ever shared with you and the name is what tells them apart.
 
 Two devices adding entries never collide, because an entry folder is a UUID. Two people editing the same sentence is the one real conflict, and it is not merged for you — both versions land on the card and you keep one.
 
@@ -67,7 +67,13 @@ Two things to get right in the Cloud console, both easy to forget:
 - **The consent screen has to be in Production.** Left in Testing it works only for accounts listed there by hand, capped at a hundred — which looks exactly like "sync is broken for everyone but me".
 - **One id does not cover every platform.** An Android build needs its own OAuth client, pinned to its package name and signing certificate, and iOS a third. They belong in the *same* Cloud project, so they share the consent screen, the quota and the user's approval: somebody who connected on their laptop is not asked again on their phone. The sign-in differs too — the loopback listener here is a desktop mechanism, and a phone takes the redirect through a custom URI scheme instead.
 
-To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API and the Google Picker API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id and secret into `DESKTOP_CLIENT_ID` and `DESKTOP_CLIENT_SECRET`; an API key restricted to the Picker API into `PICKER_API_KEY`. The chooser also needs the project's *number*, which is the leading digits of every client id in the project and is read off `DESKTOP_CLIENT_ID` — under `drive.file` the choice of a folder is a grant to that project, and without the number the chooser accepts the choice and then quietly fails to make it.
+To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), the Google Drive API enabled, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id and secret into `DESKTOP_CLIENT_ID` and `DESKTOP_CLIENT_SECRET`. That is all of it — the folder chooser rides on the same OAuth client and needs no API key of its own.
+
+### The chooser is the sign-in, with two more parameters
+
+Google's Picker has two flows, and the difference is worth knowing before anyone reaches for the better-documented one. The **web** flow is a JavaScript widget the app embeds in a page of its own; it wants an API key, a fixed origin and the Cloud project's number, and it renders in a frame from `docs.google.com` that needs the browser's Google cookies. Behind a signed-out browser, strict cookie settings or a webview's tracking prevention it fails — and it fails by accepting the choice, spinning, and handing the button back, with nothing in any console the app can read. All of that was built here and then taken out.
+
+The **desktop** flow is [`pick_url`](src-tauri/src/drive.rs): the ordinary sign-in redirect plus `trigger_onepick=true` and `allow_folder_selection=true`. Google shows the chooser on its own consent screen and redirects back to the loopback with `picked_file_ids` appended. No key, no origin, no frame, no cookies — and the redirect is the one the app already runs for signing in, because "the Google Picker imposes no additional restrictions" on it.
 
 ## The 5am rule
 

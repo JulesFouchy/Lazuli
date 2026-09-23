@@ -82,7 +82,7 @@ import { startTheme } from "./theme";
 import { openTrashDialog } from "./trash-view";
 import { displayedEntries, renderTimeline } from "./timeline";
 import { startTitlebar } from "./titlebar";
-import { clear, el, focusWhenActive, isEditing, toast, toastError } from "./ui";
+import { clear, el, isEditing, toast, toastError } from "./ui";
 
 function appRoot(): HTMLElement {
   const node = document.getElementById("app");
@@ -1142,61 +1142,17 @@ function settleConflict(entry: Entry, version: number): void {
 }
 
 /**
- * Ask what the shared project is called, then open Google's chooser on it.
- *
- * Asked rather than browsed for: a folder shared with you is in no folder of
- * yours, so the chooser can only offer everything anyone ever shared, and the
- * name is the one thing it can be narrowed by. Whoever shared it has the exact
- * string to hand, under "What to send them" in their own Syncing dialog.
- */
-function addShared(): void {
-  const name = el("input", {
-    class: "input",
-    type: "text",
-    placeholder: "Lazuli | …",
-  }) as HTMLInputElement;
-
-  const go = () => {
-    closeModal();
-    void openShared(name.value);
-  };
-
-  name.addEventListener("keydown", (event: KeyboardEvent) => {
-    if (event.key === "Enter") go();
-  });
-
-  openModal({
-    title: "Add a shared project",
-    body: el(
-      "div",
-      { class: "field" },
-      el("label", { text: "What is it called?" }),
-      name,
-      el("p", {
-        class: "hint",
-        text: "The name the person who shared it sent you. Leave it empty to see everything shared with you.",
-      }),
-    ),
-    foot: el(
-      "div",
-      { class: "modal__foot" },
-      el("button", { class: "button button--primary", text: "Choose…", onclick: go }),
-    ),
-  });
-  focusWhenActive(name);
-}
-
-/**
  * Take a project somebody shared on Drive.
  *
- * The chooser opens in the user's browser, so this waits on them being over
- * there — hence the toast rather than a silent pause.
+ * Google's own chooser opens in the user's browser and lists what has been
+ * shared with them, so there is nothing to ask here first — and this waits on
+ * them being over there, hence the toast rather than a silent pause.
  */
-async function openShared(lookingFor: string): Promise<void> {
+async function addShared(): Promise<void> {
   toast("Choose the shared folder in your browser.");
   let path: string | null;
   try {
-    path = await addSharedProject(lookingFor);
+    path = await addSharedProject();
   } catch (err) {
     toastError("Could not add that project", err);
     return;

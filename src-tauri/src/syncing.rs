@@ -373,8 +373,10 @@ pub fn set_my_name_here(
 
 /// Take a project somebody shared, through Google's own file chooser.
 ///
-/// The Picker is the only way in: `drive.file` cannot see a folder the app did
-/// not create, so the user hands this one over once and the grant sticks.
+/// Google's chooser is the only way in: `drive.file` cannot see a folder the
+/// app did not create, so the user hands this one over once and the grant
+/// sticks. It opens in their browser as part of a consent, which is why this
+/// also comes back with tokens.
 ///
 /// What comes back is a folder id, and the rest is the ordinary sync: a local
 /// folder is made for it, pointed at that remote, and filled by a pass. The
@@ -382,17 +384,18 @@ pub fn set_my_name_here(
 #[tauri::command]
 pub async fn add_shared_project(
     app: AppHandle,
-    looking_for: String,
 ) -> Result<Option<std::path::PathBuf>, crate::commands::CmdError> {
-    let handle = app.clone();
-    let picked = crate::commands::off_thread(move || {
-        let access = token(&handle)?;
-        drive::pick_folder(&access, looking_for.trim())
-    })
-    .await?;
+    let picked = crate::commands::off_thread(drive::pick_folder).await?;
     let Some(picked) = picked else {
         return Ok(None);
     };
+
+    // The chooser is its own sign-in, so it comes back with tokens of its own —
+    // and they are the ones that can reach the folder, because the grant was
+    // made to whoever consented just now. Kept, so that the next launch can
+    // sync this project without asking again.
+    crate::commands::set_drive_tokens(&app, Some(picked.tokens.clone()));
+    remember_account(&app, &picked.tokens.access_token);
 
     let parent = crate::commands::default_projects_dir(app.clone());
     let handle = app.clone();
