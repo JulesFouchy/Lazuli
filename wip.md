@@ -34,7 +34,7 @@ mcp, or at least a readme to explain the file/folder format so people can easily
 - button to clear from trash now
 - show image in trash, not just its name
 - the Synced button shouldn't flickr on ui refresh, and should say Syncing with a spinner while its not up to date with drive (either uploading or downloading new stuff)
-- 
+- the first google sign in sends you back to account selection page and you have to accept a second time before you get properly connected
 
 ## Import initial projects
 
