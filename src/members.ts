@@ -4,7 +4,7 @@
 // owner on its own servers, so this is a screen over its permissions and the
 // roles it shows are the ones that are actually true — see `drive.rs`.
 
-import type { Member } from "./api";
+import type { Sharing } from "./api";
 import {
   projectMembers,
   setMyNameHere,
@@ -58,6 +58,32 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
 
   const invite = el("button", { class: "button", text: "Invite" });
 
+  // What the people invited have to be told, because Google's invitation mail
+  // says nothing about Lazuli and their chooser cannot look inside a folder to
+  // recognise one. Read-only rather than disabled, so it can still be selected.
+  const folderName = el("input", { class: "input", type: "text" }) as HTMLInputElement;
+  folderName.readOnly = true;
+  const copy = el("button", {
+    class: "button",
+    text: "Copy",
+    onclick: () => {
+      void navigator.clipboard
+        .writeText(folderName.value)
+        .then(() => toast("Copied. Send it to whoever you invited."))
+        .catch((err: unknown) => toastError("Could not copy it", err));
+    },
+  });
+  const passOn = el(
+    "div",
+    { class: "field" },
+    el("label", { text: "What to send them" }),
+    el("div", { class: "row" }, folderName, copy),
+    el("p", {
+      class: "hint",
+      text: "They paste this into Add shared… and Google's chooser opens on that one folder.",
+    }),
+  );
+
   const nameHere = el("input", {
     class: "input",
     type: "text",
@@ -71,6 +97,7 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
     state,
     list,
     el("div", { class: "row" }, email, role, invite),
+    passOn,
     el(
       "div",
       { class: "field" },
@@ -83,7 +110,8 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
     ),
   );
 
-  const paint = (members: Member[]) => {
+  const paint = ({ invite: folder, members }: Sharing) => {
+    folderName.value = folder;
     list.replaceChildren(
       ...members.map((member) =>
         el(
@@ -113,7 +141,7 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
         : "Google enforces these, not Lazuli. Anyone who can write can add entries and edit any of them.";
   };
 
-  const act = async (call: Promise<Member[]>, whenItFails: string) => {
+  const act = async (call: Promise<Sharing>, whenItFails: string) => {
     invite.disabled = true;
     try {
       paint(await call);
@@ -129,8 +157,11 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
     void act(shareProject(path, address, role.value), "Could not share it").then(() => {
       email.value = "";
       // Said because Google sends the mail, not us: nothing else on screen
-      // would tell them an invitation went anywhere.
-      toast(`Invited ${address}. Google has emailed them the folder.`);
+      // would tell them an invitation went anywhere. And the mail is Google's,
+      // so it cannot mention Lazuli — the name below is what they still need.
+      toast(
+        `Invited ${address}. Google has emailed them the folder — send them its name too.`,
+      );
     });
   };
 
@@ -150,6 +181,7 @@ export function membersSection(path: string, isOn: () => boolean): MembersSectio
     const on = isOn();
     list.hidden = !on;
     invite.parentElement?.toggleAttribute("hidden", !on);
+    passOn.toggleAttribute("hidden", !on);
     nameHere.parentElement?.toggleAttribute("hidden", !on);
     if (!on) {
       state.textContent =

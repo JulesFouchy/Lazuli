@@ -46,7 +46,9 @@ Sharing is Drive's own: the Syncing dialog lists who a project is shared with, i
 
 You can be called something different in one project, the way you can on one Discord server: set it in the Syncing dialog and it is used there alone. And your devices know each other — an author record carries the accounts it signs in with, so an entry written on a phone is by the same person as one written on a laptop.
 
-**Receiving** a shared project does not work yet. The `drive.file` scope cannot see a folder it did not create, so the person you share with has to be handed it through Google's own file chooser, which is not built — see [ideas/syncing-projects.md](ideas/syncing-projects.md).
+**Receiving** a shared project takes one step, once. The person who shared it sends you the folder's name, which their Syncing dialog gives them to copy; you paste it into **Add shared…** on the launch screen, and Google's own file chooser opens on that one folder. Picking it is what grants Lazuli access — `drive.file` cannot see a folder it did not create, so the chooser is the grant rather than a browser, and a pasted *link* could not stand in for it. After that it is an ordinary project, and entries collaborators add later need no second visit.
+
+The name is what makes that findable. A folder somebody shares with you stays in *their* Drive and reaches you through Drive's "Shared with me", which is a view rather than a place — so no folder of yours can hold it, and the chooser cannot look inside a folder to tell a Lazuli project from anything else. The name is the only thing left to narrow by, which is why a project's folder is called `Lazuli | <project>`.
 
 Two devices adding entries never collide, because an entry folder is a UUID. Two people editing the same sentence is the one real conflict, and it is not merged for you — both versions land on the card and you keep one.
 
@@ -57,6 +59,8 @@ Syncing identifies Lazuli to Google with an OAuth client id, which is in [`src-t
 It is made once, for the app, not once per user. Every copy carries the same id; what belongs to each person is the token it gets back, which stays on their machine and never reaches us. Their Drive traffic does count against this project's quota, which is the one thing that is genuinely shared.
 
 The app asks for the `drive.file` scope and nothing else. That scope is classed non-sensitive, so there is no verification, no security assessment and no "Google hasn't verified this app" screen in front of anyone. The narrowness is the trade: it can see the files Lazuli made and nothing else of yours, which is also why a project somebody *else* shared has to be handed over through the Google Picker.
+
+Projects Lazuli syncs are made inside a **`Lazuli` folder** at the top of your Drive, so they are not loose among everything else. The folder is found by id afterwards, so moving a project somewhere else in your Drive does not break it.
 
 Two things to get right in the Cloud console, both easy to forget:
 

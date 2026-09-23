@@ -31,7 +31,10 @@ web version
 
 mcp, or at least a readme to explain the file/folder format so people can easily automate the creation of entries
 
-Dark Continent: experiment with Grapple and Rope Physics. And worldgen for the first circle.
+- button to clear from trash now
+- show image in trash, not just its name
+- the Synced button shouldn't flickr on ui refresh, and should say Syncing with a spinner while its not up to date with drive (either uploading or downloading new stuff)
+- 
 
 ## Import initial projects
 

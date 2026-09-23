@@ -148,14 +148,27 @@ export interface Member {
   name: string;
 }
 
+/** Who a project is shared with, and what the people invited look for. */
+export interface Sharing {
+  /**
+   * The Drive folder's own name, `Lazuli | <project>`.
+   *
+   * What somebody invited pastes into Google's chooser to find the folder
+   * among everything else that was ever shared with them. Empty for a project
+   * that syncs nowhere.
+   */
+  invite: string;
+  members: Member[];
+}
+
 export const projectMembers = (path: string) =>
-  invoke<Member[]>("project_members", { path });
+  invoke<Sharing>("project_members", { path });
 
 export const shareProject = (path: string, email: string, role: string) =>
-  invoke<Member[]>("share_project", { path, email, role });
+  invoke<Sharing>("share_project", { path, email, role });
 
 export const unshareProject = (path: string, permission: string) =>
-  invoke<Member[]>("unshare_project", { path, permission });
+  invoke<Sharing>("unshare_project", { path, permission });
 
 /**
  * Set, or clear, what you are called in this project alone.
@@ -172,9 +185,13 @@ export const setMyNameHere = (name: string | null) =>
  * Opens in the user's browser rather than in here: the chooser is Google's own
  * page and this one's content policy has no room for it. Resolves with where
  * the project landed, or null if they chose nothing.
+ *
+ * `lookingFor` is the folder name the person who shared it passed on, and the
+ * chooser opens searched for it. The chooser cannot look inside a folder, so a
+ * name is the only thing it can be narrowed by.
  */
-export const addSharedProject = () =>
-  invoke<string | null>("add_shared_project");
+export const addSharedProject = (lookingFor: string) =>
+  invoke<string | null>("add_shared_project", { lookingFor });
 
 export interface Project {
   root: string;

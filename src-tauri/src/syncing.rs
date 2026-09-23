@@ -285,22 +285,38 @@ impl Drop for Loop {
 
 // --- sharing ----------------------------------------------------------------
 
-/// Everyone a synced project is shared with.
+/// Who a project is shared with, and what to tell them to look for.
 ///
+/// `invite` is the Drive folder's own name, which the person invited pastes
+/// into the chooser. It travels with the member list because both are read in
+/// the same breath and the dialog shows them together.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Sharing {
+    pub invite: String,
+    pub members: Vec<drive::Member>,
+}
+
 /// Empty for a project that syncs nowhere: there is nobody to share a folder
 /// that does not exist with.
 #[tauri::command]
 pub async fn project_members(
     app: AppHandle,
     path: std::path::PathBuf,
-) -> Result<Vec<drive::Member>, crate::commands::CmdError> {
+) -> Result<Sharing, crate::commands::CmdError> {
     let handle = app.clone();
     Ok(crate::commands::off_thread(move || {
         let config = sync::Config::read(&path);
         if !config.is_on() {
-            return Ok(Vec::new());
+            return Ok(Sharing {
+                invite: String::new(),
+                members: Vec::new(),
+            });
         }
-        drive::members(&token(&handle)?, &config.folder)
+        let access = token(&handle)?;
+        Ok(Sharing {
+            invite: drive::folder_name(&access, &config.folder)?,
+            members: drive::members(&access, &config.folder)?,
+        })
     })
     .await?)
 }
@@ -311,7 +327,7 @@ pub async fn share_project(
     path: std::path::PathBuf,
     email: String,
     role: String,
-) -> Result<Vec<drive::Member>, crate::commands::CmdError> {
+) -> Result<Sharing, crate::commands::CmdError> {
     let handle = app.clone();
     let at = path.clone();
     crate::commands::off_thread(move || {
@@ -330,7 +346,7 @@ pub async fn unshare_project(
     app: AppHandle,
     path: std::path::PathBuf,
     permission: String,
-) -> Result<Vec<drive::Member>, crate::commands::CmdError> {
+) -> Result<Sharing, crate::commands::CmdError> {
     let handle = app.clone();
     let at = path.clone();
     crate::commands::off_thread(move || {
@@ -366,11 +382,12 @@ pub fn set_my_name_here(
 #[tauri::command]
 pub async fn add_shared_project(
     app: AppHandle,
+    looking_for: String,
 ) -> Result<Option<std::path::PathBuf>, crate::commands::CmdError> {
     let handle = app.clone();
     let picked = crate::commands::off_thread(move || {
         let access = token(&handle)?;
-        drive::pick_folder(&access)
+        drive::pick_folder(&access, looking_for.trim())
     })
     .await?;
     let Some(picked) = picked else {

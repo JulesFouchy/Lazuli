@@ -31,14 +31,12 @@ What is left to conflict is small: the body, `date:` and `image:` of one entry e
 - **Identity across devices.** An author record carries the accounts its owner signs in with, so a second device looks itself up and joins the author it already is rather than minting a rival. Per-project `display_name`, the Discord model: your own name everywhere until you decide otherwise, and then only there.
 - **Sharing**, as a members view over Drive's own permissions — invite by email, see who has what, take it away. The roles are real because Google enforces them, which is why there is no access control here to write.
 - **Words before pictures.** A pass carries text first, so a timeline is complete within a round trip and the photographs fill in behind it.
+- **The Picker**, which is how somebody else's project gets in. It runs in the user's own browser rather than the webview, so the CSP was left alone — letting `apis.google.com` run script and `docs.google.com` open a frame inside the app was a real widening, and it turned out not to be needed. Choosing the folder *is* the grant, which is why a pasted link cannot stand in for it and why the `drive` scope — restricted, and an annual security assessment — stays turned down.
+- **Finding the folder in the chooser**, which is a harder problem than it looks and is why project folders are named `Lazuli | <project>`. A folder shared with you is in no folder of yours: it stays in the sharer's Drive and reaches you through "Shared with me", a view rather than a place. So a Lazuli folder of your own cannot collect it, and the chooser cannot look inside a folder to recognise a `lazuli.yaml`. Its only levers are parent, owner, starred and *name* — so the name is made to carry it, the sharer's dialog hands them the exact string, and the receiver pastes it into a search the chooser opens on.
 
 Each stands on its own, and each was a prerequisite.
 
 ## Still to do
-
-**The Picker**, which is the one thing standing between this and somebody else's project. `drive.file` cannot see a folder it did not create — `sharedWithMe` comes back empty, by design — so a shared project has to be handed to the app once through Google's own chooser. That needs three things it does not have: a Google **API key** from the same Cloud project, the Picker API enabled on it, and a CSP that lets `apis.google.com` run script in the webview and `docs.google.com` open a frame. The last is a real widening of what may run in the app, and worth deciding on rather than doing quietly. Until then a project is shared *out* fine, and the person receiving it cannot open it in Lazuli.
-
-The alternative is the `drive` scope, which sees everything — and is restricted, so it costs OAuth verification plus a third-party security assessment, annually. That was turned down once already and the reasoning has not changed.
 
 **A way in on Android**, when there is an Android build. Its own OAuth client, pinned to the package name and signing certificate, and its own redirect: `Redirect` in `drive.rs` runs a loopback web server, which a phone has neither the means nor the business to do. A custom URI scheme the OS routes back to the app is the shape. Both clients live in one Cloud project, so the consent screen, the quota and the user's approval are shared, and `DESKTOP_CLIENT_ID` gains a sibling rather than a replacement.
 
@@ -64,7 +62,7 @@ Syncing is per project and opt-in; the setting is per device, in `.lazuli/sync.j
 
 ## What is left, and why
 
-Most of it now is. What is left is listed above, and the largest of it — the members view, the Picker, lazy materialisation — is better designed against a Drive that has actually been talked to than ahead of one. The sync base in particular is deliberately last of the file-format work: nothing reads or writes it until there is an engine, and a format in the tree that nothing uses is the thing `video-export.md` says cost more than it saved.
+Most of it now is. What is left is listed above, and the largest of it — the members view, the Picker, lazy materialisation — was better designed against a Drive that has actually been talked to than ahead of one. The sync base in particular is deliberately last of the file-format work: nothing reads or writes it until there is an engine, and a format in the tree that nothing uses is the thing `video-export.md` says cost more than it saved.
 
 ## A browser version, later
 

@@ -91,6 +91,21 @@ const UPLOAD_API: &str = "https://www.googleapis.com/upload/drive/v3";
 /// The mime type Drive uses to mean "folder".
 const FOLDER: &str = "application/vnd.google-apps.folder";
 
+/// Where projects this app makes are kept, so they are not loose in a Drive.
+const HOME: &str = "Lazuli";
+
+/// What a project's folder is called on Drive.
+///
+/// Prefixed, and this is load-bearing rather than decoration. A folder shared
+/// with you is in no folder of yours — it reaches you through Drive's "Shared
+/// with me", which is a view and not a place — so the only thing the chooser
+/// can be narrowed by is the name. The prefix is what the person you shared it
+/// with searches for, and it says what the folder is for to somebody who has
+/// only ever seen the invitation Google emailed them.
+pub fn project_folder_name(name: &str) -> String {
+    format!("{HOME} | {name}")
+}
+
 /// How close to expiry a token is refreshed rather than used.
 ///
 /// A token that expires during the request it was attached to is a failure the
@@ -438,20 +453,63 @@ impl Drive {
 }
 
 impl Drive {
-    /// A folder for a project, made once when syncing is turned on.
+    /// The `Lazuli` folder every project this app syncs is made inside.
     ///
-    /// Under Drive's root rather than in a folder of the app's own: with the
-    /// `drive.file` scope the app sees only what it created, so a "Lazuli"
-    /// folder would be one more thing to keep track of for no gain, and a
-    /// project the user drags somewhere tidier still works.
-    pub fn make_project_folder(access_token: &str, name: &str) -> Result<String> {
-        let client = reqwest::blocking::Client::new();
+    /// Tidiness only, and it is not what lets somebody else's project be
+    /// found: a folder shared with you stays in the sharer's Drive and shows
+    /// under "Shared with me", which is a view and not a place, so no folder
+    /// of yours can hold it. Hence [`picker_page`] opening on that view.
+    ///
+    /// Under `drive.file` this search sees only folders Lazuli itself made,
+    /// which is the behaviour wanted — a `Lazuli` folder the user happens to
+    /// have for something else is invisible here and is left alone. A project
+    /// dragged somewhere tidier afterwards still syncs; the folder is found by
+    /// id, and only a new project looks here.
+    fn home(client: &reqwest::blocking::Client, access_token: &str) -> Result<String> {
+        let query = format!(
+            "name = '{HOME}' and 'root' in parents and mimeType = '{FOLDER}' and trashed = false"
+        );
+        let found: IdList = json(
+            client
+                .get(format!("{API}/files"))
+                .bearer_auth(access_token)
+                .query(&[("q", query.as_str()), ("fields", "files(id)")])
+                .send()
+                .context("looking for the Lazuli folder on Drive")?,
+        )?;
+        if let Some(home) = found.files.first() {
+            return Ok(home.id.clone());
+        }
         let created: IdOnly = json(
             client
                 .post(format!("{API}/files"))
                 .bearer_auth(access_token)
                 .query(&[("fields", "id")])
-                .json(&serde_json::json!({ "name": name, "mimeType": FOLDER }))
+                .json(&serde_json::json!({ "name": HOME, "mimeType": FOLDER }))
+                .send()
+                .context("making the Lazuli folder on Drive")?,
+        )?;
+        Ok(created.id)
+    }
+
+    /// A folder for a project, made once when syncing is turned on.
+    ///
+    /// Named [`project_folder_name`], which is what the person you share it
+    /// with types into the chooser.
+    pub fn make_project_folder(access_token: &str, name: &str) -> Result<String> {
+        let client = reqwest::blocking::Client::new();
+        let name = &project_folder_name(name);
+        let home = Self::home(&client, access_token)?;
+        let created: IdOnly = json(
+            client
+                .post(format!("{API}/files"))
+                .bearer_auth(access_token)
+                .query(&[("fields", "id")])
+                .json(&serde_json::json!({
+                    "name": name,
+                    "mimeType": FOLDER,
+                    "parents": [home],
+                }))
                 .send()
                 .context("making the project's folder on Drive")?,
         )?;
@@ -1006,11 +1064,33 @@ mod redirect_tests {
     fn the_picker_page_carries_the_key_the_token_and_the_origin() {
         // All three are checked by Google, and a page missing one fails with a
         // message about the others.
-        let page = picker_page("http://127.0.0.1:1234", "an-access-token");
+        let page = picker_page("http://127.0.0.1:1234", "an-access-token", "Lazuli | Coollab");
         assert!(page.contains(PICKER_API_KEY));
         assert!(page.contains("an-access-token"));
         assert!(page.contains("http://127.0.0.1:1234"));
         assert!(page.contains("setSelectFolderEnabled(true)"));
+        // Opens on what was shared with them rather than on their own Drive,
+        // searched for the name they were sent.
+        assert!(page.contains("setOwnedByMe(false)"));
+        assert!(page.contains(r#""Lazuli | Coollab""#));
+    }
+
+    #[test]
+    fn a_project_name_cannot_break_out_of_the_picker_page() {
+        // The name is pasted by the user, and it lands inside a `<script>` in a
+        // page assembled by hand. A quote would end the string; `</script>`
+        // would end the tag however well the string itself were escaped.
+        let page = picker_page("o", "t", r#"a " and a \ and </script><img src=x>"#);
+        assert!(!page.contains("</script><img"));
+        assert!(page.contains(r#"a \" and a \\ and \u003c/script>\u003cimg src=x>"#));
+        // Still one script of Google's and one of ours, and nothing else.
+        assert_eq!(page.matches("</script>").count(), 2);
+    }
+
+    #[test]
+    fn a_project_folder_says_it_is_lazulis() {
+        // The prefix is what the person shared with searches the chooser for.
+        assert_eq!(project_folder_name("Coollab"), "Lazuli | Coollab");
     }
 
     #[test]
@@ -1088,6 +1168,29 @@ struct Permissions {
 
 /// Everyone the project's folder is shared with, owner included.
 ///
+/// What a project's folder is actually called on Drive.
+///
+/// Asked rather than worked out from the project's name: renaming the project
+/// here does not rename the folder there, and a name to pass to somebody else
+/// is worthless if it is not the one they will be searching for.
+pub fn folder_name(access_token: &str, folder: &str) -> Result<String> {
+    #[derive(Debug, Deserialize)]
+    struct Named {
+        #[serde(default)]
+        name: String,
+    }
+    let client = reqwest::blocking::Client::new();
+    let named: Named = json(
+        client
+            .get(format!("{API}/files/{folder}"))
+            .bearer_auth(access_token)
+            .query(&[("fields", "name")])
+            .send()
+            .context("asking Drive what the project's folder is called")?,
+    )?;
+    Ok(named.name)
+}
+
 /// The roles are Drive's and are enforced by Drive, which is the whole reason
 /// there is no access control of our own to write: reader, writer and owner are
 /// real because Google says no, not because the app declines to draw a button.
@@ -1170,7 +1273,7 @@ pub struct Picked {
 /// content policy is `default-src 'self'` with no frames, and widening it for
 /// this would be a permanent hole for an occasional dialog. The loopback server
 /// is the same one a sign-in comes back to.
-pub fn pick_folder(access_token: &str) -> Result<Option<Picked>> {
+pub fn pick_folder(access_token: &str, looking_for: &str) -> Result<Option<Picked>> {
     use std::io::{BufRead, BufReader, Write};
 
     check_configured()?;
@@ -1198,7 +1301,9 @@ pub fn pick_folder(access_token: &str) -> Result<Option<Picked>> {
 
         let body = match &answer {
             // Still the first request: hand over the page itself.
-            None if !target.starts_with("/picked") => picker_page(&origin, access_token),
+            None if !target.starts_with("/picked") => {
+                picker_page(&origin, access_token, looking_for)
+            }
             Some(_) => "<h1>Added</h1><p>You can close this tab and go back to Lazuli.</p>"
                 .to_owned(),
             None => "<h1>Nothing chosen</h1><p>You can close this tab.</p>".to_owned(),
@@ -1241,7 +1346,7 @@ pub fn picked_in(target: &str) -> Option<Picked> {
 }
 
 /// The page the browser is sent to: Google's chooser, and nothing else.
-fn picker_page(origin: &str, access_token: &str) -> String {
+fn picker_page(origin: &str, access_token: &str, looking_for: &str) -> String {
     format!(
         r#"<!doctype html>
 <html><head><meta charset="utf-8"><title>Choose a Lazuli project</title>
@@ -1257,17 +1362,33 @@ fn picker_page(origin: &str, access_token: &str) -> String {
   const TOKEN = "{token}";
   const KEY = "{key}";
   const ORIGIN = "{origin}";
+  const LOOKING_FOR = {looking_for};
   function done(query) {{ location.href = "/picked" + query; }}
   gapi.load("picker", function () {{
     try {{
-      const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+      // Shared with you, searched for by name, and opened on that: a project
+      // somebody sent you is by definition not one of yours, and a name is the
+      // only thing the chooser can narrow by — it cannot look inside a folder
+      // to see whether it holds a lazuli.yaml. Your own folders are the second
+      // tab, for re-adding one of your own on another machine.
+      const shared = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
         .setIncludeFolders(true)
-        .setSelectFolderEnabled(true);
+        .setSelectFolderEnabled(true)
+        .setOwnedByMe(false)
+        .setQuery(LOOKING_FOR)
+        .setLabel("Shared with me");
+      const mine = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+        .setIncludeFolders(true)
+        .setSelectFolderEnabled(true)
+        .setOwnedByMe(true)
+        .setQuery(LOOKING_FOR)
+        .setLabel("My Drive");
       new google.picker.PickerBuilder()
         .setDeveloperKey(KEY)
         .setOAuthToken(TOKEN)
         .setOrigin(ORIGIN)
-        .addView(view)
+        .addView(shared)
+        .addView(mine)
         .setTitle("Choose the shared project's folder")
         .setCallback(function (data) {{
           if (data.action === google.picker.Action.PICKED) {{
@@ -1295,5 +1416,13 @@ fn picker_page(origin: &str, access_token: &str) -> String {
         token = access_token,
         key = PICKER_API_KEY,
         origin = origin,
+        // A name the user pasted, so it goes in as a JSON literal rather than
+        // between quotes of ours: a quote or a backslash in a project's name
+        // would otherwise end the string and leave a page that does not parse.
+        // `<` is escaped on top of that, because `</script>` inside a JS string
+        // still closes the tag as far as the HTML parser is concerned.
+        looking_for = serde_json::to_string(looking_for)
+            .unwrap_or_else(|_| "\"\"".to_owned())
+            .replace('<', "\\u003c"),
     )
 }
