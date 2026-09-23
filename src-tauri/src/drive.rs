@@ -1071,9 +1071,13 @@ mod redirect_tests {
         assert!(page.contains("setSelectFolderEnabled(true)"));
         // Opens on what was shared with them rather than on their own Drive,
         // searched for the name they were sent.
-        assert!(page.contains("setOwnedByMe(false)"));
+        assert!(page.contains(r#"folders("Shared with me", false, LOOKING_FOR)"#));
         assert!(page.contains(r#""Lazuli | Coollab""#));
+        // And an unsearched way through, in case the chooser's own search will
+        // not let a folder be chosen from its results.
+        assert!(page.contains(r#"folders("Everything shared with me", false, "")"#));
     }
+
 
     #[test]
     fn a_project_name_cannot_break_out_of_the_picker_page() {
@@ -1352,59 +1356,87 @@ fn picker_page(origin: &str, access_token: &str, looking_for: &str) -> String {
 <html><head><meta charset="utf-8"><title>Choose a Lazuli project</title>
 <style>
  body {{ font: 15px system-ui, sans-serif; margin: 0; display: grid; place-items: center;
-        height: 100vh; background: #0b1020; color: #f2f4fb; }}
- p {{ opacity: .7 }}
+        height: 100vh; background: #0b1020; color: #f2f4fb; text-align: center; }}
+ .sheet {{ max-width: 34rem; padding: 0 1.5rem; }}
+ p {{ opacity: .75; line-height: 1.5 }}
+ #say {{ opacity: 1; font-size: 1.05rem }}
+ code {{ background: #1b2440; padding: .1em .4em; border-radius: .3em }}
 </style></head>
 <body>
+<div class="sheet">
 <p id="say">Opening Google's file chooser…</p>
+<p id="how" hidden>
+  Clicking a folder <em>opens</em> it. To choose it, select it and press
+  <strong>Select</strong> at the bottom of the chooser — pressing
+  <strong>Select</strong> while inside the folder works too.
+</p>
+</div>
 <script src="https://apis.google.com/js/api.js"></script>
 <script>
   const TOKEN = "{token}";
   const KEY = "{key}";
   const ORIGIN = "{origin}";
   const LOOKING_FOR = {looking_for};
+  const say = (text) => {{ document.getElementById("say").textContent = text; }};
   function done(query) {{ location.href = "/picked" + query; }}
+
+  function folders(label, ownedByMe, query) {{
+    const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+      .setIncludeFolders(true)
+      .setSelectFolderEnabled(true)
+      .setOwnedByMe(ownedByMe)
+      .setLabel(label);
+    // Only when there is one: an empty query is not "match everything" to
+    // every version of the chooser, and a tab that silently shows nothing is
+    // worse than one that shows too much.
+    if (query) view.setQuery(query);
+    return view;
+  }}
+
   gapi.load("picker", function () {{
     try {{
-      // Shared with you, searched for by name, and opened on that: a project
-      // somebody sent you is by definition not one of yours, and a name is the
-      // only thing the chooser can narrow by — it cannot look inside a folder
-      // to see whether it holds a lazuli.yaml. Your own folders are the second
-      // tab, for re-adding one of your own on another machine.
-      const shared = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(true)
-        .setOwnedByMe(false)
-        .setQuery(LOOKING_FOR)
-        .setLabel("Shared with me");
-      const mine = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(true)
-        .setOwnedByMe(true)
-        .setQuery(LOOKING_FOR)
-        .setLabel("My Drive");
-      new google.picker.PickerBuilder()
+      // Shared with you first: a project somebody sent you is by definition not
+      // one of yours. A name is the only thing the chooser can be narrowed by —
+      // it cannot look inside a folder to see whether it holds a lazuli.yaml.
+      //
+      // The unsearched tab is there on purpose and is not a duplicate. The
+      // chooser's search is Google's, it has misbehaved on folder views before,
+      // and a tab that lists plainly is the path that cannot be taken away by
+      // one — so there is always a way through even if the search goes wrong.
+      const views = [];
+      views.push(folders("Shared with me", false, LOOKING_FOR));
+      if (LOOKING_FOR) views.push(folders("Everything shared with me", false, ""));
+      views.push(folders("My Drive", true, LOOKING_FOR));
+
+      const builder = new google.picker.PickerBuilder()
         .setDeveloperKey(KEY)
         .setOAuthToken(TOKEN)
         .setOrigin(ORIGIN)
-        .addView(shared)
-        .addView(mine)
         .setTitle("Choose the shared project's folder")
         .setCallback(function (data) {{
           if (data.action === google.picker.Action.PICKED) {{
-            const doc = data.docs[0];
+            const doc = (data.docs || [])[0];
+            // Said before leaving, so that a choice that was made but never
+            // arrived is distinguishable from one that was never made. Without
+            // it a failed hand-back looks exactly like a chooser ignoring you.
+            if (!doc || !doc.id) {{
+              say("The chooser returned nothing to open. Tell Lazuli what you saw.");
+              return;
+            }}
+            say("Chose " + (doc.name || doc.id) + ". Handing it to Lazuli…");
             done("?id=" + encodeURIComponent(doc.id) +
                  "&name=" + encodeURIComponent(doc.name || ""));
           }} else if (data.action === google.picker.Action.CANCEL) {{
             done("?cancelled=1");
           }}
-        }})
-        .build()
-        .setVisible(true);
-      document.getElementById("say").textContent =
-        "Choose the folder of the project that was shared with you.";
+        }});
+      views.forEach((view) => builder.addView(view));
+      builder.build().setVisible(true);
+
+      say("Choose the folder of the project that was shared with you.");
+      document.getElementById("how").hidden = false;
     }} catch (err) {{
-      document.getElementById("say").textContent = "The chooser would not open: " + err;
+      say("The chooser would not open: " + err);
     }}
   }});
 </script>
