@@ -26,7 +26,6 @@ anyhow = "1"
 thiserror = "2"
 notify = "7"
 notify-debouncer-full = "0.4"
-trash = "5"
 # Already in the tree through tauri's `image-png`, which is PNG only; the extra
 # features are the formats a camera and a phone actually produce. Thumbnails
 # are decoded and re-encoded with it — see `thumbs.rs`.
@@ -55,5 +54,10 @@ webview2-com = "0.38"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 # Desktop-only by construction: there is no updater for iOS or Android, so the
-# target filter is what keeps a mobile build compiling should one ever exist.
+# target filter is what keeps a mobile build compiling.
 tauri-plugin-updater = "2"
+# Same, and for a blunter reason: the crate has no mobile backend at all and
+# does not compile for one. It is the last step of a deletion, thirty days
+# after the user asked for it — and a phone has no system trash to be that
+# step. See `trashcan::hand_on`.
+trash = "5"

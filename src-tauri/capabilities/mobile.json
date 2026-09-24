@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Capabilities the Lazuli window needs on a phone.",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "dialog:allow-open",
+      "comment": "Picking pictures out of the gallery. Asked for with `pickerMode: 'image'`, which is what routes it to Android's own photo grid rather than to a file browser, and what keeps it free of any storage permission: the user hands over exactly what they chose and nothing else."
+    },
+    {
+      "identifier": "dialog:allow-save",
+      "comment": "Writing a project out as a `.lazuli` to somewhere the user picks."
+    },
+    "dialog:allow-confirm",
+    "dialog:allow-message"
+  ]
+}

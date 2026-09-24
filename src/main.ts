@@ -74,6 +74,11 @@ import {
 import { closeModal, isModalOpen, onModalDismissed, openModal } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
 import {
+  HAS_MOUSE_HISTORY,
+  HAS_OS_FILE_DROP,
+  HAS_WINDOW_CHROME,
+} from "./platform";
+import {
   adopt as adoptProfile,
   avatarContents,
   profileButton,
@@ -1653,16 +1658,20 @@ document.addEventListener("visibilitychange", () => {
 });
 
 // Files dragged in from Explorer arrive here, not through the DOM drop event.
-void getCurrentWebview().onDragDropEvent((event) => {
-  if (event.payload.type !== "drop" || !state.project) return;
-  const paths = event.payload.paths;
-  if (paths.length === 0) return;
-  // Into the open entry if there is one, otherwise the cover.
-  const modal = here().modal;
-  const into =
-    modal?.kind === "entry" || modal?.kind === "view" ? modal.id : null;
-  void addDroppedPaths(into, paths);
-});
+// A phone has nowhere to drag a file from and no path to hand over if it did;
+// pictures get there through the system picker instead.
+if (HAS_OS_FILE_DROP) {
+  void getCurrentWebview().onDragDropEvent((event) => {
+    if (event.payload.type !== "drop" || !state.project) return;
+    const paths = event.payload.paths;
+    if (paths.length === 0) return;
+    // Into the open entry if there is one, otherwise the cover.
+    const modal = here().modal;
+    const into =
+      modal?.kind === "entry" || modal?.kind === "view" ? modal.id : null;
+    void addDroppedPaths(into, paths);
+  });
+}
 
 // The mouse's thumb buttons. The webview would otherwise take them as history
 // navigation and leave the single-page app, so both halves of the click are
@@ -1672,18 +1681,21 @@ const THUMB_BUTTONS = new Map([
   [4, goForward],
 ]);
 
-for (const type of ["mousedown", "auxclick"]) {
-  window.addEventListener(type, (event) => {
-    if (THUMB_BUTTONS.has((event as MouseEvent).button)) event.preventDefault();
+if (HAS_MOUSE_HISTORY) {
+  for (const type of ["mousedown", "auxclick"]) {
+    window.addEventListener(type, (event) => {
+      if (THUMB_BUTTONS.has((event as MouseEvent).button))
+        event.preventDefault();
+    });
+  }
+
+  window.addEventListener("mouseup", (event) => {
+    const move = THUMB_BUTTONS.get(event.button);
+    if (!move) return;
+    event.preventDefault();
+    move();
   });
 }
-
-window.addEventListener("mouseup", (event) => {
-  const move = THUMB_BUTTONS.get(event.button);
-  if (!move) return;
-  event.preventDefault();
-  move();
-});
 
 // A two-finger sideways swipe on a trackpad, which reaches the page as a
 // horizontal wheel. Fingers to the right is out one layer and fingers to the
@@ -1730,6 +1742,11 @@ let peakSpeed = 0;
 let fallen = false;
 
 window.addEventListener("wheel", (event) => {
+  // Android has this gesture already, at the edge of the screen and drawn by
+  // the system. Reading it a second time here would be two answers to one
+  // swipe.
+  if (!HAS_MOUSE_HISTORY) return;
+
   // The viewer claims the up-and-down wheel to walk the timeline, and
   // preventing the default is how it says so — its listener is registered as
   // this module imports it, so it has always run by the time this one does.
@@ -1801,7 +1818,7 @@ window.addEventListener("keydown", (event) => {
   // Before anything else, and without the usual "not while editing" guard: F11
   // is not a key that types anything, so it should work from inside a note and
   // from inside the viewer just as it does from the timeline.
-  if (event.key === "F11") {
+  if (event.key === "F11" && HAS_WINDOW_CHROME) {
     event.preventDefault();
     void toggleFullscreen().catch((err) =>
       toastError("Could not switch fullscreen", err),
@@ -1843,8 +1860,10 @@ onDateFormatChange(render);
 startTheme();
 
 // The window is built without decorations, so the bar that minimises, maximises
-// and closes it is one of ours.
-startTitlebar();
+// and closes it is one of ours. There is no such bar on a phone, and no way to
+// reach one if there were: it comes down when the pointer reaches the top edge,
+// and a finger has no position until it is already pressing something.
+if (HAS_WINDOW_CHROME) startTitlebar();
 
 // Your name and picture, for the round button in the corner. Not awaited: the
 // button draws the default figure until this lands, and then repaints itself.

@@ -18,10 +18,15 @@ pub mod store;
 pub mod theme;
 pub mod thumbs;
 pub mod trashcan;
+/// Desktop only. An app on a phone is updated by the store it came from, there
+/// is no `tauri-plugin-updater` for either mobile platform, and Play forbids an
+/// app updating itself by any other route. `Cargo.toml` filters the dependency
+/// to the same targets, and `tauri.android.conf.json` asks for no updater
+/// artifacts — three separate mechanisms saying the same thing, which is the
+/// right number for something that must never ship to a phone.
+#[cfg(desktop)]
 pub mod updates;
 pub mod watch;
-
-use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,7 +37,7 @@ pub fn run() {
     // split into who was waiting on what.
     let launched = std::time::Instant::now();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .on_page_load(move |_webview, payload| {
@@ -46,73 +51,25 @@ pub fn run() {
                     launched.elapsed().as_millis()
                 );
             }
-        })
-        // The window is built here rather than declared in `tauri.conf.json`,
-        // because its frame theme and background colour have to be known at
-        // creation: set afterwards, each one repaints the window in front of
-        // the user, and hiding it meanwhile only turns the flicker into a
-        // window that appears, vanishes and appears again.
+        });
+
+    // Only on macOS and Linux does this do anything: a downloaded update is
+    // applied as the window closes. On Windows it was applied at launch. A
+    // link in the chain rather than a call from inside one, so that the chain
+    // is shorter by exactly this where there is no updater to run.
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(updates::on_window_event);
+
+    builder
         .setup(|app| {
-            // Registered here rather than in the chain above because the crate
-            // is only a dependency on desktop targets — see `Cargo.toml`.
             #[cfg(desktop)]
-            app.handle()
-                .plugin(tauri_plugin_updater::Builder::new().build())?;
-
-            // Before the window: on Windows this is where a downloaded update
-            // is applied, and it must happen while there is nothing on screen
-            // to close. See `updates.rs`.
-            updates::at_launch(app.handle());
-
-            let dress =
-                theme::dress_for(&commands::appearance_preference(app.handle()));
-            // "main" is the label the capabilities file grants permissions to.
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title("Lazuli")
-                .icon(icon()?)?
-                .inner_size(1100.0, 820.0)
-                .min_inner_size(640.0, 480.0)
-                .maximized(true)
-                // The bar that minimises, maximises and closes the window is
-                // drawn by the page — see `src/titlebar.ts`. Only the caption
-                // goes: the resize frame is a separate window style, so edges,
-                // corners and Aero snap all still work.
-                .decorations(false)
-                // Hidden only for the length of the dance below.
-                .visible(false)
-                .theme(dress.theme)
-                .background_color(dress.background)
-                .build()?;
-
-            // An undecorated window gets its resize edges from an overlay child
-            // window Tauri puts along its border (`TAURI_DRAG_RESIZE_BORDERS`),
-            // and a maximised window should have none — there is nothing to
-            // resize. Created maximised, it keeps one: the top four pixels of
-            // the client area are covered, the page is never told the pointer
-            // is in them, and so the title bar can never be hovered into view,
-            // which is the only gesture that reveals it. Maximising the window
-            // again collapses the overlay, and nothing else measured does.
-            //
-            // Hence the hidden window: this is the restore-and-maximise the
-            // user would otherwise have to do by hand, done before there is
-            // anything on screen to see it happen.
-            window.unmaximize()?;
-            window.maximize()?;
-            window.show()?;
-
-            // Before anything can ask: the webview answers permission
-            // questions itself, and the page is free to ask from its first
-            // frame.
-            camera::allow(&window);
-
-            // Looks for a newer version a few seconds from now, downloads it
-            // in the background if there is one, and says nothing.
-            updates::start(app.handle().clone());
+            desktop_setup(app)?;
+            // The line above is the only thing that wants it, and a phone has
+            // no window of its own to build.
+            #[cfg(mobile)]
+            let _ = app;
             Ok(())
         })
-        // Only on macOS and Linux does this do anything: a downloaded update
-        // is applied as the window closes. On Windows it was applied at launch.
-        .on_window_event(updates::on_window_event)
         .manage(commands::AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::open_project,
@@ -166,6 +123,73 @@ pub fn run() {
         .expect("error while running Lazuli");
 }
 
+/// Everything the app needs at launch that only a desktop has.
+///
+/// The window is built here rather than declared in `tauri.conf.json`, because
+/// its frame theme and background colour have to be known at creation: set
+/// afterwards, each one repaints the window in front of the user, and hiding it
+/// meanwhile only turns the flicker into a window that appears, vanishes and
+/// appears again. A phone has no frame to dress, no size to ask for and no
+/// second window to distinguish, so there the window is declared in
+/// `tauri.android.conf.json` and none of this runs.
+#[cfg(desktop)]
+fn desktop_setup(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    // Registered here rather than in the builder chain because the crate is
+    // only a dependency on desktop targets — see `Cargo.toml`.
+    app.handle()
+        .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+    // Before the window: on Windows this is where a downloaded update is
+    // applied, and it must happen while there is nothing on screen to close.
+    // See `updates.rs`.
+    updates::at_launch(app.handle());
+
+    let dress = theme::dress_for(&commands::appearance_preference(app.handle()));
+    // "main" is the label the capabilities file grants permissions to.
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+        .title("Lazuli")
+        .icon(icon()?)?
+        .inner_size(1100.0, 820.0)
+        .min_inner_size(640.0, 480.0)
+        .maximized(true)
+        // The bar that minimises, maximises and closes the window is drawn by
+        // the page — see `src/titlebar.ts`. Only the caption goes: the resize
+        // frame is a separate window style, so edges, corners and Aero snap all
+        // still work.
+        .decorations(false)
+        // Hidden only for the length of the dance below.
+        .visible(false)
+        .theme(dress.theme)
+        .background_color(dress.background)
+        .build()?;
+
+    // An undecorated window gets its resize edges from an overlay child window
+    // Tauri puts along its border (`TAURI_DRAG_RESIZE_BORDERS`), and a maximised
+    // window should have none — there is nothing to resize. Created maximised,
+    // it keeps one: the top four pixels of the client area are covered, the page
+    // is never told the pointer is in them, and so the title bar can never be
+    // hovered into view, which is the only gesture that reveals it. Maximising
+    // the window again collapses the overlay, and nothing else measured does.
+    //
+    // Hence the hidden window: this is the restore-and-maximise the user would
+    // otherwise have to do by hand, done before there is anything on screen to
+    // see it happen.
+    window.unmaximize()?;
+    window.maximize()?;
+    window.show()?;
+
+    // Before anything can ask: the webview answers permission questions itself,
+    // and the page is free to ask from its first frame.
+    camera::allow(&window);
+
+    // Looks for a newer version a few seconds from now, downloads it in the
+    // background if there is one, and says nothing.
+    updates::start(app.handle().clone());
+    Ok(())
+}
+
 /// The window's icon — its taskbar button, and Alt-Tab.
 ///
 /// Given explicitly rather than left to the executable's own icon resource.
@@ -174,6 +198,7 @@ pub fn run() {
 /// binary keeps the icon it was first built with, which is exactly how the old
 /// one survived the rename. This reads the PNG the icons were generated from,
 /// so the window cannot disagree with the folder.
+#[cfg(desktop)]
 fn icon() -> tauri::Result<tauri::image::Image<'static>> {
     tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png"))
 }

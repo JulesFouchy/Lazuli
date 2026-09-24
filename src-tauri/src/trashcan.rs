@@ -15,6 +15,11 @@
 //!   open, which is why the old path retried for two seconds. A rename within
 //!   one directory does not care.
 //!
+//! A fourth reason arrived later: a phone has no system Recycle Bin to hand a
+//! file in a user-picked folder to, and the `trash` crate does not build for
+//! one at all. Deleting works there because none of it depends on the system's
+//! trash any more — only the last step, thirty days later, ever touches it.
+//!
 //! What it costs is that the trash is now the app's to empty, which the system
 //! one did for us. See [`purge_expired`].
 //!
@@ -276,14 +281,18 @@ pub fn list(root: &Path) -> Vec<TrashedItem> {
     items
 }
 
-/// Hand the payload of anything older than [`RETENTION_DAYS`] to the system
-/// Recycle Bin, keeping its marker.
+/// Hand the payload of anything older than [`RETENTION_DAYS`] on, keeping its
+/// marker.
 ///
 /// This is the one place the app removes something the user did not just ask it
-/// to remove, and it is why the payload goes to the system bin rather than
-/// being unlinked: the promise is that Lazuli never destroys anything, and the
-/// in-project trash is a grace period in front of the system one rather than a
-/// replacement for it.
+/// to remove, and on a desktop it is why the payload goes to the system bin
+/// rather than being unlinked: the promise is that Lazuli never destroys
+/// anything, and the in-project trash is a grace period in front of the system
+/// one rather than a replacement for it.
+///
+/// A phone has no system bin to pass it to — see [`hand_on`] — so there the
+/// thirty days are the whole of the grace period rather than the first half of
+/// it.
 ///
 /// Returns how many deletions were purged. Failures are skipped rather than
 /// propagated: this runs in the background, and a folder something holds open
@@ -300,7 +309,7 @@ pub fn purge_expired(root: &Path) -> usize {
         let Ok(payload) = payload_of(&folder) else {
             continue;
         };
-        if trash::delete(&payload).is_err() {
+        if !hand_on(&payload) {
             continue;
         }
         let marker = Marker {
@@ -363,6 +372,33 @@ fn copy_recursively(from: &Path, to: &Path) -> Result<()> {
 
 /// The payload inside a deletion folder: the one thing in it that is not the
 /// marker.
+/// Pass an expired payload one step further down the line, if there is one.
+///
+/// On a desktop there is: the system's own trash, which is a second grace
+/// period the user already knows how to search, and which is why expiry here
+/// destroys nothing.
+///
+/// On a phone there is no next step. A file in a folder the user picked is not
+/// something Android offers a trash for, so the thirty days in
+/// `.lazuli-trash/` — in the project folder, visible in Files, carried by
+/// whatever syncs it, restorable from any device that has the folder — are the
+/// whole of the grace period, and this is where it ends. Nothing shortens
+/// those thirty days; what changes is only that there is nowhere left to put
+/// the file afterwards.
+#[cfg(desktop)]
+fn hand_on(payload: &Path) -> bool {
+    trash::delete(payload).is_ok()
+}
+
+#[cfg(mobile)]
+fn hand_on(payload: &Path) -> bool {
+    if payload.is_dir() {
+        fs::remove_dir_all(payload).is_ok()
+    } else {
+        fs::remove_file(payload).is_ok()
+    }
+}
+
 fn payload_of(folder: &Path) -> Result<PathBuf> {
     fs::read_dir(folder)
         .with_context(|| format!("reading {}", folder.display()))?

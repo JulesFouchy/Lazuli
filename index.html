@@ -2,9 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `interactive-widget=resizes-content` is what moves the page up when a
+      soft keyboard opens. Without it the keyboard is laid over the page and
+      the field being typed into can end up behind it.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
     <title>Lazuli</title>
     <link rel="stylesheet" href="/src/styles.css" />
+    <script>
+      // Which platform, before the first paint and for the same reason the
+      // theme is settled here: the stylesheet keys off `[data-platform]`, and a
+      // module import lands a frame too late to spare a wrong first frame.
+      //
+      // The user agent, because `@tauri-apps/plugin-os` is an async import and
+      // that is exactly the frame being avoided. Read it through
+      // `src/platform.ts`, which turns it into what a build can *do* rather
+      // than what it is running on.
+      (function bootPlatform() {
+        var agent = navigator.userAgent;
+        document.documentElement.dataset.platform = /Android/.test(agent)
+          ? "android"
+          : /iPhone|iPad|iPod/.test(agent)
+            ? "ios"
+            : "desktop";
+      })();
+    </script>
     <script>
       // Blocking on purpose, and duplicated from `src/theme.ts` on purpose: the
       // module graph is fetched after the first paint, so anything left to it

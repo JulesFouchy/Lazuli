@@ -9,6 +9,12 @@
 //! the button in the image picker that says "Take a photo…", so the user has
 //! already said what this would be a second prompt about; and there is no
 //! remote content in the window that could ask on its own.
+//!
+//! Every platform asks this question and each one asks it somewhere else, so
+//! nothing here carries over: Android puts it to a `WebChromeClient`'s
+//! `onPermissionRequest` and wants `CAMERA` in the manifest besides, which is
+//! Kotlin and not this file. Called from the desktop half of `lib.rs`, so on a
+//! phone none of this runs and the answer has to come from there instead.
 
 use tauri::WebviewWindow;
 
