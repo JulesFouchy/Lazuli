@@ -1,0 +1,113 @@
+# Builds an Android APK and hands it back as a workflow artifact, to be
+# downloaded and sideloaded onto a phone.
+#
+# It exists because the Android SDK and NDK are several gigabytes to install on
+# a machine that may never need them otherwise, and the runner image already
+# carries both. That makes this the cheapest way to find out whether the mobile
+# build compiles at all, and the way testers get something to install.
+#
+# **It is not a substitute for the SDK when the time comes to work on the phone
+# build in earnest.** `tauri android dev` reloads a change in seconds where this
+# takes minutes, `adb logcat` is the only way to see why something failed, and
+# nothing here can answer a question about how fast a real device reads a real
+# folder. Build here; measure and debug there.
+#
+# Dispatched by hand, never on a push, for the same reason as everything else in
+# this repository: it is a private repo, its Actions minutes are not free, and
+# the checks that matter run on the one machine this is developed on.
+#
+# Signing and the Play upload are deliberately not here. A debug APK installs on
+# a phone that has allowed it, which is all a tester needs, and a release build
+# wants a keystore that does not exist yet.
+
+name: Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: "Which architecture to build for"
+        required: false
+        default: "aarch64"
+        type: choice
+        options:
+          - aarch64
+          - x86_64
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 17 is what the Gradle plugin Tauri generates expects; the image has
+      # several and the default is not always this one.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # The SDK is on the image already. The NDK is too, but Tauri finds it
+      # through `NDK_HOME` and nothing sets that — and the version on the image
+      # changes from time to time, so it is read rather than pinned.
+      - name: Point at the runner's NDK
+        run: |
+          ndk="$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
+          echo "Using NDK $ndk"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >-
+            ${{ inputs.abi == 'x86_64' && 'x86_64-linux-android' || 'aarch64-linux-android' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: lazuli-android-${{ inputs.abi }}
+          # A build that dies in Lazuli's own code — the usual way — should not
+          # throw away the dependencies it had already compiled.
+          cache-on-failure: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Only the first time. Once `gen/android/` is committed it is source: the
+      # manifest, `MainActivity.kt` and the Gradle signing config are all edited
+      # by hand, and re-generating would put them back.
+      - name: Generate the Android project, if it is not in the repository yet
+        run: |
+          if [ -d src-tauri/gen/android ]; then
+            echo "Using the committed src-tauri/gen/android."
+          else
+            echo "No src-tauri/gen/android — generating one."
+            npm run tauri android init
+          fi
+
+      - run: npm run tauri android build -- --apk --debug --target ${{ inputs.abi }}
+
+      # Whether or not the build got as far as an APK: on a first run this is
+      # the thing worth having, because it is what has to be committed before
+      # the manifest can be edited.
+      - name: Keep the generated project
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gen-android-${{ github.sha }}
+          path: |
+            src-tauri/gen/android
+            !src-tauri/gen/android/.gradle
+            !src-tauri/gen/android/build
+            !src-tauri/gen/android/app/build
+          if-no-files-found: warn
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lazuli-${{ inputs.abi }}-debug
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
