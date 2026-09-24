@@ -20,9 +20,19 @@ Since Android 11 an app cannot read files that another app wrote into shared sto
 
 Syncers that fill such a folder exist (Syncthing-Fork, FolderSync, Autosync for Drive and Dropbox), but choosing and configuring one is a technical step for somebody who only wanted a journal.
 
+## Tauri covers none of the picking
+
+Checked against `tauri-plugin-dialog` 2.7.3: there is **no folder picker on either mobile platform**. No `ACTION_OPEN_DOCUMENT_TREE` anywhere in its Kotlin, no `directory` handling in `src/mobile.rs`, and the iOS picker copies what was picked into caches rather than handing back a scoped URL. So "pick the folder once and keep the grant" is a plugin to write, not a flag to pass.
+
+On Android two third-party plugins already do it — `tauri-plugin-scoped-storage` and `tauri-plugin-android-fs`, both persisting the tree grant (512 of them on API 30+). Try those before writing one. For iOS security-scoped bookmarks nothing was found, so that is Swift of our own.
+
+Which settles the other question: this is a storage abstraction, not a configuration job. It also inverts the platform order — iOS hands back a real path and leaves `std::fs`, `atomic::write`, `unique_path`, `trashcan` and `thumbs` working untouched, where Android hands back a document tree and leaves none of them working. Android is first because that is where the testers are, not because it fits.
+
 ## Why not yet
 
-There is no mobile build. And it is unchecked how much of the folder picking, the bookmarks and the `content://` access Tauri 2's mobile plugins already cover — that is the first thing to find out, and it decides whether this is a configuration job or a storage abstraction.
+There is no mobile build.
+
+What is worth knowing before committing to this is how expensive a scan is over SAF, because the app re-reads the folder on every change. A directory listing there is not a syscall but a round trip into another process, and if the folder is served by a cloud provider rather than local storage, potentially a network call. Measure a real project on a device — local storage and Google Drive's provider both — before deciding whether everything can live in the tree. The fallback if it cannot is to keep the text and thumbnails on a real path and leave only the originals in the tree, fetched as they are shown.
 
 ## How
 

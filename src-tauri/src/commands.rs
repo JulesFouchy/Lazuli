@@ -3,9 +3,11 @@
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{Local, NaiveDate};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::SystemTime;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::atomic;
@@ -120,6 +122,19 @@ pub struct AppState {
     /// two quick clicks are two opens in flight, and the frontend keeps the
     /// one it asked for last, so that must also be the one left open here.
     opening: Mutex<()>,
+    /// What each listed project last read as, so drawing the launch screen
+    /// does not re-read every `lazuli.yaml` in the library. Same rules as the
+    /// entry cache in [`ProjectStore`]: checked against the disk before it is
+    /// used, and worth nothing but time if thrown away.
+    listed: Mutex<HashMap<PathBuf, CachedListing>>,
+}
+
+/// One row of the launch screen as it last read, and the stamps it read at.
+struct CachedListing {
+    cached_at: SystemTime,
+    modified: Option<SystemTime>,
+    len: u64,
+    listed: ListedProject,
 }
 
 /// Cap on the undo stack. Session-only anyway; this just stops a long tidying
@@ -847,26 +862,61 @@ pub async fn project_tabs(app: AppHandle) -> CmdResult<Vec<TabView>> {
 }
 
 fn read_tabs(app: &AppHandle) -> Vec<TabView> {
-    library::read(app)
-        .tabs
-        .into_iter()
-        .map(|tab| TabView {
+    let state = app.state::<AppState>();
+    let mut cache = state.listed.lock().expect("the listing cache was poisoned");
+    let mut listed = Vec::new();
+
+    for tab in library::read(app).tabs {
+        let mut projects = Vec::new();
+        for path in tab.projects {
+            // A folder that is no longer a project is skipped rather than
+            // dropped: the file is the user's arrangement, and a disk that is
+            // not mounted this morning is not a reason to rewrite it.
+            if let Some(project) = listed_project(app, &mut cache, path) {
+                projects.push(project);
+            }
+        }
+        listed.push(TabView {
             name: tab.name,
-            projects: tab
-                .projects
-                .into_iter()
-                // A folder that is no longer a project is skipped rather than
-                // dropped: the file is the user's arrangement, and a disk that
-                // is not mounted this morning is not a reason to rewrite it.
-                .filter(|path| store::is_project(path))
-                .map(|path| listed_project(app, path))
-                .collect(),
-        })
-        .collect()
+            projects,
+        });
+    }
+
+    // A project forgotten from the library takes its cache line with it.
+    let still_listed: HashSet<&PathBuf> = listed
+        .iter()
+        .flat_map(|tab| tab.projects.iter().map(|project| &project.path))
+        .collect();
+    cache.retain(|path, _| still_listed.contains(path));
+
+    listed
 }
 
-fn listed_project(app: &AppHandle, path: PathBuf) -> ListedProject {
-    let meta = store::read_meta(&path).ok();
+/// One launch-screen row, from the cache where the project's `lazuli.yaml` has
+/// not changed and from the disk where it has.
+///
+/// `None` when the folder is not a project. Resolving the marker file answers
+/// that *and* hands back the stamps to cache against, which is why it is one
+/// look here where it used to be one for `is_project`, another for
+/// `meta_path`, and a third to read the file.
+fn listed_project(
+    app: &AppHandle,
+    cache: &mut HashMap<PathBuf, CachedListing>,
+    path: PathBuf,
+) -> Option<ListedProject> {
+    let reading_at = SystemTime::now();
+    let (marker, modified, len) = store::marker(&path)?;
+
+    if let Some(cached) = cache.get(&path) {
+        if store::settled(modified, cached.cached_at)
+            && cached.modified == modified
+            && cached.len == len
+        {
+            return Some(cached.listed.clone());
+        }
+    }
+
+    let meta = store::read_meta_at(&marker).ok();
     // The launch screen shows each project behind its own cover, so the
     // webview has to be allowed to load that one folder. Not recursive,
     // and not the whole project: nothing else is shown until it opens.
@@ -875,14 +925,24 @@ fn listed_project(app: &AppHandle, path: PathBuf) -> ListedProject {
             .asset_protocol_scope()
             .allow_directory(path.join(store::COVER_DIR), false);
     }
-    ListedProject {
+    let listed = ListedProject {
         name: meta
             .as_ref()
             .map(|meta| meta.name.clone())
             .unwrap_or_else(|| file_name_of(&path)),
         cover: meta.and_then(|meta| meta.cover),
+        path: path.clone(),
+    };
+    cache.insert(
         path,
-    }
+        CachedListing {
+            cached_at: reading_at,
+            modified,
+            len,
+            listed: listed.clone(),
+        },
+    );
+    Some(listed)
 }
 
 #[derive(Debug, Serialize)]
@@ -891,7 +951,7 @@ pub struct TabView {
     pub projects: Vec<ListedProject>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ListedProject {
     pub name: String,
     pub path: PathBuf,

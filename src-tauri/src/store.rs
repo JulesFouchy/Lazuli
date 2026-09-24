@@ -55,6 +55,17 @@ const FRONTMATTER_FENCE: &str = "---";
 /// again; everything untouched — which in a journal is all of it — is trusted.
 const SETTLED_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Whether a file stamp is old enough to be trusted by a reading taken at
+/// `read_at`. See [`SETTLED_AFTER`] for why a stamp that merely looks older is
+/// not enough, and `None` — a filesystem that reports no time at all — is
+/// never trusted.
+pub fn settled(stamp: Option<SystemTime>, read_at: SystemTime) -> bool {
+    stamp.is_some_and(|at| {
+        at.checked_add(SETTLED_AFTER)
+            .is_some_and(|safe| safe <= read_at)
+    })
+}
+
 /// A project folder plus a cache of what each entry folder last read as.
 ///
 /// The cache is what keeps a rescan affordable at a thousand-plus entries. A
@@ -230,14 +241,8 @@ impl ProjectStore {
             // stamp that is not safely older than the read that cached it
             // cannot be told apart from one about to change. Both are treated
             // as always stale rather than trusted with what is left.
-            let settled = |stamp: Option<SystemTime>| {
-                stamp.is_some_and(|at| {
-                    at.checked_add(SETTLED_AFTER)
-                        .is_some_and(|safe| safe <= cached.cached_at)
-                })
-            };
-            let unchanged = settled(file_modified)
-                && settled(dir_modified)
+            let unchanged = settled(file_modified, cached.cached_at)
+                && settled(dir_modified, cached.cached_at)
                 && cached.file_modified == file_modified
                 && cached.file_len == file_len
                 && cached.dir_modified == dir_modified;
@@ -335,29 +340,40 @@ fn stand_in(
     )
 }
 
+/// The marker names a project folder may have, the current one first.
+fn marker_names() -> impl Iterator<Item = &'static str> {
+    std::iter::once(META_FILE).chain(LEGACY_META_FILES)
+}
+
+/// The marker file this folder actually has, with the stamps that say whether
+/// it has changed since it was last read. `None` when this is not a project.
+///
+/// One look at each name, answering both "is this a project" and "which file
+/// is it" — where asking those separately looked twice, and a caller that then
+/// read the file looked a third time. Almost always one `stat`, because almost
+/// every folder has the current name and it is tried first.
+pub fn marker(root: &Path) -> Option<(PathBuf, Option<SystemTime>, u64)> {
+    marker_names().find_map(|name| {
+        let path = root.join(name);
+        let metadata = fs::metadata(&path).ok()?;
+        metadata
+            .is_file()
+            .then(|| (path, metadata.modified().ok(), metadata.len()))
+    })
+}
+
 /// Whether a folder looks like a lazuli project.
 pub fn is_project(root: &Path) -> bool {
-    root.join(META_FILE).is_file()
-        || LEGACY_META_FILES
-            .iter()
-            .any(|name| root.join(name).is_file())
+    marker(root).is_some()
 }
 
 /// The marker file this folder actually has, the current name winning if both
 /// are somehow there. Falls back to the current name when neither exists, so a
 /// caller about to write one gets the right path.
 fn meta_path(root: &Path) -> PathBuf {
-    let current = root.join(META_FILE);
-    if current.is_file() {
-        return current;
-    }
-    for name in LEGACY_META_FILES {
-        let legacy = root.join(name);
-        if legacy.is_file() {
-            return legacy;
-        }
-    }
-    current
+    marker(root)
+        .map(|(path, _, _)| path)
+        .unwrap_or_else(|| root.join(META_FILE))
 }
 
 /// Give an older build's marker file the current name.
@@ -396,9 +412,16 @@ pub fn migrate_meta(root: &Path) -> Result<()> {
 const RETIRED_META_FIELDS: [&str; 1] = ["id"];
 
 pub fn read_meta(root: &Path) -> Result<ProjectMeta> {
-    let path = meta_path(root);
+    read_meta_at(&meta_path(root))
+}
+
+/// Read a marker file whose path is already known.
+///
+/// For a caller that has resolved it already — see [`marker`] — so that
+/// finding the file and reading it is one look at the folder rather than two.
+pub fn read_meta_at(path: &Path) -> Result<ProjectMeta> {
     let contents =
-        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let mut meta: ProjectMeta =
         serde_yaml::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?;
     for field in RETIRED_META_FIELDS {
