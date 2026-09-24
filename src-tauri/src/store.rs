@@ -268,7 +268,11 @@ impl ProjectStore {
                 return None;
             }
         };
-        let conflict = conflicts::of_entry(dir, &contents);
+        // One listing of the folder, read before either question is asked of
+        // it: which pictures are here, and did a syncer leave a second copy of
+        // the entry beside this one.
+        let names = list_files(dir);
+        let conflict = conflicts::of_entry(dir, &contents, &names);
         let (frontmatter, text) = match parse_entry(&contents) {
             Ok(parsed) => parsed,
             // A conflicted file usually cannot be parsed at all. Stand in for
@@ -282,7 +286,7 @@ impl ProjectStore {
                 }
             },
         };
-        let images = list_images(dir);
+        let images = images_among(&names);
 
         self.cache.insert(
             dir.to_path_buf(),
@@ -576,24 +580,37 @@ fn split_frontmatter(contents: &str) -> Result<(&str, &str)> {
     bail!("frontmatter was opened but never closed with a `---` line");
 }
 
-/// Every image file directly inside `dir`, sorted, or an empty list if the
-/// folder does not exist.
+/// Every file directly inside `dir`, by name, or nothing if there is no such
+/// folder.
 ///
-/// `file_type()` rather than `path().is_file()`: the kind of each child is
-/// already in what the directory read returned, and asking the path instead
-/// throws that away and pays a fresh `stat` per file.
-fn list_images(dir: &Path) -> Vec<String> {
+/// `file_type()` rather than `path().is_file()`: the kind of each child came
+/// back with the listing, and asking the path instead throws that away and
+/// pays a fresh `stat` per file.
+pub fn list_files(dir: &Path) -> Vec<String> {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut names: Vec<String> = read_dir
+    read_dir
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect()
+}
+
+/// The images among a folder's filenames, in the order they are shown.
+fn images_among(names: &[String]) -> Vec<String> {
+    let mut images: Vec<String> = names
+        .iter()
         .filter(|name| is_image(name))
+        .cloned()
         .collect();
-    names.sort_by_key(|name| name.to_lowercase());
-    names
+    images.sort_by_key(|name| name.to_lowercase());
+    images
+}
+
+/// Every image file directly inside `dir`, sorted.
+fn list_images(dir: &Path) -> Vec<String> {
+    images_among(&list_files(dir))
 }
 
 /// Every folder under `entries/`, with its modification time.

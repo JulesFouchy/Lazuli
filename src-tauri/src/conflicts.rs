@@ -69,7 +69,7 @@ pub enum Kind {
 ///
 /// `contents` is `entry.md` as it stands, already read. Returns `None` for the
 /// ordinary case, which is nearly always.
-pub fn of_entry(dir: &Path, contents: &str) -> Option<Conflict> {
+pub fn of_entry(dir: &Path, contents: &str, names: &[String]) -> Option<Conflict> {
     if let Some(versions) = split_markers(contents) {
         return Some(Conflict {
             kind: Kind::Markers,
@@ -77,7 +77,7 @@ pub fn of_entry(dir: &Path, contents: &str) -> Option<Conflict> {
         });
     }
 
-    let sidecars = sidecars(dir);
+    let sidecars = sidecars_among(dir, names);
     if sidecars.is_empty() {
         return None;
     }
@@ -107,18 +107,20 @@ pub fn of_entry(dir: &Path, contents: &str) -> Option<Conflict> {
 /// user's, and a `notes.md` they put there themselves is not a conflict. See
 /// [`is_sidecar_name`] for the shape.
 pub fn sidecars(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut found: Vec<PathBuf> = entries
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.is_file())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(is_sidecar_name)
-        })
+    sidecars_among(dir, &crate::store::list_files(dir))
+}
+
+/// The same, from a listing of the folder already in hand.
+///
+/// A scan wants two things from an entry folder — which images are in it, and
+/// whether a syncer left a second copy of the entry — and listing it twice to
+/// answer them separately is a round trip wasted where a listing is not a
+/// syscall. See `ideas/mobile-storage.md`.
+fn sidecars_among(dir: &Path, names: &[String]) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = names
+        .iter()
+        .filter(|name| is_sidecar_name(name))
+        .map(|name| dir.join(name))
         .collect();
     // Stable, so the card offers them in the same order every scan and the
     // project does not appear to change when nothing has.
