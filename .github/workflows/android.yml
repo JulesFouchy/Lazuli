@@ -97,16 +97,23 @@ jobs:
       # Whether or not the build got as far as an APK: on a first run this is
       # the thing worth having, because it is what has to be committed before
       # the manifest can be edited.
+      #
+      # `include-hidden-files`, or the `.gitignore` files Tauri writes into the
+      # generated project are silently left out and what comes back is not the
+      # project it made. `jniLibs` is the built library copied into the source
+      # tree — 170MB of it, and an output rather than a source.
       - name: Keep the generated project
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gen-android-${{ github.sha }}
+          include-hidden-files: true
           path: |
             src-tauri/gen/android
             !src-tauri/gen/android/.gradle
-            !src-tauri/gen/android/build
-            !src-tauri/gen/android/app/build
+            !src-tauri/gen/android/**/build
+            !src-tauri/gen/android/app/src/main/jniLibs
+            !src-tauri/gen/android/local.properties
           if-no-files-found: warn
 
       - name: Keep the APK
