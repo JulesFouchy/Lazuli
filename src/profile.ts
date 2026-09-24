@@ -4,15 +4,14 @@
 // into each project you write in, because whoever else opens that folder can
 // read the folder and nothing else of yours — see `authors.rs`.
 
-import type { Account, MyProfile } from "./api";
+import type { MyProfile } from "./api";
 import {
   clearMyAvatar,
-  connectDrive,
-  disconnectDrive,
-  driveAccount,
+  myNameHere,
   myProfile,
   setMyAvatar,
   setMyName,
+  setMyNameHere,
 } from "./api";
 import { openModal } from "./modal";
 import { el, toastError } from "./ui";
@@ -38,7 +37,7 @@ let repaintDialog: (() => void) | null = null;
  * The buttons are found in the DOM rather than kept in a list: `render` rebuilds
  * the whole page on every change, so a list would fill up with detached nodes.
  */
-function adopt(profile: MyProfile): void {
+export function adopt(profile: MyProfile): void {
   known = profile;
   for (const button of document.querySelectorAll<HTMLElement>(".avatar--button")) {
     paintButton(button);
@@ -52,10 +51,10 @@ function adopt(profile: MyProfile): void {
  * Round because that is what a picture of a person is everywhere else, and
  * because it tells the button apart from the square, labelled ones beside it.
  */
-export function profileButton(): HTMLElement {
+export function profileButton(projectName: string | null = null): HTMLElement {
   const button = el("button", {
     class: "avatar avatar--button",
-    onclick: () => openProfileDialog(),
+    onclick: () => openProfileDialog(projectName),
   });
   paintButton(button);
   return button;
@@ -96,10 +95,14 @@ export function authorAvatar(source: string | null, name: string): HTMLElement {
   return el("span", { class: "avatar avatar--tiny" }, avatarContents(source, name));
 }
 
-export function openProfileDialog(): void {
+/**
+ * `projectName` is the project on screen, when there is one: the dialog then
+ * also offers what you are called there alone.
+ */
+export function openProfileDialog(projectName: string | null = null): void {
   openModal({
     title: "You",
-    body: dialogBody(),
+    body: dialogBody(projectName),
     onClose: () => {
       repaintDialog = null;
     },
@@ -113,7 +116,7 @@ export function openProfileDialog(): void {
     .catch(() => {});
 }
 
-function dialogBody(): HTMLElement {
+function dialogBody(projectName: string | null): HTMLElement {
   const picture = el("div", { class: "avatar avatar--large" });
   const remove = el("button", { class: "button button--ghost", text: "Remove picture" });
 
@@ -215,85 +218,55 @@ function dialogBody(): HTMLElement {
         "copied into each project you write in, so whoever else opens it can " +
         "see who wrote what — and a project only you write in shows neither.",
     }),
-    accountControl().node,
+    projectName === null ? null : nameHereField(projectName),
   );
 }
 
 /**
- * The Google account, which is where synced projects live.
+ * What you are called in the project on screen alone.
  *
- * One control, used both in this dialog — where it belongs, because an account
- * is about *you* rather than about a project — and in a project's own Syncing
- * dialog, where somebody who has come to turn syncing on would otherwise hit a
- * button that cannot work and no way forward.
+ * The Discord model: your name everywhere until you decide otherwise, and then
+ * only where you decided it. Saved on blur, like the name above, and for the
+ * same reason — each save is a write into the project.
  */
-export interface AccountControl {
-  node: HTMLElement;
-  /** Re-read the account and repaint. Resolves with what it found. */
-  refresh: () => Promise<Account>;
-}
+function nameHereField(projectName: string): HTMLElement {
+  const field = el("input", {
+    class: "input",
+    type: "text",
+    placeholder: known?.name ?? "Your name",
+  }) as HTMLInputElement;
+  let saved = "";
+  void myNameHere()
+    .then((name) => {
+      saved = name ?? "";
+      if (document.activeElement !== field) field.value = saved;
+    })
+    .catch(() => {});
 
-export function accountControl(
-  onChanged?: (account: Account) => void,
-): AccountControl {
-  const state = el("p", { class: "hint", text: "…" });
-  const button = el("button", { class: "button", text: "Connect Google Drive" });
-  const node = el(
+  field.addEventListener("blur", () => {
+    const name = field.value.trim();
+    if (name === saved) return;
+    void setMyNameHere(name || null)
+      .then(() => {
+        saved = name;
+      })
+      .catch((err) => toastError("Could not change how you appear here", err));
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      field.blur();
+    }
+  });
+
+  return el(
     "div",
     { class: "field" },
-    el("label", { text: "Google account" }),
-    state,
-    button,
+    el("label", { text: `In ${projectName}` }),
+    field,
+    el("p", {
+      class: "hint",
+      text: "Left empty, your own name shows. Filled in, it is used in this project and nowhere else.",
+    }),
   );
-
-  let connected = false;
-
-  const paint = (account: Account) => {
-    connected = account.connected;
-    if (account.unavailable) {
-      state.textContent = account.unavailable;
-      button.hidden = true;
-      onChanged?.(account);
-      return;
-    }
-    button.hidden = false;
-    button.textContent = account.connected
-      ? "Disconnect"
-      : "Connect Google Drive";
-    state.textContent = account.connected
-      ? "Connected. Each project says for itself whether it syncs."
-      : "Not connected. Connect an account to keep projects on your Drive, so your other devices — and anyone you share one with — can reach them.";
-    onChanged?.(account);
-  };
-
-  const refresh = async (): Promise<Account> => {
-    try {
-      const account = await driveAccount();
-      paint(account);
-      return account;
-    } catch {
-      state.textContent = "Could not read the account.";
-      button.hidden = true;
-      return { connected: false, unavailable: null };
-    }
-  };
-
-  button.onclick = () => {
-    button.disabled = true;
-    const was = connected;
-    void (was ? disconnectDrive() : connectDrive())
-      .then(paint)
-      .catch((err) =>
-        toastError(
-          was ? "Could not disconnect" : "Could not connect to Google Drive",
-          err,
-        ),
-      )
-      .finally(() => {
-        button.disabled = false;
-      });
-  };
-
-  void refresh();
-  return { node, refresh };
 }

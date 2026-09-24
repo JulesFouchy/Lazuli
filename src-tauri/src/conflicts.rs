@@ -10,8 +10,9 @@
 //!
 //! - **Markers inside the file**, which is what git leaves.
 //! - **A second file beside it**, which is what a folder syncer leaves rather
-//!   than touching the contents — Syncthing's `entry.sync-conflict-….md` and
-//!   Dropbox's `entry (Someone's conflicted copy ….md)`.
+//!   than touching the contents — Syncthing's `entry.sync-conflict-….md`,
+//!   Dropbox's `entry (Someone's conflicted copy ….md)`, OneDrive's
+//!   `entry-COMPUTERNAME.md`, and the numbered copies others make.
 //!
 //! Both reduce to the same thing: more than one version of an entry, offered
 //! for the user to pick from. Prose is never merged automatically, which is the
@@ -102,9 +103,9 @@ pub fn of_entry(dir: &Path, contents: &str) -> Option<Conflict> {
 
 /// Files a folder syncer left beside `entry.md` because it would not choose.
 ///
-/// Matched by the names those tools actually use rather than by "any other
-/// `.md`": an entry folder is the user's, and a `notes.md` they put there
-/// themselves is not a conflict.
+/// Matched by shape rather than by "any other `.md`": an entry folder is the
+/// user's, and a `notes.md` they put there themselves is not a conflict. See
+/// [`is_sidecar_name`] for the shape.
 pub fn sidecars(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
@@ -125,13 +126,28 @@ pub fn sidecars(dir: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Whether `name` is a second copy of `entry.md`: `entry`, then something
+/// that is not a letter or a digit, then anything, then `.md`.
+///
+/// Every syncer names its copy by keeping the stem and adding to it, and none
+/// of them agree on what they add — Syncthing appends `.sync-conflict-…`,
+/// Dropbox ` (Someone's conflicted copy …)`, OneDrive `-COMPUTERNAME`, others a
+/// number. Listing them one by one would miss the next one, and a missed copy
+/// is an edit nobody is ever shown. The separator is what keeps `entryway.md`
+/// out.
 fn is_sidecar_name(name: &str) -> bool {
-    if name == ENTRY_FILE || !name.ends_with(".md") {
+    if name == ENTRY_FILE {
         return false;
     }
     let lower = name.to_ascii_lowercase();
-    // Syncthing, then Dropbox.
-    lower.contains(".sync-conflict-") || lower.contains("conflicted copy")
+    let Some(rest) = lower.strip_prefix("entry") else {
+        return false;
+    };
+    lower.ends_with(".md")
+        && rest
+            .chars()
+            .next()
+            .is_some_and(|after| !after.is_ascii_alphanumeric())
 }
 
 /// Split a file holding git conflict markers into the two sides.
@@ -253,7 +269,9 @@ pub fn resolve(
             .map(|(frontmatter, _)| frontmatter.created)
             .unwrap_or_else(|| chrono::Local::now().fixed_offset()),
         image: version.image.clone(),
-        author: existing.and_then(|(frontmatter, _)| frontmatter.author),
+        author: existing.as_ref().and_then(|(frontmatter, _)| frontmatter.author.clone()),
+        // What a newer build wrote into the entry is not the conflict's to lose.
+        rest: existing.map(|(frontmatter, _)| frontmatter.rest).unwrap_or_default(),
     };
     crate::store::write_entry_file(dir, &frontmatter, &version.text)?;
 
@@ -375,8 +393,13 @@ Same sentence either way.
 
     #[test]
     fn the_syncers_own_names_are_recognised() {
+        // Syncthing, Dropbox, OneDrive, and a numbered copy.
         assert!(is_sidecar_name("entry.sync-conflict-20260922-101010-ABCDEFG.md"));
         assert!(is_sidecar_name("entry (Jules's conflicted copy 2026-09-22).md"));
+        assert!(is_sidecar_name("entry-DESKTOP-4F2K9.md"));
+        assert!(is_sidecar_name("entry 2.md"));
+        assert!(is_sidecar_name("entry (1).md"));
+        assert!(is_sidecar_name("Entry-LAPTOP.MD"));
     }
 
     #[test]
@@ -385,6 +408,8 @@ Same sentence either way.
         // of it.
         assert!(!is_sidecar_name("notes.md"));
         assert!(!is_sidecar_name("entry.md"));
+        assert!(!is_sidecar_name("entryway.md"));
+        assert!(!is_sidecar_name("entry 2.jpg"));
         assert!(!is_sidecar_name("README.md"));
         assert!(!is_sidecar_name("photo.jpg"));
     }

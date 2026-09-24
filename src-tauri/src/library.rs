@@ -12,6 +12,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -29,15 +30,23 @@ const LEGACY_FILE: &str = "recent.json";
 /// What the first tab is called until it is renamed.
 const FIRST_TAB: &str = "Projects";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Tab {
     pub name: String,
     pub projects: Vec<PathBuf>,
+    /// Fields this build does not know, carried through a rewrite untouched,
+    /// so that an older build filing a project cannot strip what a newer one
+    /// added to the tab.
+    #[serde(flatten)]
+    pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Library {
     pub tabs: Vec<Tab>,
+    /// As [`Tab::rest`], for the list as a whole.
+    #[serde(flatten)]
+    pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Where a project sits: which tab, and where in it.
@@ -57,7 +66,7 @@ impl Library {
         if self.tabs.is_empty() {
             self.tabs.push(Tab {
                 name: FIRST_TAB.to_string(),
-                projects: Vec::new(),
+                ..Tab::default()
             });
         }
         let mut seen = HashSet::new();
@@ -131,7 +140,7 @@ impl Library {
     pub fn add_tab(&mut self, name: String) -> usize {
         self.tabs.push(Tab {
             name,
-            projects: Vec::new(),
+            ..Tab::default()
         });
         self.tabs.len() - 1
     }
@@ -180,13 +189,63 @@ fn library_file(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_config_dir().ok().map(|dir| dir.join(LIBRARY_FILE))
 }
 
+/// Held across every read-change-write of the list.
+///
+/// Commands run on more than one thread, and two changes interleaved would end
+/// with the second written from a copy that predates the first.
+static LIBRARY: Mutex<()> = Mutex::new(());
+
+/// The list on disk, or why it cannot be had.
+///
+/// No `projects.json` is a first launch — or one from before tabs — and reads
+/// as whatever the flat list held. A file that is there and cannot be read or
+/// parsed is **not** that: read as empty, the next change would write the
+/// emptiness back over every tab the user had arranged. So it is an error,
+/// retried briefly because on Windows a file being renamed over is unopenable
+/// for the duration.
+fn load(app: &AppHandle) -> anyhow::Result<Library> {
+    use anyhow::Context;
+
+    let path = library_file(app).ok_or_else(|| anyhow::anyhow!("the app has no config folder"))?;
+    let mut attempts = 0;
+    loop {
+        let read = match fs::read_to_string(&path) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                let mut library = from_legacy(app);
+                library.tidy();
+                return Ok(library);
+            }
+            read => read
+                .with_context(|| format!("reading {}", path.display()))
+                .and_then(|text| {
+                    serde_json::from_str::<Library>(&text)
+                        .with_context(|| format!("parsing {}", path.display()))
+                }),
+        };
+        match read {
+            Err(err) if attempts < 5 => {
+                attempts += 1;
+                eprintln!("lazuli: project list unreadable, retrying: {err:#}");
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            Err(err) => return Err(err),
+            Ok(mut library) => {
+                library.tidy();
+                return Ok(library);
+            }
+        }
+    }
+}
+
+/// The list for showing. A list that cannot be read shows as empty for that
+/// one paint, which is harmless because nothing reads it this way and then
+/// writes it back.
 pub fn read(app: &AppHandle) -> Library {
-    let mut library = library_file(app)
-        .and_then(|path| fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<Library>(&text).ok())
-        .unwrap_or_else(|| from_legacy(app));
-    library.tidy();
-    library
+    load(app).unwrap_or_else(|_| {
+        let mut library = Library::default();
+        library.tidy();
+        library
+    })
 }
 
 /// Everything the flat recents list held, as a single tab.
@@ -203,7 +262,9 @@ fn from_legacy(app: &AppHandle) -> Library {
         tabs: vec![Tab {
             name: FIRST_TAB.to_string(),
             projects: paths,
+            ..Tab::default()
         }],
+        ..Library::default()
     }
 }
 
@@ -221,8 +282,17 @@ fn write(app: &AppHandle, library: &Library) {
 
 /// Read, change, write. Every mutation goes through here so that none of them
 /// can write a list the invariants do not hold for.
+///
+/// A list that could not be read is not written: the change is made to a copy
+/// so the caller still gets an answer, and is lost, which is a thing the user
+/// can do again — where writing it would lose every tab they had.
 pub fn update<T>(app: &AppHandle, change: impl FnOnce(&mut Library) -> T) -> T {
-    let mut library = read(app);
+    let _held = LIBRARY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Ok(mut library) = load(app).inspect_err(|err| {
+        eprintln!("lazuli: project list not saved: {err:#}");
+    }) else {
+        return change(&mut read(app));
+    };
     let outcome = change(&mut library);
     library.tidy();
     write(app, &library);
@@ -239,15 +309,28 @@ mod tests {
                 Tab {
                     name: "Projects".into(),
                     projects: vec![PathBuf::from("/a"), PathBuf::from("/b")],
+                    ..Tab::default()
                 },
                 Tab {
                     name: "Done".into(),
                     projects: vec![PathBuf::from("/c")],
+                    ..Tab::default()
                 },
             ],
+            ..Library::default()
         };
         library.tidy();
         library
+    }
+
+    #[test]
+    fn a_field_a_newer_build_wrote_survives_a_rewrite() {
+        let text = r#"{ "tabs": [ { "name": "Projects", "projects": [], "colour": "blue" } ], "pinned": ["/a"] }"#;
+        let library: Library = serde_json::from_str(text).expect("should parse");
+        let back: serde_json::Value =
+            serde_json::to_value(&library).expect("should serialise");
+        assert_eq!(back["tabs"][0]["colour"], "blue");
+        assert_eq!(back["pinned"][0], "/a");
     }
 
     #[test]

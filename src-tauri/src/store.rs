@@ -137,14 +137,27 @@ impl ProjectStore {
                 .then_with(|| a_created.cmp(b_created))
                 .then_with(|| a.id.cmp(&b.id))
         });
-        let entries = entries.into_iter().map(|(_, entry)| entry).collect();
+        // An entry written under an id its author has since said is someone
+        // they also are is theirs, and counted as theirs; see `same_as`.
+        let every_author = authors::read_all(&self.root);
+        let entries = entries
+            .into_iter()
+            .map(|(_, mut entry)| {
+                if let Some(id) = &entry.author {
+                    let id = authors::canonical(&every_author, id).to_owned();
+                    entry.author = Some(id);
+                }
+                entry
+            })
+            .collect();
+        let authors = authors::without_aliases(every_author);
 
         Ok(Project {
             root: self.root.clone(),
             meta,
             entries,
             cover_images,
-            authors: authors::read_all(&self.root),
+            authors,
         })
     }
 
@@ -198,6 +211,7 @@ fn stand_in(
             created,
             image: first.and_then(|version| version.image.clone()),
             author: None,
+            rest: Default::default(),
         },
         first.map(|version| version.text.clone()).unwrap_or_default(),
     )
@@ -317,21 +331,9 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
         cover: None,
         date_format: DateFormat::default(),
         sort_order: SortOrder::default(),
+        rest: Default::default(),
     };
     write_meta(root, &meta)?;
-
-    // For a project kept in a repository of its own, which is how a journal
-    // ends up living beside the code it is about. `.lazuli/` is this machine's
-    // account of syncing it, and a clone that inherited another machine's would
-    // read every file the remote has not got as something deleted. Written only
-    // for a new project: an existing one is never rewritten, and its owner can
-    // add the line themselves.
-    let _ = atomic::write(
-        &root.join(".gitignore"),
-        "# This machine's own account of syncing this project.
-.lazuli/
-",
-    );
     Ok(meta)
 }
 
@@ -357,6 +359,7 @@ pub fn create_entry(
             created,
             image: None,
             author: author.map(str::to_owned),
+            rest: Default::default(),
         },
         "",
     )?;
@@ -699,14 +702,63 @@ mod tests {
     }
 
     #[test]
-    fn a_new_project_keeps_its_sync_state_out_of_git() {
-        // A journal kept in the repository it is about would otherwise commit
-        // which remote *this* machine syncs it to, and what the two last
-        // agreed — which another clone would then act on.
-        let dir = TempDir::new("gitignore");
+    fn a_new_project_is_only_its_own_files() {
+        // Everything in a project folder syncs, whatever syncs it, so nothing
+        // this machine alone should know may be written there. The one file
+        // that used to be, a `.gitignore` for a sync base, went with the base.
+        let dir = TempDir::new("new-project-files");
         create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
-        let ignored = fs::read_to_string(dir.0.join(".gitignore")).expect("should read");
-        assert!(ignored.contains(".lazuli/"));
+        let mut names: Vec<String> = fs::read_dir(&dir.0)
+            .expect("should list")
+            .map(|entry| entry.expect("should read").file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, [COVER_DIR, ENTRIES_DIR, META_FILE]);
+    }
+
+    #[test]
+    fn a_field_a_newer_build_wrote_survives_editing_the_project() {
+        // Everyone sharing a folder runs whichever build they have. One that
+        // dropped what it did not understand would strip a newer build's fields
+        // every time it renamed the project.
+        let dir = TempDir::new("meta-rest");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let path = dir.0.join(META_FILE);
+        let written = fs::read_to_string(&path).expect("should read");
+        fs::write(&path, format!("{written}mood: calm\n")).expect("should write");
+
+        let mut meta = read_meta(&dir.0).expect("should read");
+        meta.name = "Renamed".into();
+        write_meta(&dir.0, &meta).expect("should write");
+
+        let after = fs::read_to_string(&path).expect("should read");
+        assert!(after.contains("name: Renamed"));
+        assert!(after.contains("mood: calm"), "{after}");
+    }
+
+    #[test]
+    fn a_field_a_newer_build_wrote_survives_editing_the_entry() {
+        // An older build editing a newer entry used to lose its `author:` this
+        // way, and would lose whatever comes after it just the same.
+        let dir = TempDir::new("entry-rest");
+        let entry = dir.0.join("e");
+        fs::create_dir_all(&entry).expect("should create");
+        let file = entry.join(ENTRY_FILE);
+        fs::write(
+            &file,
+            "---\ndate: 2026-06-10\ncreated: 2026-06-10T09:00:00+02:00\nimage: null\nweather: sunny\n---\n\nBefore.\n",
+        )
+        .expect("should write");
+
+        let (frontmatter, _) = read_entry_file(&file).expect("should read");
+        write_entry_file(&entry, &frontmatter, "After.").expect("should write");
+
+        let after = fs::read_to_string(&file).expect("should read");
+        assert!(after.contains("weather: sunny"), "{after}");
+        assert!(after.contains("After."));
+        // And `created` still round-trips byte for byte: its offset is what
+        // keeps an entry on the day it was written.
+        assert!(after.contains("created: 2026-06-10T09:00:00+02:00"), "{after}");
     }
 
     #[test]
@@ -1047,6 +1099,7 @@ mod tests {
             cover: Some("sunset-take2.jpg".into()),
             date_format: DateFormat::Day,
             sort_order: SortOrder::Oldest,
+            rest: Default::default(),
         };
         let yaml = serde_yaml::to_string(&meta).expect("should serialise");
         assert!(yaml.contains("start_date: 2026-06-01"));

@@ -87,7 +87,7 @@ export interface AuthorProfile {
   name: string;
   /** Picture filename, beside the record in `authors/<id>/`. */
   avatar: string | null;
-  /** Accounts this author signs in with, as `<backend>:<id>`. */
+  /** Accounts an older, Drive-syncing build recorded. Read by nothing. */
   accounts: string[];
   /** What to call them in this project, when that differs from `name`. */
   display_name: string | null;
@@ -113,64 +113,8 @@ export const setMyAvatar = (filename: string, bytes: Uint8Array) =>
 
 export const clearMyAvatar = () => invoke<MyProfile>("clear_my_avatar");
 
-/** The Google account the app is signed in to, if any. */
-export interface Account {
-  connected: boolean;
-  /** Why signing in is impossible in this build, or null when it is possible. */
-  unavailable: string | null;
-}
-
-/** Whether a project syncs, and what went wrong last time it tried. */
-export interface SyncStatus {
-  on: boolean;
-  problem: string | null;
-}
-
-export const driveAccount = () => invoke<Account>("drive_account");
-export const connectDrive = () => invoke<Account>("connect_drive");
-export const disconnectDrive = () => invoke<Account>("disconnect_drive");
-
-export const syncStatus = (path: string) =>
-  invoke<SyncStatus>("sync_status", { path });
-export const startSyncing = (path: string) =>
-  invoke<SyncStatus>("start_syncing", { path });
-export const stopSyncing = (path: string) =>
-  invoke<SyncStatus>("stop_syncing", { path });
-export const syncNow = (path: string) => invoke<SyncStatus>("sync_now", { path });
-
-/** One person a synced project's Drive folder is shared with. */
-export interface Member {
-  /** The Drive permission, which is what removing them needs. */
-  id: string;
-  /** `owner`, `writer`, `commenter` or `reader` — Drive's own, and enforced by it. */
-  role: string;
-  email: string;
-  name: string;
-}
-
-/** Who a project is shared with, and what the people invited look for. */
-export interface Sharing {
-  /**
-   * The Drive folder's own name, `Lazuli | <project>`.
-   *
-   * What to tell the people invited, so they know which folder to choose in
-   * Google's chooser. Empty for a project that syncs nowhere.
-   */
-  invite: string;
-  members: Member[];
-}
-
-export const projectMembers = (path: string) =>
-  invoke<Sharing>("project_members", { path });
-
-export const shareProject = (path: string, email: string, role: string) =>
-  invoke<Sharing>("share_project", { path, email, role });
-
-export const unshareProject = (path: string, permission: string) =>
-  invoke<Sharing>("unshare_project", { path, permission });
-
 /**
- * Set, or clear, what you are called in this project alone.
+ * Set, or clear, what you are called in the open project alone.
  *
  * The Discord model: your name is yours everywhere until you decide it is not,
  * and then only here.
@@ -178,15 +122,26 @@ export const unshareProject = (path: string, permission: string) =>
 export const setMyNameHere = (name: string | null) =>
   invoke<void>("set_my_name_here", { name });
 
+/** What you are called in the open project, when that differs from your name. */
+export const myNameHere = () => invoke<string | null>("my_name_here");
+
 /**
- * Take a project somebody shared, through Google's own file chooser.
+ * Authors in the open project this device might be, by id.
  *
- * Opens in the user's browser rather than in here: the chooser is Google's own
- * page, shown as part of a consent. Resolves with where the project landed, or
- * null if they chose nothing.
+ * Nothing carries who you are from one device to the next, so a device that
+ * opens a project it has not written in yet asks. Empty when there is nothing
+ * to ask.
  */
-export const addSharedProject = () =>
-  invoke<string | null>("add_shared_project");
+export const unclaimedAuthors = () => invoke<string[]>("unclaimed_authors");
+
+/**
+ * Say which of `offered` is you, or `null` for none of them.
+ *
+ * Choosing one adopts it whole, name and picture included; the rest are
+ * remembered as somebody else and not asked about again.
+ */
+export const claimAuthor = (me: string | null, offered: string[]) =>
+  invoke<MyProfile>("claim_author", { me, offered });
 
 export interface Project {
   root: string;

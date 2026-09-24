@@ -16,7 +16,6 @@ use crate::library::{self, Slot};
 use crate::model::{is_image, DateFormat, Project, ProjectMeta, SortOrder};
 use crate::paths::{folder_name_for, is_named_after, unique_path};
 use crate::store::{self, ProjectStore};
-use crate::syncing;
 use crate::theme;
 use crate::thumbs;
 use crate::trashcan;
@@ -74,9 +73,6 @@ struct OpenProject {
     snapshot: Project,
     /// Held so the watcher stays alive. Taken and stopped by [`Self::close`].
     watcher: Option<ProjectWatcher>,
-    /// Reconciles this project with its remote while it is open, if it has one.
-    /// Stops when dropped, so closing the project ends it.
-    _syncing: syncing::Loop,
     undo: Vec<Trashed>,
 }
 
@@ -262,9 +258,6 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
             store,
             snapshot: snapshot.clone(),
             watcher: Some(watcher),
-            // Started whether or not this project syncs: it costs a sleeping
-            // thread, and the user can turn syncing on without reopening.
-            _syncing: syncing::Loop::start(app.clone(), path.clone()),
             undo: Vec::new(),
         });
     if let Some(open) = replaced {
@@ -518,19 +511,17 @@ pub fn create_entry(
     let avatar = avatar_path(&app);
     Ok(with_project(&app, &state, |open| {
         let root = root_of(open);
-        // Resolved against this project, so a second device writes as the author
-        // it already is rather than as a new one.
-        let me = author_here(&app, &root);
+        let me = author(&app);
         // Writing to the project is what publishes the name, so that a project
         // only ever read does not gain a folder naming whoever looked at it.
-        if let Some((id, name, account)) = &me {
-            authors::publish(&root, id, name, avatar.as_deref(), account.as_deref());
+        if let Some((id, name)) = &me {
+            authors::publish(&root, id, name, avatar.as_deref());
         }
         store::create_entry(
             &root,
             date,
             Local::now().fixed_offset(),
-            me.as_ref().map(|(id, _, _)| id.as_str()),
+            me.as_ref().map(|(id, _)| id.as_str()),
         )
     })?)
 }
@@ -1143,9 +1134,36 @@ pub fn restore_trashed(app: AppHandle, state: State<AppState>, id: String) -> Cm
 
 const SETTINGS_FILE: &str = "settings.json";
 
+/// Who the user is, kept apart from everything else. See [`Settings`].
+const ME_FILE: &str = "profile.json";
+
+/// The fields of [`Settings`] that live in [`ME_FILE`], by their names on disk.
+const ME_FIELDS: [&str; 4] = ["author_id", "author_name", "author_avatar", "not_me"];
+
+/// Fields an earlier build wrote that nothing reads any more, and that are not
+/// carried through a rewrite the way an unknown field is: the Google sign-in of
+/// the builds that synced through Drive. A refresh token nothing uses is a
+/// credential lying about, and the sooner it goes the better.
+const RETIRED_FIELDS: [&str; 2] = ["drive_tokens", "drive_account"];
+
 /// App-level settings, kept next to the project list rather than in any
 /// project folder.
-#[derive(Debug, Default, Serialize, serde::Deserialize)]
+///
+/// Stored in two files, and the split is the fix for a loss that kept
+/// happening. `settings.json` has been written by every release, and 0.4.0
+/// knows four fields of it: whenever it saved — and the theme is saved on every
+/// launch — it wrote back those four and nothing else, taking the name, the
+/// picture and the author id with it whenever a release and a newer build
+/// shared a machine. So:
+///
+/// - What this machine looks like stays in `settings.json`, where every release
+///   expects it.
+/// - Who the user is lives in `profile.json`, which no earlier release knows
+///   exists, and so none can rewrite.
+/// - Both carry the fields they do not know through a rewrite, in `rest`, so
+///   that the next time one build falls behind another, the older one cannot
+///   strip what the newer wrote.
+#[derive(Debug, Default)]
 struct Settings {
     /// Where the "new project" dialog opens. Updated whenever a project is
     /// created somewhere else, so the app follows wherever you keep them.
@@ -1166,9 +1184,9 @@ struct Settings {
     /// Global rather than per project, and per *person* rather than per
     /// install: a second device is meant to end up with this same id, so that a
     /// phone and a laptop are one author rather than two collaborators. Nothing
-    /// carries it across yet — that happens when a project can be synced, by
-    /// matching the account in a project's `authors/` folder — so a second
-    /// machine mints its own for now and the two are reconciled then.
+    /// carries it across on its own — there is no account to — so a device
+    /// opening a project whose authors it does not know asks which of them it
+    /// is, and adopts the answer. See [`claim_author`].
     author_id: Option<String>,
     /// The name published into the projects this user writes to. Defaulted from
     /// the machine, and theirs to change.
@@ -1177,39 +1195,46 @@ struct Settings {
     /// rather than in any project, because it is the user's and not a
     /// project's; each project gets a copy when they write in it.
     author_avatar: Option<String>,
-    /// The Google account the app is signed in to, when it is.
+    /// Authors this user has said they are not, so they are asked once.
     ///
-    /// In the app's own config folder rather than the OS keychain, which would
-    /// be a new dependency and three platform implementations. The scope is
-    /// `drive.file`, so what this reaches is the files Lazuli itself made — and
-    /// the folder it sits in is the user's own. Worth revisiting; see
-    /// `ideas/`.
-    drive_tokens: Option<crate::drive::Tokens>,
-    /// Which Google account those tokens belong to, as `google:<permissionId>`.
-    ///
-    /// Asked for once, when connecting, rather than per write: it is what a
-    /// second device looks itself up by in a project's `authors/`, and a round
-    /// trip to Google before every entry would be absurd.
-    drive_account: Option<String>,
+    /// Kept by author rather than by project: somebody who shares three
+    /// projects with you is somebody you should only have to say "not me" about
+    /// once.
+    not_me: Vec<String>,
+    /// What `settings.json` held that this build does not know.
+    machine_rest: serde_json::Map<String, serde_json::Value>,
+    /// What `profile.json` held that this build does not know.
+    me_rest: serde_json::Map<String, serde_json::Value>,
 }
 
-/// The connected account's id, or `None` when none is.
-pub fn drive_account_id(app: &AppHandle) -> Option<String> {
-    read_settings(app).drive_account
+/// `settings.json` as it is on disk.
+#[derive(Debug, Default, Serialize, serde::Deserialize)]
+struct MachineFile {
+    #[serde(default)]
+    projects_dir: Option<PathBuf>,
+    #[serde(default)]
+    theme: Option<String>,
+    #[serde(default)]
+    background_dark: Option<String>,
+    #[serde(default)]
+    background_light: Option<String>,
+    #[serde(flatten)]
+    rest: serde_json::Map<String, serde_json::Value>,
 }
 
-pub fn set_drive_account_id(app: &AppHandle, account: Option<String>) {
-    save_settings(app, |settings| settings.drive_account = account);
-}
-
-/// The signed-in Google account's tokens, if there are any.
-pub fn drive_tokens(app: &AppHandle) -> Option<crate::drive::Tokens> {
-    read_settings(app).drive_tokens
-}
-
-/// Remember, or forget, the signed-in account.
-pub fn set_drive_tokens(app: &AppHandle, tokens: Option<crate::drive::Tokens>) {
-    save_settings(app, |settings| settings.drive_tokens = tokens);
+/// `profile.json` as it is on disk.
+#[derive(Debug, Default, Serialize, serde::Deserialize)]
+struct MeFile {
+    #[serde(default)]
+    author_id: Option<String>,
+    #[serde(default)]
+    author_name: Option<String>,
+    #[serde(default)]
+    author_avatar: Option<String>,
+    #[serde(default)]
+    not_me: Vec<String>,
+    #[serde(flatten)]
+    rest: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The user's own profile, as the button and the dialog show it.
@@ -1309,6 +1334,13 @@ pub fn set_my_avatar(
     filename: String,
     bytes: Vec<u8>,
 ) -> CmdResult<MyProfile> {
+    keep_avatar(&app, &filename, &bytes)?;
+    republish(&app, &state);
+    Ok(my_profile(app))
+}
+
+/// Make `bytes` the user's picture, named after `filename`'s extension.
+fn keep_avatar(app: &AppHandle, filename: &str, bytes: &[u8]) -> Result<()> {
     let directory = app
         .path()
         .app_config_dir()
@@ -1319,26 +1351,23 @@ pub fn set_my_avatar(
     // One fixed stem, so changing the picture replaces the old one instead of
     // leaving a folder of every picture ever chosen. The extension follows the
     // source, because it is what says how to decode it.
-    let extension = Path::new(&filename)
+    let extension = Path::new(filename)
         .extension()
         .and_then(|extension| extension.to_str())
         .filter(|extension| is_image(&format!("x.{extension}")))
         .unwrap_or("png")
         .to_ascii_lowercase();
     let name = format!("avatar.{extension}");
-    atomic::write(&directory.join(&name), &bytes)
-        .with_context(|| format!("writing {name}"))?;
+    atomic::write(&directory.join(&name), bytes).with_context(|| format!("writing {name}"))?;
 
-    update_settings(&app, |settings| {
+    update_settings(app, |settings| {
         // An old picture with a different extension would otherwise sit there
         // unreferenced for good.
         if let Some(previous) = settings.author_avatar.take().filter(|previous| previous != &name) {
             let _ = fs::remove_file(directory.join(previous));
         }
         settings.author_avatar = Some(name);
-    })?;
-    republish(&app, &state);
-    Ok(my_profile(app))
+    })
 }
 
 #[tauri::command]
@@ -1353,51 +1382,130 @@ pub fn clear_my_avatar(app: AppHandle, state: State<AppState>) -> MyProfile {
     my_profile(app)
 }
 
-/// Who the user is *in this project*, adopting the author they already are.
+/// Authors in the open project that this device might be.
 ///
-/// An author id is per machine, because the settings that hold it are. What
-/// crosses is the account: a record in the project's `authors/` that lists this
-/// user's Google account **is** this user, written from their other device, and
-/// joining it is the difference between one person and a crowd of one-per-
-/// machine. The adoption is remembered, so it happens once.
-fn author_here(app: &AppHandle, root: &Path) -> Option<(String, String, Option<String>)> {
-    let (mut id, name) = author(app)?;
-    let account = drive_account_id(app);
-    if let Some(account) = &account {
-        if let Some(theirs) = authors::id_for_account(root, account) {
-            if theirs != id {
-                let adopted = theirs.clone();
-                save_settings(app, |settings| settings.author_id = Some(adopted));
-                id = theirs;
+/// Nothing carries an author id from one machine to the next — there is no
+/// account for it to travel in — so a laptop and a phone would otherwise be two
+/// people, and a journal kept by one person would start showing names. Instead,
+/// a device that opens a project where it is not yet an author is asked which
+/// of the ones there it is.
+///
+/// Empty when there is nothing to ask: this device already writes here, or
+/// every author here is one it has been told is someone else. Aliases are left
+/// out, being somebody already asked about under another id.
+#[tauri::command]
+pub fn unclaimed_authors(app: AppHandle, state: State<AppState>) -> Vec<String> {
+    let settings = read_settings(&app);
+    let Ok(root) = with_project(&app, &state, |open| Ok(root_of(open))) else {
+        return Vec::new();
+    };
+    let here = authors::read_all(&root);
+    if settings
+        .author_id
+        .as_ref()
+        .is_some_and(|mine| here.contains_key(mine))
+    {
+        return Vec::new();
+    }
+    let mut unclaimed: Vec<String> = here
+        .into_iter()
+        .filter(|(id, profile)| profile.same_as.is_none() && !settings.not_me.contains(id))
+        .map(|(id, _)| id)
+        .collect();
+    unclaimed.sort();
+    unclaimed
+}
+
+/// Settle who this device is, from the authors [`unclaimed_authors`] offered.
+///
+/// `me` is the one chosen, or `None` for "none of these"; every other id in
+/// `offered` is remembered as not this user, so they are not asked about again.
+///
+/// Claiming an author adopts it whole — its id, its name and its picture —
+/// which is also how a new device gets a profile it was never given. An id this
+/// device had already been writing under is not lost: its records in the
+/// projects on the list are marked as the same person, so its entries are
+/// counted as the claimed author's rather than a stranger's. The entries
+/// themselves are never rewritten.
+#[tauri::command]
+pub fn claim_author(
+    app: AppHandle,
+    state: State<AppState>,
+    me: Option<String>,
+    offered: Vec<String>,
+) -> CmdResult<MyProfile> {
+    let root = with_project(&app, &state, |open| Ok(root_of(open)))?;
+    let previous = read_settings(&app).author_id;
+
+    let claimed = match &me {
+        Some(id) => Some(
+            authors::read_all(&root)
+                .remove(id)
+                .ok_or_else(|| anyhow!("there is no author {id} in this project"))?,
+        ),
+        None => None,
+    };
+
+    update_settings(&app, |settings| {
+        for id in &offered {
+            if Some(id) != me.as_ref() && !settings.not_me.contains(id) {
+                settings.not_me.push(id.clone());
+            }
+        }
+        if let (Some(id), Some(profile)) = (&me, &claimed) {
+            settings.author_id = Some(id.clone());
+            settings.author_name = Some(profile.name.clone());
+        }
+    })?;
+
+    if let (Some(id), Some(profile)) = (&me, &claimed) {
+        // The picture is copied rather than pointed at: the project may be
+        // removed from this machine, and the profile is not the project's.
+        if let Some(picture) = &profile.avatar {
+            let source = root.join(authors::AUTHORS_DIR).join(id).join(picture);
+            if let Ok(bytes) = fs::read(&source) {
+                keep_avatar(&app, picture, &bytes)?;
+            }
+        }
+        if let Some(previous) = previous.filter(|previous| previous != id) {
+            let library = library::read(&app);
+            for project in library.tabs.iter().flat_map(|tab| &tab.projects) {
+                authors::mark_same_as(project, &previous, id);
             }
         }
     }
-    Some((id, name, account))
+    Ok(my_profile(app))
 }
 
-/// Put a project at the top of the first tab, as an arrival rather than a
-/// rearrangement.
-pub fn file_project_at_top(app: &AppHandle, path: PathBuf) {
-    library::update(app, |library| {
-        library.insert(path, Slot { tab: 0, index: 0 })
-    });
+/// What this user is called in the open project alone, when that differs.
+#[tauri::command]
+pub fn my_name_here(app: AppHandle, state: State<AppState>) -> Option<String> {
+    let id = read_settings(&app).author_id?;
+    with_project(&app, &state, |open| Ok(root_of(open)))
+        .ok()
+        .and_then(|root| authors::read_all(&root).remove(&id))
+        .and_then(|profile| profile.display_name)
 }
 
-/// Change what this user is called in the open project alone.
+/// Set, or clear, what this user is called in the open project alone.
 ///
 /// The record is theirs to write, which is what keeps the registry free of
-/// conflicts, so this only ever touches their own folder.
-pub fn set_display_name_here(
-    app: &AppHandle,
-    state: &State<AppState>,
-    name: Option<&str>,
-) -> Result<()> {
-    with_project(app, state, |open| {
+/// conflicts, so this only ever touches their own folder — publishing it first
+/// if they have not written here yet, since there is nothing to rename until
+/// there is a record.
+#[tauri::command]
+pub fn set_my_name_here(
+    app: AppHandle,
+    state: State<AppState>,
+    name: Option<String>,
+) -> CmdResult<()> {
+    let avatar = avatar_path(&app);
+    Ok(with_project(&app, &state, |open| {
         let root = root_of(open);
-        let (id, _, _) =
-            author_here(app, &root).ok_or_else(|| anyhow!("there is no profile to rename"))?;
-        authors::set_display_name(&root, &id, name)
-    })
+        let (id, published) = author(&app).ok_or_else(|| anyhow!("there is no profile to rename"))?;
+        authors::publish(&root, &id, &published, avatar.as_deref());
+        authors::set_display_name(&root, &id, name.as_deref())
+    })?)
 }
 
 /// Push a changed profile into the project on screen, if there is one.
@@ -1410,8 +1518,8 @@ fn republish(app: &AppHandle, state: &State<AppState>) {
     let avatar = avatar_path(app);
     let _ = with_project(app, state, |open| {
         let root = root_of(open);
-        if let Some((id, name, account)) = author_here(app, &root) {
-            authors::publish(&root, &id, &name, avatar.as_deref(), account.as_deref());
+        if let Some((id, name)) = author(app) {
+            authors::publish(&root, &id, &name, avatar.as_deref());
         }
         Ok(())
     });
@@ -1509,45 +1617,78 @@ pub fn default_projects_dir(app: AppHandle) -> PathBuf {
     dir
 }
 
-fn settings_file(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join(SETTINGS_FILE))
+fn config_dir(app: &AppHandle) -> Result<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .map_err(|_| anyhow!("the app has no config folder"))
 }
 
-/// Held across every read-modify-write of the settings file.
+/// Held across every read-modify-write of the settings.
 ///
-/// The sync loop refreshes tokens on its own thread while the page saves a
-/// theme on the main one; two of those interleaved end with whichever wrote
-/// second having written from a copy that predates the first.
+/// Commands run on more than one thread; two changes interleaved would end with
+/// whichever wrote second having written from a copy that predates the first.
 static SETTINGS: Mutex<()> = Mutex::new(());
 
-/// The settings in `path`, or why they cannot be had.
+/// A JSON file's contents, or `None` when there is no such file.
 ///
-/// A file that is not there is a fresh install and means empty settings. A
-/// file that is there and cannot be read or parsed is something else — a
-/// rename mid-flight, another instance's handle, a bad byte — and is **not**
-/// empty settings. Reading it as empty is what used to lose the Google
-/// sign-in, the name and the picture all at once: the next writer took the
-/// emptiness for the truth and persisted it, and `author` minted a new
-/// identity on top.
-fn settings_at(path: &Path) -> Result<Settings> {
+/// A file that is not there is a fresh install and means empty settings. A file
+/// that is there and cannot be read or parsed is something else — a rename
+/// mid-flight, another instance's handle, a bad byte — and is **not** empty
+/// settings: reading it as empty is how a name, a picture and an identity were
+/// once lost at a stroke, when the next writer took the emptiness for the truth.
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Settings::default());
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(err).with_context(|| format!("reading {}", path.display())),
     };
-    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+    serde_json::from_str(&text)
+        .map(Some)
+        .with_context(|| format!("parsing {}", path.display()))
+}
+
+/// The settings kept in `dir`, or why they cannot be had.
+fn settings_at(dir: &Path) -> Result<Settings> {
+    let mut machine: MachineFile = read_json(&dir.join(SETTINGS_FILE))?.unwrap_or_default();
+    let me: MeFile = match read_json(&dir.join(ME_FILE))? {
+        Some(me) => me,
+        // Before `profile.json` existed, the builds that had a profile kept it
+        // in `settings.json`, where it arrives here as fields this struct does
+        // not know. Taken from there once; the first save moves it for good.
+        None => {
+            let carried: serde_json::Map<String, serde_json::Value> = ME_FIELDS
+                .iter()
+                .filter_map(|field| Some((field.to_string(), machine.rest.get(*field)?.clone())))
+                .collect();
+            serde_json::from_value(serde_json::Value::Object(carried)).unwrap_or_default()
+        }
+    };
+    // Wherever the profile came from, `settings.json` is not where it lives.
+    for field in ME_FIELDS.iter().chain(&RETIRED_FIELDS) {
+        machine.rest.remove(*field);
+    }
+    Ok(Settings {
+        projects_dir: machine.projects_dir,
+        theme: machine.theme,
+        background_dark: machine.background_dark,
+        background_light: machine.background_light,
+        author_id: me.author_id,
+        author_name: me.author_name,
+        author_avatar: me.author_avatar,
+        not_me: me.not_me,
+        machine_rest: machine.rest,
+        me_rest: me.rest,
+    })
 }
 
 /// The settings, retrying briefly: on Windows a file that is being renamed
 /// over is unopenable for the duration, and another instance of the app may
 /// be doing exactly that.
 fn load_settings(app: &AppHandle) -> Result<Settings> {
-    let path = settings_file(app).ok_or_else(|| anyhow!("the app has no config folder"))?;
+    let dir = config_dir(app)?;
     let mut attempts = 0;
     loop {
-        match settings_at(&path) {
+        match settings_at(&dir) {
             Err(err) if attempts < 5 => {
                 attempts += 1;
                 eprintln!("lazuli: settings unreadable, retrying: {err:#}");
@@ -1586,12 +1727,36 @@ fn save_settings(app: &AppHandle, change: impl FnOnce(&mut Settings)) {
 }
 
 fn write_settings(app: &AppHandle, settings: &Settings) -> Result<()> {
-    let path = settings_file(app).ok_or_else(|| anyhow!("the app has no config folder"))?;
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let text = serde_json::to_string_pretty(settings).context("serialising the settings")?;
-    atomic::write(&path, text)
+    write_settings_to(&config_dir(app)?, settings)
+}
+
+/// Write both files. The profile first: a run stopped between the two leaves a
+/// `profile.json` that is complete and a `settings.json` that still carries the
+/// old copy of it, and the profile file is the one that wins.
+fn write_settings_to(dir: &Path, settings: &Settings) -> Result<()> {
+    let _ = fs::create_dir_all(dir);
+    let me = MeFile {
+        author_id: settings.author_id.clone(),
+        author_name: settings.author_name.clone(),
+        author_avatar: settings.author_avatar.clone(),
+        not_me: settings.not_me.clone(),
+        rest: settings.me_rest.clone(),
+    };
+    let machine = MachineFile {
+        projects_dir: settings.projects_dir.clone(),
+        theme: settings.theme.clone(),
+        background_dark: settings.background_dark.clone(),
+        background_light: settings.background_light.clone(),
+        rest: settings.machine_rest.clone(),
+    };
+    atomic::write(
+        &dir.join(ME_FILE),
+        serde_json::to_string_pretty(&me).context("serialising the profile")?,
+    )?;
+    atomic::write(
+        &dir.join(SETTINGS_FILE),
+        serde_json::to_string_pretty(&machine).context("serialising the settings")?,
+    )
 }
 
 /// Remember where a project was created, so the next one is offered the same
@@ -1644,22 +1809,124 @@ mod tests {
     #[test]
     fn no_settings_file_is_empty_settings() {
         let dir = scratch("settings-missing");
-        let settings = settings_at(&dir.join("settings.json")).expect("a fresh install reads");
-        assert!(settings.drive_tokens.is_none());
+        let settings = settings_at(&dir).expect("a fresh install reads");
         assert!(settings.author_id.is_none());
+        assert!(settings.not_me.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_settings_file_that_will_not_parse_is_not_empty_settings() {
-        // The bug this guards against: a file present but unreadable came back
-        // as defaults, the next writer persisted them, and the sign-in, the
-        // name and the picture were gone together. Broken must stay an error,
-        // so nothing downstream takes it for a blank slate.
+        // A file present but unreadable once came back as defaults, the next
+        // writer persisted them, and the name and the picture were gone
+        // together. Broken must stay an error, so nothing downstream takes it
+        // for a blank slate — and that holds for either file.
         let dir = scratch("settings-broken");
-        let path = dir.join("settings.json");
-        fs::write(&path, "{ \"drive_tokens\": { \"refresh_token\": ").unwrap();
-        assert!(settings_at(&path).is_err());
+        fs::write(dir.join(SETTINGS_FILE), "{ \"theme\": \"da").unwrap();
+        assert!(settings_at(&dir).is_err());
+
+        let dir2 = scratch("profile-broken");
+        fs::write(dir2.join(ME_FILE), "{ \"author_id\": \"a1b2").unwrap();
+        assert!(settings_at(&dir2).is_err());
+        let _ = fs::remove_dir_all(dir);
+        let _ = fs::remove_dir_all(dir2);
+    }
+
+    #[test]
+    fn a_rewrite_by_the_0_4_release_cannot_take_the_profile_with_it() {
+        // The loss this split exists for: 0.4.0 reads `settings.json` into four
+        // fields and writes those four back. Simulate exactly that write, over
+        // a machine that had a profile, and the profile must still be there.
+        let dir = scratch("settings-release");
+        let mut settings = Settings {
+            theme: Some("dark".into()),
+            author_id: Some("me".into()),
+            author_name: Some("Jules".into()),
+            author_avatar: Some("avatar.png".into()),
+            ..Settings::default()
+        };
+        write_settings_to(&dir, &settings).unwrap();
+
+        fs::write(
+            dir.join(SETTINGS_FILE),
+            r#"{ "projects_dir": null, "theme": "light", "background_dark": null, "background_light": null }"#,
+        )
+        .unwrap();
+
+        settings = settings_at(&dir).unwrap();
+        assert_eq!(settings.theme.as_deref(), Some("light"), "the release's own change stands");
+        assert_eq!(settings.author_id.as_deref(), Some("me"));
+        assert_eq!(settings.author_name.as_deref(), Some("Jules"));
+        assert_eq!(settings.author_avatar.as_deref(), Some("avatar.png"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_field_this_build_does_not_know_survives_a_rewrite() {
+        // So the next build that falls behind another cannot do what 0.4.0 did.
+        let dir = scratch("settings-unknown");
+        fs::write(
+            dir.join(SETTINGS_FILE),
+            r#"{ "theme": "dark", "from_the_future": [1, 2] }"#,
+        )
+        .unwrap();
+        fs::write(dir.join(ME_FILE), r#"{ "author_id": "me", "pronouns": "they" }"#).unwrap();
+
+        let mut settings = settings_at(&dir).unwrap();
+        settings.theme = Some("light".into());
+        write_settings_to(&dir, &settings).unwrap();
+
+        let machine: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(SETTINGS_FILE)).unwrap()).unwrap();
+        let me: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(ME_FILE)).unwrap()).unwrap();
+        assert_eq!(machine["from_the_future"], serde_json::json!([1, 2]));
+        assert_eq!(machine["theme"], "light");
+        assert_eq!(me["pronouns"], "they");
+        assert_eq!(me["author_id"], "me");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_profile_kept_in_settings_json_by_an_earlier_build_moves_out() {
+        // The dev builds before the split wrote the profile into
+        // `settings.json`. It is read from there once and saved where it
+        // belongs, and does not stay behind as a second copy.
+        let dir = scratch("settings-migrate");
+        fs::write(
+            dir.join(SETTINGS_FILE),
+            r#"{ "theme": "dark", "author_id": "me", "author_name": "Jules", "not_me": ["ana"] }"#,
+        )
+        .unwrap();
+
+        let settings = settings_at(&dir).unwrap();
+        assert_eq!(settings.author_id.as_deref(), Some("me"));
+        assert_eq!(settings.not_me, ["ana"]);
+        write_settings_to(&dir, &settings).unwrap();
+
+        let machine = fs::read_to_string(dir.join(SETTINGS_FILE)).unwrap();
+        assert!(!machine.contains("author_id"), "the profile left settings.json");
+        let again = settings_at(&dir).unwrap();
+        assert_eq!(again.author_name.as_deref(), Some("Jules"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_google_sign_in_of_the_drive_builds_is_dropped() {
+        // Unknown fields are carried through a rewrite; a refresh token that
+        // nothing uses is deliberately not.
+        let dir = scratch("settings-drive");
+        fs::write(
+            dir.join(SETTINGS_FILE),
+            r#"{ "author_id": "me", "drive_tokens": { "refresh_token": "x" }, "drive_account": "google:1" }"#,
+        )
+        .unwrap();
+        let settings = settings_at(&dir).expect("an old file reads");
+        assert_eq!(settings.author_id.as_deref(), Some("me"));
+        write_settings_to(&dir, &settings).unwrap();
+        let machine = fs::read_to_string(dir.join(SETTINGS_FILE)).unwrap();
+        assert!(!machine.contains("drive_tokens"));
+        assert!(!machine.contains("refresh_token"));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1668,11 +1935,10 @@ mod tests {
         // Every field is optional, so a file that predates the newest of them
         // is a fresh install for that field and nothing else.
         let dir = scratch("settings-old");
-        let path = dir.join("settings.json");
-        fs::write(&path, "{ \"theme\": \"dark\" }").unwrap();
-        let settings = settings_at(&path).expect("an old file reads");
+        fs::write(dir.join(SETTINGS_FILE), "{ \"theme\": \"dark\" }").unwrap();
+        let settings = settings_at(&dir).expect("an old file reads");
         assert_eq!(settings.theme.as_deref(), Some("dark"));
-        assert!(settings.drive_tokens.is_none());
+        assert!(settings.not_me.is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 }

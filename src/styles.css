@@ -1052,9 +1052,9 @@ body.dragging * {
   font-style: italic;
 }
 
-/* Who a shared project is shared with. Drive's roles, shown as what they mean
-   rather than as what Drive calls them. */
-.members {
+/* "Which of these is you?": the authors of a project this device has not
+   written in yet, one row each, the whole row the button. */
+.claim {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -1062,39 +1062,28 @@ body.dragging * {
   overflow: hidden;
 }
 
-.members__row {
+.claim__row {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
   padding: 8px 12px;
   background: var(--bg-raised);
+  border: none;
   border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.members__row:last-child {
+.claim__row:last-child {
   border-bottom: none;
 }
 
-.members__who {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.members__email {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.members__role {
-  font-size: 12px;
-  color: var(--text-dim);
-  white-space: nowrap;
+.claim__row:hover,
+.claim__row:focus-visible {
+  background: var(--bg-inset);
 }
 
 /* A picture of a person is round everywhere else, and round is also what tells

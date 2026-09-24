@@ -2,9 +2,3 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/binaries/
-
-# What a machine knows about syncing a project: which remote it uses, and what
-# the two last agreed on. Per device by design — a checkout that inherited
-# another machine's would read every file the remote has not got as something
-# deleted. See `sync.rs`.
-.lazuli/

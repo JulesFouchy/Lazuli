@@ -28,6 +28,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -71,6 +72,13 @@ pub struct Marker {
     /// than never seen. Dropping it is what would resurrect the entry.
     #[serde(default)]
     pub purged: bool,
+    /// Fields this build does not know, carried through a rewrite untouched.
+    ///
+    /// A project folder is written by whichever build each person has, and a
+    /// build that dropped what it did not understand would strip a newer
+    /// build's fields every time it saved. This one is rewritten when its payload is purged.
+    #[serde(flatten)]
+    pub rest: BTreeMap<String, serde_yaml::Value>,
 }
 
 /// One thing in the trash, as the UI lists it.
@@ -170,6 +178,7 @@ pub fn put(root: &Path, path: &Path, by: Option<&str>) -> Result<String> {
         deleted: Utc::now().into(),
         by: by.map(str::to_owned),
         purged: false,
+        rest: BTreeMap::new(),
     };
     write_marker(&folder, &marker)?;
     Ok(id)
@@ -378,6 +387,27 @@ fn read_marker(folder: &Path) -> Result<Marker> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_field_a_newer_build_wrote_survives_the_marker_being_rewritten() {
+        // A marker is rewritten when its payload is purged, by whichever build
+        // happens to open the project thirty days later.
+        let folder = std::env::temp_dir().join(format!("lazuli-marker-rest-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).expect("should create");
+        fs::write(
+            folder.join(MARKER_FILE),
+            "path: entries/e\ndeleted: 2026-06-10T09:00:00+02:00\nby: null\npurged: false\nreason: tidying\n",
+        )
+        .expect("should write");
+
+        let marker = read_marker(&folder).expect("should read");
+        write_marker(&folder, &Marker { purged: true, ..marker }).expect("should write");
+
+        let after = fs::read_to_string(folder.join(MARKER_FILE)).expect("should read");
+        assert!(after.contains("purged: true"));
+        assert!(after.contains("reason: tidying"), "{after}");
+        let _ = fs::remove_dir_all(&folder);
+    }
 
     struct TempDir(PathBuf);
 

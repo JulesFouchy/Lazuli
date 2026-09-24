@@ -15,8 +15,9 @@ import type {
 } from "./api";
 import {
   addProject as fileProject,
-  addSharedProject,
   addTab,
+  assetUrl,
+  claimAuthor,
   createEntry,
   defaultProjectsDir,
   deleteTab,
@@ -33,14 +34,10 @@ import {
   setProjectName,
   setSortOrder,
   showSmall,
-  startSyncing,
   startupProject,
-  stopSyncing,
-  syncNow,
-  syncStatus,
-  type SyncStatus,
   trashProject,
   undoDelete,
+  unclaimedAuthors,
 } from "./api";
 import { openAppearanceDialog } from "./appearance";
 import { whileBusy } from "./busy";
@@ -73,10 +70,14 @@ import {
   placeCaret,
   type MarkdownInput,
 } from "./md-input";
-import { membersSection } from "./members";
 import { closeModal, isModalOpen, onModalDismissed, openModal } from "./modal";
 import { isDeleting, markDeleting, projectKey, unmarkDeleting } from "./pending";
-import { accountControl, profileButton, startProfile } from "./profile";
+import {
+  adopt as adoptProfile,
+  avatarContents,
+  profileButton,
+  startProfile,
+} from "./profile";
 import { openNewProjectDialog, openStartDateEditor } from "./project-setup";
 import { startTheme } from "./theme";
 import { openTrashDialog } from "./trash-view";
@@ -237,12 +238,6 @@ function launchView(): HTMLElement {
         class: "button",
         text: "Add project…",
         onclick: () => void addProject(),
-      }),
-      el("button", {
-        class: "button",
-        text: "Add shared…",
-        title: "A project somebody shared with you on Google Drive",
-        onclick: () => void addShared(),
       }),
       el("span", { class: "launch__spacer" }),
       el("button", {
@@ -789,7 +784,6 @@ function timelineSection(project: Project): HTMLElement {
         text: "Appearance…",
         onclick: () => openHere({ kind: "appearance" }),
       }),
-      syncButton(project),
       el("button", {
         class: "button button--ghost",
         text: "Trash…",
@@ -802,7 +796,7 @@ function timelineSection(project: Project): HTMLElement {
         title: "Reverse the timeline",
         onclick: () => toggleSortOrder(),
       }),
-      profileButton(),
+      profileButton(plainText(project.meta.name)),
     ),
     renderTimeline(
       project,
@@ -911,6 +905,7 @@ async function loadProject(path: string, quiet = false): Promise<boolean> {
     if (asked !== opensAsked) return false;
     adopt(project);
     render();
+    void askWhoYouAre(project);
     return true;
   } catch (err) {
     if (asked === opensAsked && !quiet) {
@@ -1020,113 +1015,6 @@ function deleteProject(project: ListedProject): void {
 }
 
 /**
- * Whether this project syncs, and the button that changes that.
- *
- * Per project and opt-in: a private journal stays on this machine until it is
- * asked to leave. The state is read after the button is on screen, so the
- * toolbar never waits for a round trip to paint.
- */
-function syncButton(project: Project): HTMLElement {
-  const button = el("button", {
-    class: "button button--ghost",
-    text: "Sync…",
-    title: "Whether this project is kept on your Google Drive",
-    onclick: () => openSyncDialog(project),
-  });
-  void syncStatus(project.root)
-    .then((status) => {
-      button.textContent = status.on ? "Synced ✓" : "Sync…";
-    })
-    .catch(() => {});
-  return button;
-}
-
-function openSyncDialog(project: Project): void {
-  const state = el("p", { class: "hint", text: "…" });
-  const act = el("button", { class: "button" });
-  const now = el("button", { class: "button button--ghost", text: "Sync now" });
-
-  let on = false;
-  const people = membersSection(project.root, () => on);
-
-  // The account belongs in the profile dialog, and it is here as well: somebody
-  // who came to turn syncing on would otherwise meet a button that cannot work,
-  // and nothing saying where to go instead.
-  let connected = false;
-  const account = accountControl((read) => {
-    connected = read.connected;
-    act.disabled = !connected;
-    act.title = connected ? "" : "Connect a Google account first.";
-  });
-
-  const paint = (status: SyncStatus) => {
-    on = status.on;
-    // Told rather than left to work it out: it is drawn before the first status
-    // lands, and again whenever syncing is turned on or off under it.
-    people.refresh();
-    act.textContent = status.on ? "Stop syncing this project" : "Sync this project";
-    // Nothing to sync to, so nothing to stop either.
-    act.disabled = !connected && !status.on;
-    now.hidden = !status.on;
-    state.textContent = status.problem
-      ? `Last try: ${status.problem}`
-      : status.on
-        ? "This project is kept on your Google Drive. Every device you sign in on gets it, and anyone you share the folder with can read or write it."
-        : "This project is on this machine only. Syncing it puts it on your Google Drive, where your other devices — and anyone you share the folder with — can reach it.";
-  };
-
-  const run = async (call: Promise<SyncStatus>, whenItFails: string) => {
-    act.disabled = true;
-    now.disabled = true;
-    state.textContent = "Working…";
-    try {
-      paint(await call);
-    } catch (err) {
-      toastError(whenItFails, err);
-      paint(await syncStatus(project.root).catch(() => ({ on: false, problem: null })));
-    }
-    act.disabled = false;
-    now.disabled = false;
-    render();
-  };
-
-  // No flipping of `on` here: `paint` sets it from the status that came back,
-  // which is the one that is true. Guessing it would disagree with the button
-  // the moment a start failed.
-  act.onclick = () =>
-    void run(
-      on ? stopSyncing(project.root) : startSyncing(project.root),
-      on ? "Could not stop syncing" : "Could not start syncing",
-    );
-  now.onclick = () => void run(syncNow(project.root), "Could not sync");
-
-  openModal({
-    title: "Syncing",
-    body: el(
-      "div",
-      { class: "modal__body-inner" },
-      account.node,
-      el("div", { class: "field" }, el("label", { text: "This project" }), state),
-      el("div", { class: "row" }, act, now),
-      el("p", {
-        class: "hint",
-        text: "Whether this machine syncs this project is this machine's own business — it is not carried to your other devices.",
-      }),
-      people.node,
-    ),
-  });
-
-  void syncStatus(project.root)
-    .then((status) => {
-      on = status.on;
-      paint(status);
-    })
-    .catch(() => {
-      state.textContent = "Could not read whether this project syncs.";
-    });
-}
-
-/**
  * Keep one version of an entry that arrived in more than one.
  *
  * No optimism here, unlike a delete: the card is a question, and the honest
@@ -1142,24 +1030,77 @@ function settleConflict(entry: Entry, version: number): void {
 }
 
 /**
- * Take a project somebody shared on Drive.
+ * Ask which of a project's authors this device is, when it does not know.
  *
- * Google's own chooser opens in the user's browser and lists what has been
- * shared with them, so there is nothing to ask here first — and this waits on
- * them being over there, hence the toast rather than a silent pause.
+ * Nothing carries who you are from one device to the next — there is no
+ * account — so a laptop and a phone would otherwise be two people, and a
+ * journal kept by one person would start showing names. Asked once: whatever
+ * is answered, the authors offered are never offered again.
+ *
+ * Not over another dialog. Opening a project can put a viewer or an editor back
+ * on screen, and this can wait for the next time the project is opened.
  */
-async function addShared(): Promise<void> {
-  toast("Choose the shared folder in your browser.");
-  let path: string | null;
+async function askWhoYouAre(project: Project): Promise<void> {
+  let offered: string[];
   try {
-    path = await addSharedProject();
-  } catch (err) {
-    toastError("Could not add that project", err);
+    offered = await unclaimedAuthors();
+  } catch {
     return;
   }
-  if (!path) return;
-  await readTabs();
-  await openListed(path);
+  if (offered.length === 0 || isModalOpen() || state.project?.root !== project.root) {
+    return;
+  }
+
+  const answer = (me: string | null) => {
+    closeModal();
+    void claimAuthor(me, offered).then(
+      (profile) => {
+        adoptProfile(profile);
+        if (me) toast(`This device now writes as ${profile.name}`);
+      },
+      (err) => toastError("Could not settle who you are", err),
+    );
+  };
+
+  const rows = offered.map((id) => {
+    const who = project.authors[id];
+    const name = who ? who.display_name ?? who.name : "Someone";
+    const picture =
+      who?.avatar ? assetUrl(project.root, "authors", id, who.avatar) : null;
+    return el(
+      "button",
+      { class: "claim__row", onclick: () => answer(id) },
+      el("span", { class: "avatar" }, avatarContents(picture, name)),
+      el("span", { text: name }),
+    );
+  });
+
+  openModal({
+    title: "Which of these is you?",
+    body: el(
+      "div",
+      { class: "modal__body-inner" },
+      el("p", {
+        class: "hint",
+        text:
+          "This project has entries by people this device does not know yet. If " +
+          "one of them is you, writing from another device, choose it: this " +
+          "device then writes as them, with their name and picture, and your " +
+          "entries stay under one name.",
+      }),
+      el("div", { class: "claim" }, ...rows),
+    ),
+    foot: el(
+      "div",
+      { class: "modal__foot" },
+      el("button", {
+        class: "button",
+        text: "None of these",
+        title: "You are new to this project. You will not be asked about these people again.",
+        onclick: () => answer(null),
+      }),
+    ),
+  });
 }
 
 /** Drop a project from the list, leaving the folder where it is. */

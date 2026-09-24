@@ -27,7 +27,6 @@ A project is a folder of plain files. No database, no app-owned store, nothing t
       face.jpg
   .lazuli-thumbs/           small copies of every picture, for the timeline
   .lazuli-trash/            what you deleted, for thirty days
-  .lazuli/                  what *this machine* knows about syncing it
 ```
 
 Open the folder in an editor, a git repo, or Explorer and it still makes sense. Edit an `entry.md` by hand and the app picks the change up while you watch.
@@ -38,44 +37,22 @@ Nothing is thrown away on your behalf: every image you tried for an entry stays 
 
 ## Syncing, and sharing
 
-A project can be kept on your Google Drive, which is how it reaches your other devices and how somebody else gets to write in it. It is per project and off until you ask: **Sync…** in a project's toolbar, once an account is connected from the round button in the corner.
+Lazuli does not sync anything itself. A project is a folder, so it goes wherever a folder can go: put it somewhere that keeps folders in step, and every device and every person that folder reaches has the project.
 
-Lazuli talks to Drive's HTTP API. There is no Drive client to install, which is the point — no such client exists on a phone, and relying on a folder something else keeps in step is what would rule that out. Editing works offline and reconciles when there is a connection again: the folder *is* the outbox, so there is no queue to fall out of step.
+- **Your own computers:** Dropbox, OneDrive, iCloud Drive, Google Drive for Desktop or Syncthing. Put the project folder inside the synced folder and open it from there with **Add project…**.
+- **Other people:** a shared folder in any of those, or a git repository. A journal kept in the repository of the project it is about is the natural case — commit and pull it like any other file. Commit `.lazuli-thumbs/` and `.lazuli-trash/` too: the trash is how another checkout learns that an entry was deleted.
+- **A phone:** not yet. See [ideas/mobile-storage.md](ideas/mobile-storage.md).
 
-Sharing is Drive's own: the Syncing dialog lists who a project is shared with, invites somebody by email as a reader or a writer, and removes them again — Google sends the invitation and enforces the roles. There is no Lazuli account and no Lazuli server.
+What Lazuli does is stay correct while something else moves the files:
 
-You can be called something different in one project, the way you can on one Discord server: set it in the Syncing dialog and it is used there alone. And your devices know each other — an author record carries the accounts it signs in with, so an entry written on a phone is by the same person as one written on a laptop.
+- Two devices adding entries never collide, because an entry folder is a UUID.
+- Every write lands whole, so a syncer never picks up half a file.
+- A deletion is a move into `.lazuli-trash/`, so it travels like any other change, and can be undone from any device for thirty days.
+- An entry edited in two places comes back as a card offering both versions, whether the syncer left a second file beside it — Syncthing, Dropbox, OneDrive and iCloud all do, each with its own naming — or git left conflict markers inside it. Nothing is merged for you.
 
-**Receiving a shared project does not work yet, and cannot on the current scope.** `drive.file` grants an app access per *file*, per *user*: what this user's Lazuli created, plus what this user hands it through Google's chooser. Handing over a folder grants the folder object and **nothing inside it** — measured, not assumed: Drive reports `canListChildren: true` on the picked folder and then returns zero children to every query, because every file inside fails the per-file check. Files another person's Lazuli created are invisible to yours for the same reason, however thoroughly the folder is shared. So **Add shared…** opens Google's chooser, the choice comes back, and the folder arrives empty. Reading somebody else's project needs a scope that sees more than the app's own files, and every such scope is one Google classes *restricted*; see [ideas/syncing-projects.md](ideas/syncing-projects.md) for the decision that is waiting on that.
+Your name and picture travel with the project: they are copied into its `authors/` folder when you write in it. Nothing carries *who you are* between your own devices, so the first time a device opens a project whose authors it does not know, it asks **which of these is you** — choose yourself and that device writes under the same name and picture from then on. You can also be called something different in one project, the way you can on one Discord server: open the round button in the corner while that project is on screen.
 
-A project's folder is called `Lazuli | <project>`, inside a `Lazuli` folder, so that it can be told apart in a Drive.
-
-Two devices adding entries never collide, because an entry folder is a UUID. Two people editing the same sentence is the one real conflict, and it is not merged for you — both versions land on the card and you keep one.
-
-### The Google client id
-
-Syncing identifies Lazuli to Google with an OAuth client id, which is in [`src-tauri/src/drive.rs`](src-tauri/src/drive.rs). A desktop client id is public by design: it is baked into every copy of the app, it says *which app is asking*, and it grants nothing on its own. What proves a sign-in genuine is the PKCE exchange. Google issues a "client secret" beside the id and its token endpoint refuses a desktop exchange without it, so one is baked in too — and Google's own documentation says it is not a secret in an installed app: anyone can read it out of the binary, it grants nothing on its own, and the security of a sign-in rests on PKCE alone.
-
-It is made once, for the app, not once per user. Every copy carries the same id; what belongs to each person is the token it gets back, which stays on their machine and never reaches us. Their Drive traffic does count against this project's quota, which is the one thing that is genuinely shared.
-
-The app asks for the `drive.file` scope and nothing else. That scope is classed non-sensitive, so there is no verification, no security assessment and no "Google hasn't verified this app" screen in front of anyone. The narrowness is the trade: it can see the files Lazuli made and nothing else of yours, which is also why a project somebody *else* shared has to be handed over through the Google Picker.
-
-Projects Lazuli syncs are made inside a **`Lazuli` folder** at the top of your Drive, so they are not loose among everything else. The folder is found by id afterwards, so moving a project somewhere else in your Drive does not break it.
-
-Two things to get right in the Cloud console, both easy to forget:
-
-- **The consent screen has to be in Production.** Left in Testing it works only for accounts listed there by hand, capped at a hundred — which looks exactly like "sync is broken for everyone but me". Worse, and less obvious: **Google expires a refresh token issued in Testing after seven days**, so a sign-in that worked stops working a week later with no warning and no change in the app. An account that keeps needing to be connected again, on a schedule, is this and not a bug.
-- **One id does not cover every platform.** An Android build needs its own OAuth client, pinned to its package name and signing certificate, and iOS a third. They belong in the *same* Cloud project, so they share the consent screen, the quota and the user's approval: somebody who connected on their laptop is not asked again on their phone. The sign-in differs too — the loopback listener here is a desktop mechanism, and a phone takes the redirect through a custom URI scheme instead.
-
-To make a fresh one, for a fork: a project at [console.cloud.google.com](https://console.cloud.google.com), with **both the Google Drive API and the Google Picker API enabled**, then Credentials → Create credentials → OAuth client ID → **Desktop app**, and the id and secret into `DESKTOP_CLIENT_ID` and `DESKTOP_CLIENT_SECRET`. That is all of it. The Picker API has to be on even though nothing here holds a Picker key — the chooser rides on the same OAuth client, and an **API key is not part of this flow at all**.
-
-### The chooser is the sign-in, with two more parameters — and it is not enough
-
-Google's Picker has two flows, and the difference is worth knowing before anyone reaches for the better-documented one. The **web** flow is a JavaScript widget the app embeds in a page of its own; it wants an API key, a fixed origin and the Cloud project's number, and it renders in a frame from `docs.google.com` that needs the browser's Google cookies. Behind a signed-out browser, strict cookie settings or a webview's tracking prevention it fails — and it fails by accepting the choice, spinning, and handing the button back, with nothing in any console the app can read. All of that was built here and then taken out.
-
-The **desktop** flow is [`pick_url`](src-tauri/src/drive.rs): the ordinary sign-in redirect plus `trigger_onepick=true` and `allow_folder_selection=true`. Google shows the chooser on its own consent screen and redirects back to the loopback with `picked_file_ids` appended. No key, no origin, no frame, no cookies — and the redirect is the one the app already runs for signing in, because "the Google Picker imposes no additional restrictions" on it.
-
-It works, and it is not sufficient: a picked folder is granted as one object, its contents are not, and Google's documentation says nothing about that either way. It stays because the mechanism is right and would carry a per-file grant if one were ever wanted; what receiving a project needs is a wider scope, not a better chooser.
+Lazuli once synced through Google Drive itself; it was taken out because receiving a project somebody else shared cannot work on the permission Google grants without an annual security audit. [ideas/rejected/syncing-through-google-drive.md](ideas/rejected/syncing-through-google-drive.md) has the details, and what would bring it back.
 
 ## The 5am rule
 

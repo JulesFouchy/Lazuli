@@ -20,7 +20,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 
@@ -43,14 +43,13 @@ pub struct Profile {
     /// nothing else of ours.
     #[serde(default)]
     pub avatar: Option<String>,
-    /// Accounts this author signs in with, as `<backend>:<id>`.
+    /// Accounts this author signed in with, as `<backend>:<id>`, written by
+    /// the builds that synced through Google Drive.
     ///
-    /// How a second device works out that it is *this* author rather than a new
-    /// one. Nothing carries an author id between machines — the settings that
-    /// hold it are per machine by design — so the first sync looks its own
-    /// account up here and adopts what it finds. Without that a phone and a
-    /// laptop are two collaborators, and every solo project starts showing
-    /// names.
+    /// Nothing reads it now: a second device learns who it is by being asked
+    /// (see `claim_author` in `commands.rs`). It is carried through a republish
+    /// rather than dropped, because a record is rewritten whenever its name
+    /// changes and a format never loses what an older build put there.
     #[serde(default)]
     pub accounts: Vec<String>,
     /// What to call this person *here*, when it differs from their own name.
@@ -61,6 +60,24 @@ pub struct Profile {
     /// has no override, and none that has.
     #[serde(default)]
     pub display_name: Option<String>,
+    /// Another author id this person also is, set on a record they stopped
+    /// writing under.
+    ///
+    /// A device that wrote here before it was told who it was has entries under
+    /// an id of its own. Claiming the right author does not rewrite those
+    /// entries — a format never rewrites what is on disk — so the old record
+    /// says where it went instead, and a reader counts its entries as the
+    /// author it names. Left out of the file when unset, so an ordinary record
+    /// does not grow a line of nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub same_as: Option<String>,
+    /// Fields this build does not know, carried through a rewrite untouched.
+    ///
+    /// A project folder is written by whichever build each person has, and a
+    /// build that dropped what it did not understand would strip a newer
+    /// build's fields every time it saved. The same goes for every file the app rewrites.
+    #[serde(flatten)]
+    pub rest: BTreeMap<String, serde_yaml::Value>,
 }
 
 impl Profile {
@@ -68,22 +85,66 @@ impl Profile {
     pub fn shown_name(&self) -> &str {
         self.display_name.as_deref().unwrap_or(&self.name)
     }
-
-    /// Whether this record belongs to whoever is signed in as `account`.
-    pub fn signs_in_as(&self, account: &str) -> bool {
-        self.accounts.iter().any(|known| known == account)
-    }
 }
 
-/// The author id that already belongs to whoever signs in as `account`.
+/// The author an entry by `id` should be counted as, following `same_as`.
 ///
-/// Called before an entry is written, so that a second device joins the author
-/// it finds rather than minting a rival.
-pub fn id_for_account(root: &Path, account: &str) -> Option<String> {
-    read_all(root)
-        .into_iter()
-        .find(|(_, profile)| profile.signs_in_as(account))
-        .map(|(id, _)| id)
+/// Only to an id that has a record of its own in `authors`: an alias pointing
+/// at somebody who has not written here yet stays itself, since a card needs a
+/// record to put a name to. Records that lead back round to one already
+/// visited are a loop, which only a hand edit makes, and each of them is then
+/// left as itself.
+pub fn canonical<'a>(authors: &'a HashMap<String, Profile>, id: &'a str) -> &'a str {
+    let mut seen = vec![id];
+    let mut at = id;
+    while let Some(next) = authors
+        .get(at)
+        .and_then(|profile| profile.same_as.as_deref())
+        .filter(|next| authors.contains_key(*next))
+    {
+        if seen.contains(&next) {
+            return id;
+        }
+        seen.push(next);
+        at = next;
+    }
+    at
+}
+
+/// The authors a project shows: every record except those standing in for
+/// another that is here.
+pub fn without_aliases(mut authors: HashMap<String, Profile>) -> HashMap<String, Profile> {
+    // Following the chain rather than one step: a loop of records naming each
+    // other leads every one of them back to itself, so none of them vanishes
+    // and takes its entries' names with it.
+    let aliases: Vec<String> = authors
+        .keys()
+        .filter(|id| canonical(&authors, id) != id.as_str())
+        .cloned()
+        .collect();
+    for id in aliases {
+        authors.remove(&id);
+    }
+    authors
+}
+
+/// Say, in `root`, that the author `old` is the same person as `new`.
+///
+/// Only ever touches `old`'s own record, which is the claiming user's to write,
+/// so this keeps the registry conflict-free. Nothing to do where `old` never
+/// wrote.
+pub fn mark_same_as(root: &Path, old: &str, new: &str) {
+    let folder = root.join(AUTHORS_DIR).join(old);
+    let Ok(mut profile) = read_profile(&folder) else {
+        return;
+    };
+    if profile.same_as.as_deref() == Some(new) {
+        return;
+    }
+    profile.same_as = Some(new.to_owned());
+    if let Ok(yaml) = serde_yaml::to_string(&profile) {
+        let _ = atomic::write(&folder.join(PROFILE_FILE), yaml);
+    }
 }
 
 /// Every author a project knows, by id.
@@ -112,24 +173,17 @@ pub fn read_all(root: &Path) -> HashMap<String, Profile> {
 /// Failure is not an error worth stopping an edit for — a project someone
 /// shared read-only cannot be written to at all, and the edit that triggered
 /// this has already succeeded or failed on its own terms.
-pub fn publish(root: &Path, id: &str, name: &str, avatar: Option<&Path>, account: Option<&str>) {
+pub fn publish(root: &Path, id: &str, name: &str, avatar: Option<&Path>) {
     let folder = root.join(AUTHORS_DIR).join(id);
     let existing = read_profile(&folder).ok();
 
     // Kept from what is already published rather than passed in. A name shown
     // only here is a decision made here, and republishing the global name must
-    // not quietly undo it.
+    // not quietly undo it; the accounts are what an older build wrote.
     let display_name = existing.as_ref().and_then(|old| old.display_name.clone());
-
-    // Added to rather than replaced: somebody who signs in with two accounts is
-    // still one author, and the account that is not in use today should not be
-    // forgotten because of it.
-    let mut accounts = existing.map(|old| old.accounts).unwrap_or_default();
-    if let Some(account) = account {
-        if !accounts.iter().any(|known| known == account) {
-            accounts.push(account.to_owned());
-        }
-    }
+    let (accounts, rest) = existing
+        .map(|old| (old.accounts, old.rest))
+        .unwrap_or_default();
 
     let profile = Profile {
         name: name.to_owned(),
@@ -139,6 +193,10 @@ pub fn publish(root: &Path, id: &str, name: &str, avatar: Option<&Path>, account
             .map(str::to_owned),
         accounts,
         display_name,
+        // Somebody writing under this id is this id: whatever it stood in for
+        // before, it stands for itself again.
+        same_as: None,
+        rest,
     };
 
     // The picture is checked separately from the record: the two are written in
@@ -226,14 +284,31 @@ mod tests {
             avatar: None,
             accounts: Vec::new(),
             display_name: None,
+            same_as: None,
+            rest: BTreeMap::new(),
         }
     }
 
     #[test]
     fn a_published_profile_reads_back() {
         let dir = TempDir::new("authors-publish");
-        publish(&dir.0, "author-1", "Jules", None, None);
+        publish(&dir.0, "author-1", "Jules", None);
         assert_eq!(read_all(&dir.0).get("author-1"), Some(&profile("Jules")));
+    }
+
+    #[test]
+    fn a_field_a_newer_build_wrote_survives_a_republish() {
+        let dir = TempDir::new("authors-rest");
+        publish(&dir.0, "author-1", "Jules", None);
+        let path = dir.0.join(AUTHORS_DIR).join("author-1").join(PROFILE_FILE);
+        let written = fs::read_to_string(&path).expect("should read");
+        fs::write(&path, format!("{written}pronouns: they\n")).expect("should write");
+
+        publish(&dir.0, "author-1", "Jules F", None);
+
+        let after = fs::read_to_string(&path).expect("should read");
+        assert!(after.contains("name: Jules F"));
+        assert!(after.contains("pronouns: they"), "{after}");
     }
 
     #[test]
@@ -247,13 +322,13 @@ mod tests {
         // Every write is a filesystem event the watcher rescans for, and this
         // runs on every edit.
         let dir = TempDir::new("authors-idempotent");
-        publish(&dir.0, "author-1", "Jules", None, None);
+        publish(&dir.0, "author-1", "Jules", None);
         let path = dir.0.join(AUTHORS_DIR).join("author-1").join(PROFILE_FILE);
         let first = fs::metadata(&path)
             .and_then(|meta| meta.modified())
             .expect("should stat");
 
-        publish(&dir.0, "author-1", "Jules", None, None);
+        publish(&dir.0, "author-1", "Jules", None);
         let second = fs::metadata(&path)
             .and_then(|meta| meta.modified())
             .expect("should stat");
@@ -263,8 +338,8 @@ mod tests {
     #[test]
     fn a_changed_name_is_published_over_the_old_one() {
         let dir = TempDir::new("authors-rename");
-        publish(&dir.0, "author-1", "Jules", None, None);
-        publish(&dir.0, "author-1", "Jules F", None, None);
+        publish(&dir.0, "author-1", "Jules", None);
+        publish(&dir.0, "author-1", "Jules F", None);
         assert_eq!(read_all(&dir.0).get("author-1"), Some(&profile("Jules F")));
     }
 
@@ -273,8 +348,8 @@ mod tests {
         // Each person writes only their own folder, which is what keeps the
         // registry free of conflicts when two of them sync one project.
         let dir = TempDir::new("authors-several");
-        publish(&dir.0, "author-1", "Jules", None, None);
-        publish(&dir.0, "author-2", "Manu", None, None);
+        publish(&dir.0, "author-1", "Jules", None);
+        publish(&dir.0, "author-2", "Manu", None);
         let all = read_all(&dir.0);
         assert_eq!(all.len(), 2);
         assert_eq!(all.get("author-2"), Some(&profile("Manu")));
@@ -288,7 +363,7 @@ mod tests {
         let source = dir.0.join("me.png");
         fs::write(&source, b"pixels").expect("should write");
 
-        publish(&dir.0, "author-1", "Jules", Some(&source), None);
+        publish(&dir.0, "author-1", "Jules", Some(&source));
 
         let folder = dir.0.join(AUTHORS_DIR).join("author-1");
         assert_eq!(
@@ -305,41 +380,101 @@ mod tests {
         let dir = TempDir::new("authors-half");
         let source = dir.0.join("me.png");
         fs::write(&source, b"pixels").expect("should write");
-        publish(&dir.0, "author-1", "Jules", Some(&source), None);
+        publish(&dir.0, "author-1", "Jules", Some(&source));
 
         let copied = dir.0.join(AUTHORS_DIR).join("author-1").join("me.png");
         fs::remove_file(&copied).expect("should remove");
 
-        publish(&dir.0, "author-1", "Jules", Some(&source), None);
+        publish(&dir.0, "author-1", "Jules", Some(&source));
         assert!(copied.is_file());
     }
 
     #[test]
-    fn a_second_device_finds_the_author_it_already_is() {
-        // Nothing carries an author id between machines, so this is the only
-        // way a phone and a laptop end up one author rather than two.
-        let dir = TempDir::new("authors-account");
-        publish(&dir.0, "author-1", "Jules", None, Some("google:12345"));
-
-        assert_eq!(
-            id_for_account(&dir.0, "google:12345").as_deref(),
-            Some("author-1")
-        );
-        assert_eq!(id_for_account(&dir.0, "google:somebody-else"), None);
+    fn what_an_older_build_wrote_survives_a_republish() {
+        // Records from the Drive builds carry the accounts they signed in with.
+        // Nothing reads them any more, and nothing should strip them either.
+        let dir = TempDir::new("authors-accounts");
+        let folder = dir.0.join(AUTHORS_DIR).join("author-1");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(
+            folder.join(PROFILE_FILE),
+            "name: Jules\navatar: null\naccounts:\n- google:12345\ndisplay_name: null\n",
+        )
+        .unwrap();
+        publish(&dir.0, "author-1", "Jules F", None);
+        assert_eq!(read_all(&dir.0)["author-1"].accounts, ["google:12345"]);
     }
 
     #[test]
-    fn signing_in_with_a_second_account_does_not_forget_the_first() {
-        let dir = TempDir::new("authors-two-accounts");
-        publish(&dir.0, "author-1", "Jules", None, Some("google:12345"));
-        publish(&dir.0, "author-1", "Jules", None, Some("dropbox:67890"));
+    fn an_alias_is_counted_as_the_author_it_names() {
+        // A device wrote as author-2 before it was told it is author-1.
+        let dir = TempDir::new("authors-alias");
+        publish(&dir.0, "author-1", "Jules", None);
+        publish(&dir.0, "author-2", "Jules", None);
+        mark_same_as(&dir.0, "author-2", "author-1");
 
         let all = read_all(&dir.0);
-        let profile = all.get("author-1").expect("should be there");
-        assert_eq!(profile.accounts, ["google:12345", "dropbox:67890"]);
-        // And publishing the same one again does not list it twice.
-        publish(&dir.0, "author-1", "Jules", None, Some("google:12345"));
-        assert_eq!(read_all(&dir.0)["author-1"].accounts.len(), 2);
+        assert_eq!(canonical(&all, "author-2"), "author-1");
+        assert_eq!(canonical(&all, "author-1"), "author-1");
+        let shown = without_aliases(all);
+        assert_eq!(shown.len(), 1, "one person, however many ids");
+        assert!(shown.contains_key("author-1"));
+    }
+
+    #[test]
+    fn an_alias_for_somebody_not_here_stays_itself() {
+        // Its entries need a record to put a name to, and the one it points at
+        // has not written in this project.
+        let dir = TempDir::new("authors-alias-absent");
+        publish(&dir.0, "author-2", "Jules", None);
+        mark_same_as(&dir.0, "author-2", "author-1");
+
+        let all = read_all(&dir.0);
+        assert_eq!(canonical(&all, "author-2"), "author-2");
+        assert_eq!(without_aliases(all).len(), 1);
+    }
+
+    #[test]
+    fn records_pointing_at_each_other_both_stay() {
+        // Nothing writes this, but a hand edit could, and losing the records
+        // would leave every entry either wrote with no name.
+        let dir = TempDir::new("authors-alias-loop");
+        publish(&dir.0, "a", "A", None);
+        publish(&dir.0, "b", "B", None);
+        // A third, so the loop is not the whole registry.
+        publish(&dir.0, "c", "C", None);
+        mark_same_as(&dir.0, "a", "b");
+        mark_same_as(&dir.0, "b", "a");
+        let all = read_all(&dir.0);
+        assert_eq!(canonical(&all, "a"), "a");
+        assert_eq!(canonical(&all, "b"), "b");
+        assert_eq!(without_aliases(all).len(), 3);
+    }
+
+    #[test]
+    fn writing_under_an_aliased_id_makes_it_itself_again() {
+        let dir = TempDir::new("authors-alias-undone");
+        publish(&dir.0, "author-2", "Jules", None);
+        mark_same_as(&dir.0, "author-2", "author-1");
+        publish(&dir.0, "author-2", "Jules", None);
+        assert_eq!(read_all(&dir.0)["author-2"].same_as, None);
+    }
+
+    #[test]
+    fn marking_an_author_who_never_wrote_here_writes_nothing() {
+        let dir = TempDir::new("authors-alias-none");
+        mark_same_as(&dir.0, "author-2", "author-1");
+        assert!(!dir.0.join(AUTHORS_DIR).exists());
+    }
+
+    #[test]
+    fn an_unset_alias_adds_no_line_to_the_file() {
+        let dir = TempDir::new("authors-alias-quiet");
+        publish(&dir.0, "author-1", "Jules", None);
+        let written =
+            fs::read_to_string(dir.0.join(AUTHORS_DIR).join("author-1").join(PROFILE_FILE))
+                .unwrap();
+        assert!(!written.contains("same_as"));
     }
 
     #[test]
@@ -347,10 +482,10 @@ mod tests {
         // The Discord model: the override is a decision made in this project,
         // and republishing the global name must not quietly undo it.
         let dir = TempDir::new("authors-display");
-        publish(&dir.0, "author-1", "Jules", None, None);
+        publish(&dir.0, "author-1", "Jules", None);
         set_display_name(&dir.0, "author-1", Some("Jules Fouchy")).expect("should set");
 
-        publish(&dir.0, "author-1", "jf", None, None);
+        publish(&dir.0, "author-1", "jf", None);
 
         let all = read_all(&dir.0);
         let profile = all.get("author-1").expect("should be there");
@@ -361,7 +496,7 @@ mod tests {
     #[test]
     fn clearing_the_override_hands_the_name_back() {
         let dir = TempDir::new("authors-display-clear");
-        publish(&dir.0, "author-1", "Jules", None, None);
+        publish(&dir.0, "author-1", "Jules", None);
         set_display_name(&dir.0, "author-1", Some("Someone Else")).expect("should set");
         set_display_name(&dir.0, "author-1", None).expect("should clear");
         assert_eq!(read_all(&dir.0)["author-1"].shown_name(), "Jules");

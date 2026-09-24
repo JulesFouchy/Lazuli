@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use crate::authors;
@@ -50,6 +50,13 @@ pub struct ProjectMeta {
     /// which is what every project showed until now.
     #[serde(default)]
     pub sort_order: SortOrder,
+    /// Fields this build does not know, carried through a rewrite untouched.
+    ///
+    /// A project folder is written by whichever build each person has, and a
+    /// build that dropped what it did not understand would strip a newer
+    /// build's fields every time it saved. The same goes for every file the app rewrites.
+    #[serde(flatten)]
+    pub rest: BTreeMap<String, serde_yaml::Value>,
 }
 
 /// Which of an entry's two dates is shown: `Sep 05, 2026` or `Day 39`.
@@ -109,6 +116,13 @@ pub struct EntryFrontmatter {
     /// `date` reads through the 5am rule.
     #[serde(default)]
     pub author: Option<String>,
+    /// Fields this build does not know, carried through a rewrite untouched.
+    ///
+    /// A project folder is written by whichever build each person has, and a
+    /// build that dropped what it did not understand would strip a newer
+    /// build's fields every time it saved. An older build editing an entry would otherwise lose its `author:`.
+    #[serde(flatten)]
+    pub rest: BTreeMap<String, serde_yaml::Value>,
 }
 
 impl EntryFrontmatter {
@@ -225,6 +239,7 @@ mod tests {
                 .expect("valid test timestamp"),
             image: image.map(str::to_owned),
             author: None,
+            rest: BTreeMap::new(),
         }
     }
 
@@ -279,6 +294,7 @@ mod tests {
                 .expect("valid test timestamp"),
             image: None,
             author: None,
+            rest: BTreeMap::new(),
         };
         assert_eq!(
             frontmatter.journal_date(),
@@ -296,6 +312,7 @@ mod tests {
                 .expect("valid test timestamp"),
             image: None,
             author: None,
+            rest: BTreeMap::new(),
         };
         assert_eq!(
             frontmatter.journal_date(),
