@@ -51,6 +51,17 @@ export const HAS_OS_FILE_DROP = !MOBILE;
 export const HAS_MOUSE_HISTORY = !MOBILE;
 
 /**
+ * A back gesture the system provides and the page has to answer.
+ *
+ * Android's back button and its edge swipe both drive the webview's own
+ * history, so the way to be asked is to have somewhere to go back *to* — see
+ * `src/back.ts`. A desktop has no such gesture, and arming one there would
+ * answer Alt+Left twice: once through the key and once through the history it
+ * moves.
+ */
+export const HAS_SYSTEM_BACK = MOBILE;
+
+/**
  * Whether the thing pointing at the page right now is a finger.
  *
  * Asked each time rather than answered once: a laptop can have both a

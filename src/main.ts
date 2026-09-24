@@ -41,6 +41,7 @@ import {
   unclaimedAuthors,
 } from "./api";
 import { openAppearanceDialog } from "./appearance";
+import { startBack } from "./back";
 import { whileBusy } from "./busy";
 import {
   closeContextMenu,
@@ -1864,6 +1865,19 @@ startTheme();
 // reach one if there were: it comes down when the pointer reaches the top edge,
 // and a finger has no position until it is already pressing something.
 if (HAS_WINDOW_CHROME) startTitlebar();
+
+// The system's own back gesture, on a platform that has one. It walks the
+// webview's history, so the page has to keep an entry there to be asked at all
+// — see `src/back.ts`, which cannot live here because `history` is taken.
+startBack({
+  goUp,
+  // Whether there is another layer to come out of. Asked after `goUp` has
+  // taken one off, to decide whether to stay armed for the next press: at the
+  // launch screen with nothing open the answer is no, and the press after that
+  // closes the app rather than being swallowed.
+  canGoUp: () =>
+    isContextMenuOpen() || isModalOpen() || isEditing() || cursor > 0,
+});
 
 // Your name and picture, for the round button in the corner. Not awaited: the
 // button draws the default figure until this lands, and then repaints itself.

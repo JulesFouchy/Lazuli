@@ -533,7 +533,7 @@ input {
 .md-input--note {
   /* Three lines and then it grows, which is where `rows="3"` had it. */
   min-height: calc(3 * 1.5em + 18px);
-  max-height: 40vh;
+  max-height: 40dvh;
   overflow-y: auto;
   line-height: 1.5;
 }
@@ -576,7 +576,16 @@ input {
 .launch {
   max-width: 640px;
   margin: 0 auto;
+  /* The 96px at the top is room for the title bar to come down into. */
   padding: 96px 24px 64px;
+}
+
+/* Where the page draws no title bar there is nothing to leave room for. Keyed
+   on the platform rather than on the width, because it follows the bar and not
+   the size of the window: a desktop window dragged narrow still has one. */
+:root[data-platform="android"] .launch,
+:root[data-platform="ios"] .launch {
+  padding-top: 24px;
 }
 
 .launch__actions {
@@ -1198,7 +1207,7 @@ body.dragging * {
   width: 100%;
   /* Tall enough to be the point of the card, short enough that several
      entries are visible at once on any window size. */
-  max-height: min(440px, 52vh);
+  max-height: min(440px, 52dvh);
   object-fit: cover;
   border-radius: var(--radius);
   background: var(--bg-sunken);
@@ -1754,7 +1763,7 @@ body.dragging * {
   width: 100%;
   /* Tall enough to frame by, capped so the dialog does not grow past the
      window on a camera that hands back a portrait stream. */
-  max-height: 46vh;
+  max-height: 46dvh;
   border-radius: var(--radius-sm);
   background: var(--bg-sunken);
   box-shadow: inset 0 0 0 1px var(--image-ring);
@@ -1875,7 +1884,9 @@ body.dragging * {
 .toasts {
   position: fixed;
   left: 50%;
-  bottom: 28px;
+  /* Clear of a phone's home indicator or navigation bar, and exactly 28px
+     everywhere that has neither. */
+  bottom: calc(28px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column-reverse;
@@ -1927,7 +1938,7 @@ body.dragging * {
 .busy {
   position: fixed;
   right: 20px;
-  bottom: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
   width: 18px;
   height: 18px;
   border: 2px solid var(--line-strong);
@@ -1961,6 +1972,118 @@ body.dragging * {
   * {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- a finger instead of a pointer ----------------------------------------
+
+   Not "a phone": a laptop with a touchscreen has no hover either, and gets
+   these for the same reason. Everything here is about whether a control can be
+   *found*, which is a question about the pointing device and not about the
+   width of the window — see `src/platform.ts` for why those are kept apart.
+
+   Of the two dozen `:hover` rules in this file, only these four are the sole
+   way to discover something. The rest are feedback: on a touch device they
+   either never fire or stick after a tap, which is cosmetic either way. */
+@media (hover: none) {
+  /* The strip's `+` for a new tab was invisible until the strip was hovered,
+     which on a touch screen is never. */
+  .launch__add {
+    opacity: 1;
+  }
+
+  /* "Click to change the cover" is the only thing that says the banner is a
+     button at all. */
+  .banner__hint {
+    opacity: 1;
+  }
+
+  /* The start date reads as part of a sentence until hovered, and a sentence
+     is not something anybody taps. */
+  .banner__start {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+/* --- a narrow window ------------------------------------------------------
+
+   A phone is the reason, but the rule is the width and nothing else: a desktop
+   window dragged this narrow has the same problem and gets the same answer.
+
+   The two content columns already collapse on their own, being `max-width`
+   with `margin: 0 auto`, and `.thumbs` is already a fluid grid. What does not
+   survive is anything measured in fixed pixels: a banner that would take a
+   third of the screen, dialogs with 64px of chrome around them, and a row of
+   things laid out side by side that have no room to be. */
+@media (max-width: 640px) {
+  body {
+    font-size: 16px;
+  }
+
+  .launch {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 48px;
+  }
+
+  .timeline {
+    padding: 20px 16px 96px;
+  }
+
+  /* A third of a phone screen is too much to spend on the cover before the
+     first entry, and the bar across its foot has to be able to wrap: the name
+     and "N entries · started X" cannot both fit on one line at this width, and
+     `space-between` would squeeze the name to nothing rather than admit it. */
+  .banner {
+    height: 200px;
+  }
+
+  .banner__bar {
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 14px 16px;
+  }
+
+  .banner__name {
+    font-size: 24px;
+  }
+
+  .banner__meta {
+    white-space: normal;
+  }
+
+  /* Dialogs become sheets: up from the bottom edge, full width, and no taller
+     than the space a keyboard leaves. `dvh` rather than `vh` because the
+     browser's own chrome grows and shrinks as the page scrolls, and `vh` is
+     the larger of the two — which is the one that does not fit. */
+  .overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    max-width: none;
+    max-height: 88dvh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  /* On the footer rather than the sheet, so the inset pushes the buttons up
+     off the home indicator instead of shrinking what is above them. */
+  .modal__foot {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  /* The viewer is the exception: it fills the screen rather than sitting on
+     it, so it keeps its own shape. */
+  .overlay:has(.modal--viewer) .modal {
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .camera__view {
+    max-height: 60dvh;
   }
 }
 
