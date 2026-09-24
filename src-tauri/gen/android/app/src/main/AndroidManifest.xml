@@ -2,6 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      "Take a photo…" in the image picker. Declaring it is the whole of what is
+      needed: wry's own `RustWebChromeClient.onPermissionRequest` already turns
+      the page's `getUserMedia` into this runtime permission, asks, and grants
+      or denies on the answer. Nothing of ours has to answer for it the way
+      `src-tauri/src/camera.rs` does on Windows.
+
+      Not required, so that a device without a camera can still keep a journal;
+      `src/camera.ts` already hides the button where there is none. And no
+      RECORD_AUDIO: nothing here ever asks for a microphone.
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
