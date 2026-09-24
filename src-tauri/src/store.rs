@@ -40,22 +40,72 @@ pub const ENTRY_FILE: &str = "entry.md";
 /// The delimiter line that opens and closes a frontmatter block.
 const FRONTMATTER_FENCE: &str = "---";
 
-/// A project folder plus a parse cache keyed by `entry.md` path.
+/// How far in the past a file stamp has to be before the scan will trust it.
 ///
-/// The cache is what keeps a full rescan affordable at a thousand-plus entries:
-/// directory listings still happen every time, but unchanged files cost a
-/// `stat` rather than a YAML parse.
+/// A filesystem timestamp and a clock reading are not the same measurement.
+/// `SystemTime::now()` is sub-microsecond on Windows, while the time NTFS
+/// records comes from a clock that only advances every ~15ms, so a change
+/// landing a moment after a read still carries a stamp that reads as safely
+/// older than it. FAT32, which an SD card may well still be, rounds to two
+/// whole seconds.
+///
+/// So a stamp is only trusted once it is older than the read by more than any
+/// of that. The cost is that a folder touched in the last couple of seconds is
+/// read again on the next scan, which is precisely the folder worth reading
+/// again; everything untouched — which in a journal is all of it — is trusted.
+const SETTLED_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A project folder plus a cache of what each entry folder last read as.
+///
+/// The cache is what keeps a rescan affordable at a thousand-plus entries. A
+/// folder that has not been touched since the last scan costs two `stat`s and
+/// nothing else: no file read, no directory listing, no YAML parse. That
+/// matters most where a directory listing is not a syscall but a round trip
+/// into another process — see `ideas/mobile-storage.md`.
+///
+/// It is a cache and not an authority. Every entry in it is checked against the
+/// disk before it is used, and throwing the whole thing away only costs time.
 pub struct ProjectStore {
     root: PathBuf,
     cache: HashMap<PathBuf, CachedEntry>,
+    /// Entry folders the last scan had to go to disk for. Zero is the steady
+    /// state and the whole point of the cache; a scan that reads everything
+    /// every time still works and is simply the cost this exists to avoid.
+    read_from_disk: usize,
 }
 
-/// A parsed `entry.md` with the file stamps it was parsed from.
+/// One entry folder as the last scan read it, with the stamps it was read at.
+///
+/// Two stamps, because the folder holds two things that change independently:
+/// `entry.md`, and the images beside it. An image added moves the folder's
+/// time and leaves the file's alone; an edit from a text editor does the
+/// reverse.
 struct CachedEntry {
-    modified: Option<SystemTime>,
-    len: u64,
+    /// When this was read, taken before the read rather than after.
+    ///
+    /// A stamp equal to or later than this is a stamp that cannot be trusted:
+    /// filesystem times tick coarsely — around 15ms on Windows — so a change
+    /// landing in the same tick as the read leaves a time identical to the one
+    /// already recorded, and the folder would look untouched forever. Anything
+    /// stamped at or after the moment it was read is re-read next time. It
+    /// costs one extra read per folder, once, and then the stamp is safely in
+    /// the past for good.
+    cached_at: SystemTime,
+    /// The entry folder's own modification time. Moves when a child is added,
+    /// removed or renamed — which includes `atomic::write` renaming a new
+    /// `entry.md` into place, and therefore every write the app itself makes.
+    dir_modified: Option<SystemTime>,
+    /// `entry.md`'s own stamps. Kept alongside the folder's because a folder
+    /// whose time moved for another reason — an image imported — should not
+    /// cost a re-parse of a file that did not change.
+    file_modified: Option<SystemTime>,
+    file_len: u64,
     frontmatter: EntryFrontmatter,
     text: String,
+    /// Read from the same bytes as `frontmatter`, and from the sidecars beside
+    /// them, so it is only good while *both* stamps hold.
+    conflict: Option<conflicts::Conflict>,
+    images: Vec<String>,
 }
 
 impl ProjectStore {
@@ -63,7 +113,14 @@ impl ProjectStore {
         Self {
             root: root.into(),
             cache: HashMap::new(),
+            read_from_disk: 0,
         }
+    }
+
+    /// How many entry folders the last scan read from disk.
+    #[cfg(test)]
+    fn read_from_disk(&self) -> usize {
+        self.read_from_disk
     }
 
     pub fn root(&self) -> &Path {
@@ -76,52 +133,35 @@ impl ProjectStore {
     /// trusting a watcher event to say what changed.
     pub fn scan(&mut self) -> Result<Project> {
         let meta = read_meta(&self.root)?;
-        let cover_images = list_images(&self.root.join(COVER_DIR))?;
+        let cover_images = list_images(&self.root.join(COVER_DIR));
 
         let mut entries = Vec::new();
         let mut seen = HashSet::new();
-        for entry_dir in list_entry_dirs(&self.root)? {
+        self.read_from_disk = 0;
+        for (entry_dir, dir_modified) in list_entry_dirs(&self.root)? {
             let id = entry_dir
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or_default()
                 .to_owned();
-            let entry_file = entry_dir.join(ENTRY_FILE);
 
-            // Two versions of one entry, from a merge or from a folder two
-            // machines both wrote to. Read before the parse, because the
-            // commonest shape — conflict markers in the file — is precisely a
-            // file that does not parse, and this used to be where the entry
-            // silently left the timeline.
-            let conflict = fs::read_to_string(&entry_file)
-                .ok()
-                .and_then(|contents| conflicts::of_entry(&entry_dir, &contents));
-
-            let (frontmatter, text) = match self.read_cached(&entry_file) {
-                Ok(parsed) => parsed,
-                // A conflicted file usually cannot be parsed at all. Stand in
-                // for it with the first version on offer, so the card is on the
-                // timeline, on its own day, asking to be settled.
-                Err(err) => match &conflict {
-                    Some(conflict) => stand_in(conflict, &entry_file),
-                    None => {
-                        // Genuinely malformed, or half-written by something
-                        // else. One entry must not take the project down.
-                        eprintln!("lazuli: skipping {}: {err:#}", entry_file.display());
-                        continue;
-                    }
-                },
+            let Some(read) = self.read_entry(&entry_dir, dir_modified) else {
+                continue;
             };
-            seen.insert(entry_file);
+            seen.insert(entry_dir);
 
             // `created` is paired with the entry only for the sort below; it is
             // dropped before the project leaves this function, because an entry
             // has a day and no time as far as the rest of the app is concerned.
-            let created = frontmatter.created;
-            let images = list_images(&entry_dir)?;
-            let mut entry =
-                Project::make_entry(meta.start_date, id, frontmatter, text, images);
-            entry.conflict = conflict;
+            let created = read.frontmatter.created;
+            let mut entry = Project::make_entry(
+                meta.start_date,
+                id,
+                read.frontmatter,
+                read.text,
+                read.images,
+            );
+            entry.conflict = read.conflict;
             entries.push((created, entry));
         }
 
@@ -161,33 +201,112 @@ impl ProjectStore {
         })
     }
 
-    /// Parse `entry.md`, reusing the cached parse when the file is untouched.
-    fn read_cached(&mut self, path: &Path) -> Result<(EntryFrontmatter, String)> {
-        let metadata = fs::metadata(path)
-            .with_context(|| format!("reading metadata for {}", path.display()))?;
-        let modified = metadata.modified().ok();
-        let len = metadata.len();
+    /// Everything one entry folder contributes to a scan, from the cache where
+    /// the folder has not been touched and from the disk where it has.
+    ///
+    /// `None` means there is no entry here: a folder without an `entry.md`, or
+    /// one whose `entry.md` cannot be made sense of. One entry must never take
+    /// the project down with it.
+    fn read_entry(&mut self, dir: &Path, dir_modified: Option<SystemTime>) -> Option<EntryRead> {
+        // Before anything is read, so that a change landing while this runs is
+        // stamped at or after it and is therefore not trusted — see `cached_at`.
+        let reading_at = SystemTime::now();
+        let file = dir.join(ENTRY_FILE);
+        let (file_modified, file_len) = match fs::metadata(&file) {
+            Ok(metadata) => (metadata.modified().ok(), metadata.len()),
+            // A folder under `entries/` that holds no `entry.md` is not an
+            // entry and never was — `.lazuli-trash/` restores in progress, a
+            // folder someone made by hand. Silent, where a folder that *has*
+            // one and cannot be read is worth saying out loud.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(err) => {
+                eprintln!("lazuli: skipping {}: {err}", file.display());
+                return None;
+            }
+        };
 
-        if let Some(cached) = self.cache.get(path) {
-            // `modified` is `None` on filesystems that do not report it; treat
-            // that as "always stale" rather than trusting the length alone.
-            if cached.modified.is_some() && cached.modified == modified && cached.len == len {
-                return Ok((cached.frontmatter.clone(), cached.text.clone()));
+        if let Some(cached) = self.cache.get(dir) {
+            // A `None` stamp is a filesystem that does not report one, and a
+            // stamp that is not safely older than the read that cached it
+            // cannot be told apart from one about to change. Both are treated
+            // as always stale rather than trusted with what is left.
+            let settled = |stamp: Option<SystemTime>| {
+                stamp.is_some_and(|at| {
+                    at.checked_add(SETTLED_AFTER)
+                        .is_some_and(|safe| safe <= cached.cached_at)
+                })
+            };
+            let unchanged = settled(file_modified)
+                && settled(dir_modified)
+                && cached.file_modified == file_modified
+                && cached.file_len == file_len
+                && cached.dir_modified == dir_modified;
+            if unchanged {
+                return Some(EntryRead {
+                    frontmatter: cached.frontmatter.clone(),
+                    text: cached.text.clone(),
+                    conflict: cached.conflict.clone(),
+                    images: cached.images.clone(),
+                });
             }
         }
 
-        let (frontmatter, text) = read_entry_file(path)?;
+        // Read once and use the bytes twice. The conflict check has to see the
+        // file before the parse does, because the commonest shape — conflict
+        // markers left by a merge — is precisely a file that does not parse,
+        // and that used to be where an entry silently left the timeline.
+        self.read_from_disk += 1;
+        let contents = match fs::read_to_string(&file) {
+            Ok(contents) => contents,
+            Err(err) => {
+                eprintln!("lazuli: skipping {}: {err}", file.display());
+                return None;
+            }
+        };
+        let conflict = conflicts::of_entry(dir, &contents);
+        let (frontmatter, text) = match parse_entry(&contents) {
+            Ok(parsed) => parsed,
+            // A conflicted file usually cannot be parsed at all. Stand in for
+            // it with the first version on offer, so the card is on the
+            // timeline, on its own day, asking to be settled.
+            Err(err) => match &conflict {
+                Some(conflict) => stand_in(conflict, file_modified),
+                None => {
+                    eprintln!("lazuli: skipping {}: {err:#}", file.display());
+                    return None;
+                }
+            },
+        };
+        let images = list_images(dir);
+
         self.cache.insert(
-            path.to_path_buf(),
+            dir.to_path_buf(),
             CachedEntry {
-                modified,
-                len,
+                cached_at: reading_at,
+                dir_modified,
+                file_modified,
+                file_len,
                 frontmatter: frontmatter.clone(),
                 text: text.clone(),
+                conflict: conflict.clone(),
+                images: images.clone(),
             },
         );
-        Ok((frontmatter, text))
+        Some(EntryRead {
+            frontmatter,
+            text,
+            conflict,
+            images,
+        })
     }
+}
+
+/// What one entry folder contributed to a scan.
+struct EntryRead {
+    frontmatter: EntryFrontmatter,
+    text: String,
+    conflict: Option<conflicts::Conflict>,
+    images: Vec<String>,
 }
 
 /// Frontmatter to show a conflicted entry with until it is settled.
@@ -198,13 +317,12 @@ impl ProjectStore {
 /// and is replaced by the real one the moment a version is chosen.
 fn stand_in(
     conflict: &conflicts::Conflict,
-    entry_file: &Path,
+    file_modified: Option<SystemTime>,
 ) -> (EntryFrontmatter, String) {
     let first = conflict.versions.first();
-    let created = fs::metadata(entry_file)
-        .and_then(|meta| meta.modified())
+    let created = file_modified
         .map(|modified| DateTime::<chrono::Local>::from(modified).fixed_offset())
-        .unwrap_or_else(|_| chrono::Local::now().fixed_offset());
+        .unwrap_or_else(|| chrono::Local::now().fixed_offset());
     (
         EntryFrontmatter {
             date: first.and_then(|version| version.date),
@@ -437,30 +555,43 @@ fn split_frontmatter(contents: &str) -> Result<(&str, &str)> {
 
 /// Every image file directly inside `dir`, sorted, or an empty list if the
 /// folder does not exist.
-fn list_images(dir: &Path) -> Result<Vec<String>> {
+///
+/// `file_type()` rather than `path().is_file()`: the kind of each child is
+/// already in what the directory read returned, and asking the path instead
+/// throws that away and pays a fresh `stat` per file.
+fn list_images(dir: &Path) -> Vec<String> {
     let Ok(read_dir) = fs::read_dir(dir) else {
-        return Ok(Vec::new());
+        return Vec::new();
     };
     let mut names: Vec<String> = read_dir
         .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().is_file())
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter(|name| is_image(name))
         .collect();
     names.sort_by_key(|name| name.to_lowercase());
-    Ok(names)
+    names
 }
 
-/// Every folder under `entries/` that contains an `entry.md`.
-fn list_entry_dirs(root: &Path) -> Result<Vec<PathBuf>> {
+/// Every folder under `entries/`, with its modification time.
+///
+/// The time comes from this listing rather than from a `stat` of each folder
+/// afterwards, and it is what lets a scan skip a folder entirely — see
+/// [`CachedEntry`]. Whether a folder holds an `entry.md` is not asked here:
+/// the scan has to stat that file anyway, so asking twice is one round trip
+/// per entry spent on a question already being answered.
+fn list_entry_dirs(root: &Path) -> Result<Vec<(PathBuf, Option<SystemTime>)>> {
     let dir = root.join(ENTRIES_DIR);
     let Ok(read_dir) = fs::read_dir(&dir) else {
         return Ok(Vec::new());
     };
     Ok(read_dir
         .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.join(ENTRY_FILE).is_file())
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| {
+            let modified = entry.metadata().ok().and_then(|meta| meta.modified().ok());
+            (entry.path(), modified)
+        })
         .collect())
 }
 
@@ -995,6 +1126,104 @@ mod tests {
             .expect("should update");
         let third = store.scan().expect("third scan");
         assert_eq!(third.entries[0].text, "Edited externally.");
+    }
+
+    /// The images beside `entry.md` are cached on the folder's own stamp, not
+    /// on the file's, so a picture arriving without the file changing has to
+    /// still show up.
+    #[test]
+    fn an_image_added_beside_an_unchanged_entry_is_noticed() {
+        let dir = TempDir::new("images-cache");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let id = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"), None)
+            .expect("should add");
+        let folder = entry_dir(&dir.0, &id);
+
+        let mut store = ProjectStore::new(&dir.0);
+        assert!(store.scan().expect("first scan").entries[0].images.is_empty());
+
+        fs::write(folder.join("shot.jpg"), b"not really a jpeg").expect("should write");
+        let with_image = store.scan().expect("second scan");
+        assert_eq!(with_image.entries[0].images, vec!["shot.jpg".to_string()]);
+
+        fs::remove_file(folder.join("shot.jpg")).expect("should remove");
+        assert!(store.scan().expect("third scan").entries[0].images.is_empty());
+    }
+
+    /// A folder under `entries/` that holds no `entry.md` is not an entry. It
+    /// is skipped without comment, where one that *has* a file it cannot read
+    /// is worth saying out loud.
+    #[test]
+    fn a_folder_without_an_entry_file_is_not_an_entry() {
+        let dir = TempDir::new("no-entry-file");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"), None)
+            .expect("should add");
+        fs::create_dir_all(dir.0.join(ENTRIES_DIR).join("not-an-entry"))
+            .expect("should create");
+
+        let project = ProjectStore::new(&dir.0).scan().expect("should scan");
+        assert_eq!(project.entries.len(), 1);
+    }
+
+    /// The point of the cache, asserted directly: nothing else in the suite
+    /// would notice it quietly regressing to reading every folder every time,
+    /// because the results would all still be right.
+    ///
+    /// The sleep is the contract, not a workaround: a stamp is not trusted
+    /// until it is older than the read by more than any filesystem's timestamp
+    /// granularity — see [`SETTLED_AFTER`].
+    #[test]
+    fn a_settled_project_is_scanned_without_touching_a_single_entry() {
+        let dir = TempDir::new("cache-hits");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        for day in 2..6 {
+            create_entry(&dir.0, date(2026, 6, day), ts("2026-06-02T10:00:00+02:00"), None)
+                .expect("should add");
+        }
+
+        let mut store = ProjectStore::new(&dir.0);
+        store.scan().expect("first scan");
+        assert_eq!(store.read_from_disk(), 4, "a cold scan reads every entry");
+
+        // Once the stamps are old enough to trust, one more scan is still
+        // needed: what was cached was cached at a moment those stamps were
+        // fresh, so it is that reading which has to be re-dated. That is the
+        // "one extra read per folder, once" of `cached_at`.
+        std::thread::sleep(SETTLED_AFTER + std::time::Duration::from_millis(100));
+        store.scan().expect("settling scan");
+        assert_eq!(store.read_from_disk(), 4, "the stamps are re-dated once");
+
+        let before = store.scan().expect("settled scan");
+        assert_eq!(
+            store.read_from_disk(),
+            0,
+            "a project nothing has touched costs no reads at all"
+        );
+
+        // And the result is the same as the scan that did read everything.
+        let mut cold = ProjectStore::new(&dir.0);
+        assert_eq!(before, cold.scan().expect("cold scan"));
+        assert_eq!(cold.read_from_disk(), 4);
+    }
+
+    /// A deleted entry's cache line has to go with it, or a long session of
+    /// adding and removing entries grows the map without bound.
+    #[test]
+    fn a_removed_entry_leaves_nothing_behind_in_the_cache() {
+        let dir = TempDir::new("cache-evict");
+        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
+        let id = create_entry(&dir.0, date(2026, 6, 2), ts("2026-06-02T10:00:00+02:00"), None)
+            .expect("should add");
+
+        let mut store = ProjectStore::new(&dir.0);
+        store.scan().expect("first scan");
+        assert_eq!(store.cache.len(), 1);
+
+        fs::remove_dir_all(entry_dir(&dir.0, &id)).expect("should remove");
+        let project = store.scan().expect("second scan");
+        assert!(project.entries.is_empty());
+        assert!(store.cache.is_empty());
     }
 
     #[test]
