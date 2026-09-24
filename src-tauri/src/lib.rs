@@ -153,6 +153,7 @@ pub fn run() {
             commands::trash_entry,
             commands::undo_delete,
             commands::journal_today,
+            commands::rescan_now,
             commands::startup_project,
             commands::default_projects_dir,
             commands::set_theme_preference,

@@ -27,6 +27,7 @@ import {
   openProject,
   projectTabs,
   renameTab,
+  rescanNow,
   resolveConflict,
   restoreListing,
   restoreProject,
@@ -1639,6 +1640,16 @@ void listen<Project>("project-changed", (event) => {
   if (modal?.kind === "entry") refreshEntryEditor(modal.id, editorContext);
   else if (modal?.kind === "view") refreshLightbox(modal.id, viewerContext);
   else if (modal?.kind === "cover") refreshCoverPicker(editorContext);
+});
+
+// Coming back to the window, ask the folder again rather than trusting that
+// nothing was missed while it was away. A watcher can be outlived by a sleep,
+// by a drive going away and coming back, or by a syncer writing while the
+// window sat behind another one -- and on a phone the process is frozen or
+// killed outright the moment it is backgrounded, which is precisely when a
+// syncer runs. A settled project costs a stat per entry and emits nothing.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void rescanNow();
 });
 
 // Files dragged in from Explorer arrive here, not through the DOM drop event.

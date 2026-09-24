@@ -290,6 +290,26 @@ pub async fn close_project(app: AppHandle) -> CmdResult<()> {
 
 /// Re-read the project and tell the frontend only if something actually
 /// differs. Called by the watcher and after every write.
+/// Read the open project's folder again, because the window has come back.
+///
+/// The watcher is the usual way a change is noticed, and it is not something
+/// to stake correctness on having survived: a sleep, a drive that went away
+/// and came back, a syncer writing while the window sat behind another one.
+/// On a phone it is not even the usual way — the process is frozen or killed
+/// the moment it is backgrounded, which is exactly when a syncer runs.
+///
+/// Off the main thread because it reads, and cheap when nothing has changed:
+/// every entry folder still costs two stats, and no more than that. Emits
+/// nothing when the folder says what it said before.
+#[tauri::command]
+pub async fn rescan_now(app: AppHandle) -> CmdResult<()> {
+    Ok(off_thread(move || {
+        rescan_and_emit(&app);
+        Ok(())
+    })
+    .await?)
+}
+
 pub fn rescan_and_emit(app: &AppHandle) {
     let state = app.state::<AppState>();
     let mut guard = state.open.lock().expect("project lock was poisoned");

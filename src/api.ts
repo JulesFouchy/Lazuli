@@ -441,6 +441,17 @@ export const startupProject = () => invoke<string | null>("startup_project");
 /** The journal day currently in progress, `YYYY-MM-DD`. */
 export const journalToday = () => invoke<string>("journal_today");
 
+/**
+ * Read the open project's folder again, from scratch.
+ *
+ * The watcher is what normally notices a change, and it is not something to
+ * rely on having stayed alive: a machine that slept, a folder on a drive that
+ * went away and came back, a syncer that wrote while the window was behind
+ * another one. Asking again on the way back costs a stat per entry and closes
+ * all of it.
+ */
+export const rescanNow = () => invoke<void>("rescan_now");
+
 /** A `file://` path the webview is allowed to load. */
 export function assetUrl(...segments: string[]): string {
   return convertFileSrc(segments.join("/"));
