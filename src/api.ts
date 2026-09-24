@@ -354,15 +354,27 @@ export const updateEntry = (
 export const importImages = (entryId: string | null, sources: string[]) =>
   invoke<string[]>("import_images", { entryId, sources });
 
+/**
+ * Save a picture the page is holding — a photo just taken, a pasted screenshot.
+ *
+ * The bytes go over as the request body, not as an argument. An argument is
+ * JSON, and a four-megabyte photograph becomes sixteen megabytes of
+ * comma-separated integers: built as a string here and parsed again there. A
+ * phone's camera hands over three times as much as a webcam does.
+ *
+ * Which leaves the headers for everything else, and a header is ASCII — so the
+ * name is percent-encoded, because `Été.jpg` is an ordinary thing to be given.
+ */
 export const importImageBytes = (
   entryId: string | null,
   filename: string,
   bytes: Uint8Array,
 ) =>
-  invoke<string>("import_image_bytes", {
-    entryId,
-    filename,
-    bytes: Array.from(bytes),
+  invoke<string>("import_image_bytes", bytes, {
+    headers: {
+      "x-entry-id": entryId ?? "",
+      "x-filename": encodeURIComponent(filename),
+    },
   });
 
 export const trashImage = (entryId: string | null, filename: string) =>

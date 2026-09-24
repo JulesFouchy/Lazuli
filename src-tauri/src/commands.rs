@@ -639,15 +639,43 @@ fn choose_image(open: &OpenProject, entry_id: Option<&str>, filename: &str) -> R
     }
 }
 
-/// Save pasted image bytes into an entry folder or `cover/`.
+/// Save image bytes from the page into an entry folder or `cover/`.
+///
+/// The bytes come over as the request body rather than as an argument, because
+/// an argument is JSON: a four-megabyte photograph becomes sixteen megabytes of
+/// comma-separated integers, built as a string on one side and parsed on the
+/// other. That was already the slowest thing the camera did on a desktop, and a
+/// phone's camera hands over three times as much.
+///
+/// Which leaves nowhere for the other two arguments but the headers, and a
+/// header is ASCII — hence the percent-encoded filename, since a picture called
+/// `Été.jpg` is an ordinary thing to be handed.
 #[tauri::command]
 pub fn import_image_bytes(
     app: AppHandle,
     state: State<AppState>,
-    entry_id: Option<String>,
-    filename: String,
-    bytes: Vec<u8>,
+    request: tauri::ipc::Request<'_>,
 ) -> CmdResult<String> {
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+    };
+    let entry_id = header("x-entry-id")
+        .filter(|id| !id.is_empty())
+        .map(|id| id.to_owned());
+    let filename = header("x-filename")
+        .map(|name| {
+            percent_encoding::percent_decode_str(name)
+                .decode_utf8_lossy()
+                .into_owned()
+        })
+        .ok_or_else(|| anyhow!("the image arrived without a name"))?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(anyhow!("the image arrived without any bytes").into());
+    };
+
     Ok(with_project(&app, &state, |open| {
         // A pasted file keeps the name it had in Explorer, so this one comes
         // from outside the app. The rules for a name a filesystem will accept
@@ -661,7 +689,7 @@ pub fn import_image_bytes(
         fs::create_dir_all(&target)
             .with_context(|| format!("creating {}", target.display()))?;
         let destination = unique_path(&target, &filename);
-        atomic::write(&destination, &bytes)
+        atomic::write(&destination, bytes)
             .with_context(|| format!("writing {}", destination.display()))?;
         thumbs::build_one(&root_of(open), &destination);
         let saved = file_name_of(&destination);
