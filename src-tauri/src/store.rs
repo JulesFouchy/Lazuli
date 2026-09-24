@@ -269,11 +269,24 @@ pub fn migrate_meta(root: &Path) -> Result<()> {
     })
 }
 
+/// Fields older builds wrote into `lazuli.yaml` that are dropped rather than
+/// carried: `id:`, which the Drive builds minted to recognise one project in two
+/// places. A project is its folder, and a copy made by hand is a second one, so
+/// an id that travels with the copy would be the one thing saying otherwise.
+/// Dropped only when the file is next saved for a reason of its own — opening a
+/// project writes nothing into it.
+const RETIRED_META_FIELDS: [&str; 1] = ["id"];
+
 pub fn read_meta(root: &Path) -> Result<ProjectMeta> {
     let path = meta_path(root);
     let contents =
         fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    serde_yaml::from_str(&contents).with_context(|| format!("parsing {}", path.display()))
+    let mut meta: ProjectMeta =
+        serde_yaml::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?;
+    for field in RETIRED_META_FIELDS {
+        meta.rest.remove(field);
+    }
+    Ok(meta)
 }
 
 pub fn write_meta(root: &Path, meta: &ProjectMeta) -> Result<()> {
@@ -325,7 +338,6 @@ pub fn create_project(root: &Path, name: &str, start_date: NaiveDate) -> Result<
         .with_context(|| format!("creating {}", root.join(COVER_DIR).display()))?;
 
     let meta = ProjectMeta {
-        id: Some(uuid::Uuid::new_v4().to_string()),
         name: name.to_owned(),
         start_date,
         cover: None,
@@ -363,31 +375,6 @@ pub fn create_entry(
         },
         "",
     )?;
-    Ok(id)
-}
-
-/// Give a project an `id` if it has none, and say what it is.
-///
-/// Called as the project is opened, before the watcher exists, like
-/// [`migrate_meta`]. A project that cannot be written to — one shared
-/// read-only, or a folder on a read-only medium — keeps the id in memory for
-/// the session rather than refusing to open: the id matters for syncing, and
-/// not being able to sync is a smaller problem than not being able to read.
-pub fn adopt_id(root: &Path) -> Result<String> {
-    let mut meta = read_meta(root)?;
-    if let Some(id) = meta.id {
-        return Ok(id);
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    meta.id = Some(id.clone());
-    // A file the app wrote gains one line and keeps the rest byte for byte,
-    // because it is already in field order. One edited by hand into another
-    // order, or carrying comments, comes back in field order without them —
-    // once, and it is the same rewrite any other setting would have caused.
-    //
-    // Failure is deliberately not an error: a project shared read-only, or one
-    // on a read-only medium, keeps the id for the session and opens.
-    let _ = write_meta(root, &meta);
     Ok(id)
 }
 
@@ -762,36 +749,37 @@ mod tests {
     }
 
     #[test]
-    fn a_project_from_before_ids_reads_and_is_given_one() {
-        let dir = TempDir::new("adopt-id");
+    fn opening_a_project_from_before_writes_nothing_into_it() {
+        // Nothing is minted or migrated on the way in: in a project kept in a
+        // repository, a file the app touched just by opening it is a diff.
+        let dir = TempDir::new("open-untouched");
         write_a_project_from_before_identity(&dir.0);
-
-        let id = adopt_id(&dir.0).expect("should adopt");
-        assert!(!id.is_empty());
-        assert_eq!(read_meta(&dir.0).expect("should read").id.as_deref(), Some(id.as_str()));
-    }
-
-    #[test]
-    fn a_project_that_already_has_an_id_keeps_it() {
-        // Minting a second one would make one project look like two.
-        let dir = TempDir::new("keep-id");
-        create_project(&dir.0, "P", date(2026, 6, 1)).expect("should create");
-        let first = adopt_id(&dir.0).expect("should adopt");
-        assert_eq!(adopt_id(&dir.0).expect("should adopt"), first);
-    }
-
-    #[test]
-    fn adopting_an_id_leaves_every_entry_file_alone() {
-        // The migration must not rewrite the journal: in a project kept in a
-        // repository that would be a diff across the whole of it.
-        let dir = TempDir::new("adopt-untouched");
-        write_a_project_from_before_identity(&dir.0);
+        let meta_file = dir.0.join(META_FILE);
         let entry_file = dir.0.join(ENTRIES_DIR).join("legacy-id").join(ENTRY_FILE);
-        let before = fs::read(&entry_file).expect("should read");
+        let before = (fs::read(&meta_file).unwrap(), fs::read(&entry_file).unwrap());
 
-        adopt_id(&dir.0).expect("should adopt");
+        read_project(&dir.0).expect("should read");
 
-        assert_eq!(fs::read(&entry_file).expect("should read"), before);
+        assert_eq!(fs::read(&meta_file).unwrap(), before.0);
+        assert_eq!(fs::read(&entry_file).unwrap(), before.1);
+    }
+
+    #[test]
+    fn the_id_the_drive_builds_wrote_goes_at_the_next_save() {
+        // A copy made by hand is a second project, and an id travelling with
+        // the copy would be the one thing saying otherwise.
+        let dir = TempDir::new("retired-id");
+        fs::write(
+            dir.0.join(META_FILE),
+            "id: 1f0e-uuid\nname: Old\nstart_date: 2026-06-01\ncover: null\n",
+        )
+        .unwrap();
+        let mut meta = read_meta(&dir.0).expect("should read");
+        meta.name = "Renamed".into();
+        write_meta(&dir.0, &meta).expect("should write");
+        let after = fs::read_to_string(dir.0.join(META_FILE)).unwrap();
+        assert!(after.contains("name: Renamed"));
+        assert!(!after.contains("1f0e-uuid"), "{after}");
     }
 
     #[test]
@@ -1093,7 +1081,6 @@ mod tests {
     #[test]
     fn meta_round_trips_through_yaml() {
         let meta = ProjectMeta {
-            id: Some("project-uuid".into()),
             name: "Woodworking bench".into(),
             start_date: date(2026, 6, 1),
             cover: Some("sunset-take2.jpg".into()),

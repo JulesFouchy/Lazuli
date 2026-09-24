@@ -10,21 +10,12 @@ use crate::conflicts;
 use crate::dates;
 
 /// `lazuli.yaml` at the root of a project folder.
+///
+/// A project has no identity but its folder: a copy made by hand is a second
+/// project, not the same one twice. The builds that synced through Drive wrote
+/// an `id:` here, and [`crate::store::read_meta`] retires it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectMeta {
-    /// A UUID for the project itself, minted the first time it is opened.
-    ///
-    /// Everything identifies a project by its path today, and a path stops
-    /// being an identity the moment the folder exists in two places: without
-    /// this, renaming a project on one machine makes the other take the result
-    /// for a second project. Minted early rather than when it is first synced,
-    /// so that a folder copied or committed between machines before then still
-    /// arrives with the same id on both.
-    ///
-    /// Optional only for a `lazuli.yaml` written before the field existed; one
-    /// is written in as it is opened. See [`crate::store::adopt_id`].
-    #[serde(default)]
-    pub id: Option<String>,
     pub name: String,
     /// Day 1. A journal date, so a project begun at 03:00 records the previous
     /// calendar day.

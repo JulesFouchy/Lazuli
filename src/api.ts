@@ -8,8 +8,6 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { plainText } from "./markdown";
 
 export interface ProjectMeta {
-  /** A UUID for the project, minted the first time it is opened. */
-  id: string | null;
   name: string;
   /** `YYYY-MM-DD`. A journal date: Day 1. */
   start_date: string;

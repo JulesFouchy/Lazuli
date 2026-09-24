@@ -208,11 +208,6 @@ fn open_at(app: &AppHandle, path: PathBuf) -> Result<Project> {
     // marker file renamed here, once.
     store::migrate_meta(&path)?;
 
-    // Before the watcher too, and once: a project made before the field existed
-    // is given an id here, so that a folder copied to a second machine after
-    // this point is recognisably the same project on both.
-    store::adopt_id(&path)?;
-
     // Also before the watcher: an expired deletion hands its contents on to the
     // system Recycle Bin here, which is a write the watcher would otherwise see
     // and rescan for. Opening the project is the only moment the app reliably

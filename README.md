@@ -14,7 +14,7 @@ A project is a folder of plain files. No database, no app-owned store, nothing t
 
 ```
 <project>/
-  lazuli.yaml            id, name, start date, chosen cover
+  lazuli.yaml            name, start date, chosen cover
   cover/                    every cover image ever added
   entries/
     <uuid>/
