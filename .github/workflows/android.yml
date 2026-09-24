@@ -36,7 +36,11 @@ on:
 
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    # Pinned rather than `ubuntu-latest`, like the release workflow: the SDK and
+    # NDK come from the image, so which image it is decides what this compiles
+    # against. `ubuntu-latest` moves to a new Ubuntu on its own schedule, and
+    # finding out by way of a failed build is the wrong time.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
